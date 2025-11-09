@@ -14,9 +14,9 @@
 ## Installation
 
 ```tsx
-import Pagination from './components/pagination/hobin'
+import Pagination from './components/pagination'
 // 또는 styled 버전 사용
-import Pagination from './components/pagination/hobin/styled'
+import Pagination from './components/pagination/styled'
 ```
 
 ## Basic Usage
@@ -26,7 +26,7 @@ import Pagination from './components/pagination/hobin/styled'
 `totalCount`와 `pageSize`를 사용하여 초기 상태를 설정합니다. `defaultPage`를 사용하여 초기 페이지를 지정할 수 있습니다.
 
 ```tsx
-import Pagination from './components/pagination/hobin/styled'
+import Pagination from './components/pagination/styled'
 
 function MyComponent() {
   return (
@@ -55,7 +55,7 @@ function MyComponent() {
 
 ```tsx
 import { useState } from 'react'
-import Pagination from './components/pagination/hobin/styled'
+import Pagination from './components/pagination/styled'
 
 function MyComponent() {
   const [currentPage, setCurrentPage] = useState(1)

@@ -16,7 +16,7 @@
 ## Installation
 
 ```tsx
-import Accordion from './components/accordion/hobin'
+import Accordion from './components/accordion'
 ```
 
 ## Basic Usage

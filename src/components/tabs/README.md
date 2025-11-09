@@ -15,9 +15,9 @@
 ## Installation
 
 ```tsx
-import Tabs from './components/tabs/hobin'
+import Tabs from './components/tabs'
 // 또는 styled 버전 사용
-import Tabs from './components/tabs/hobin/styled'
+import Tabs from './components/tabs/styled'
 ```
 
 ## Basic Usage
@@ -27,7 +27,7 @@ import Tabs from './components/tabs/hobin/styled'
 `defaultValue`를 사용하여 초기 탭을 설정합니다.
 
 ```tsx
-import Tabs from './components/tabs/hobin/styled'
+import Tabs from './components/tabs/styled'
 
 function MyComponent() {
   return (
@@ -51,7 +51,7 @@ function MyComponent() {
 
 ```tsx
 import { useState } from 'react'
-import Tabs from './components/tabs/hobin/styled'
+import Tabs from './components/tabs/styled'
 
 function MyComponent() {
   const [activeTab, setActiveTab] = useState('tab1')
@@ -203,7 +203,7 @@ Disabled 탭은:
 `styled.tsx` 파일에서 Tailwind CSS로 스타일링된 컴포넌트를 제공합니다:
 
 ```tsx
-import Tabs from './components/tabs/hobin/styled'
+import Tabs from './components/tabs/styled'
 
 // styled 버전은 기본적으로 다음 스타일이 적용됩니다:
 // - 탭 목록: 하단 border
@@ -272,7 +272,7 @@ import type {
   ListProps,
   TabProps,
   PanelProps,
-} from './components/tabs/hobin'
+} from './components/tabs'
 
 export type TabValue = string | number
 export type TabsOrientation = 'horizontal' | 'vertical'
