@@ -2,6 +2,7 @@ import { useControllableState } from '@radix-ui/react-use-controllable-state'
 import React, { createContext, useContext, useEffect, useId } from 'react'
 import { type ComponentPropsWithoutRef } from 'react'
 import { createPortal } from 'react-dom'
+import * as focusTrap from 'focus-trap'
 import { useStableCallback } from '../../hooks/useStableCallback'
 
 const ModalContext = createContext<
@@ -94,6 +95,23 @@ export function Root({
       window.removeEventListener('keydown', handler)
     }
   }, [closeModalStableCallback, open])
+
+  useEffect(() => {
+    if (!open || !contentId) {
+      return
+    }
+
+    const contentEl = document.getElementById(contentId)
+    if (!contentEl) {
+      return
+    }
+
+    const trap = focusTrap.createFocusTrap(contentEl).activate()
+
+    return () => {
+      trap.deactivate()
+    }
+  }, [contentId, open])
 
   return (
     <ModalContext.Provider

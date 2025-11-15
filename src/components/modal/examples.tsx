@@ -11,6 +11,10 @@ export function Example() {
             <Modal.Content className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 p-4 flex flex-col items-center justify-center bg-white">
               <Modal.Title>Title</Modal.Title>
               <Modal.Description>Description</Modal.Description>
+              <input type="text" />
+              <input type="text" />
+              <input type="text" />
+              <button type="button">Button</button>
               <Modal.CloseTrigger>Close</Modal.CloseTrigger>
             </Modal.Content>
           </Modal.Portal>
