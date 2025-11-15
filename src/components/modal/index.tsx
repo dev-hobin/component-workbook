@@ -257,6 +257,7 @@ export function Content(props: ContentProps) {
       aria-modal="true"
       aria-labelledby={ariaIds.titleId}
       aria-describedby={ariaIds.descriptionId}
+      data-state={open ? 'open' : 'closed'}
       {...props}
     />
   )
@@ -279,6 +280,7 @@ export function Backdrop({ onClick, ...rest }: BackdropProps) {
         }
         onClick?.(event)
       }}
+      data-state={open ? 'open' : 'closed'}
       {...rest}
     />
   )
