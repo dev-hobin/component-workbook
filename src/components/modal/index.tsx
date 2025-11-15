@@ -13,15 +13,6 @@ import * as focusTrap from 'focus-trap'
 import { useStableCallback } from '../../hooks/useStableCallback'
 import { usePresence } from '../../hooks/usePresence'
 
-function isFocusInside(containers: (HTMLElement | null)[]): boolean {
-  const activeElement = document.activeElement
-  if (!activeElement) return false
-
-  return containers
-    .filter((container): container is HTMLElement => Boolean(container))
-    .some((container) => container.contains(activeElement))
-}
-
 const ModalContext = createContext<
   | {
       open: boolean
@@ -360,3 +351,12 @@ const Modal = {
 }
 
 export default Modal
+
+function isFocusInside(containers: (HTMLElement | null)[]): boolean {
+  const activeElement = document.activeElement
+  if (!activeElement) return false
+
+  return containers
+    .filter((container): container is HTMLElement => Boolean(container))
+    .some((container) => container.contains(activeElement))
+}

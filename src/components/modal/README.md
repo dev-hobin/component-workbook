@@ -10,6 +10,8 @@
 - ✅ Escape 키로 닫기
 - ✅ 외부 클릭으로 닫기 옵션
 - ✅ 초기 포커스 설정 가능
+- ✅ **애니메이션 완료까지 DOM 유지** (usePresence 기반)
+- ✅ **Enter/Exit 애니메이션 지원** (CSS transition 기반)
 - ✅ Data attributes를 활용한 상태별 스타일링
 - ✅ 접근성 지원 (ARIA 속성)
 - ✅ 자동 ID 관리
@@ -160,6 +162,15 @@ Modal은 data attributes를 활용해 상태별 스타일링이 가능합니다.
 ### Data Attributes
 
 - `data-state="open"` / `data-state="closed"`: 모달 열림/닫힘 상태
+- `data-transition="starting"` / `data-transition="idle"` / `data-transition="ending"`: 전환 상태 (usePresence 기반)
+
+### Transition States
+
+Modal은 `usePresence` 훅을 사용하여 애니메이션 상태를 관리합니다:
+
+- `starting`: 모달이 나타나기 시작하는 상태 (Enter 애니메이션)
+- `idle`: 모달이 완전히 표시된 안정 상태 (애니메이션 완료)
+- `ending`: 모달이 사라지기 시작하는 상태 (Exit 애니메이션)
 
 ### Example
 
@@ -169,9 +180,13 @@ export function Backdrop({ className, ...rest }) {
   return (
     <ModalPrimitives.Backdrop
       className={cn(
-        'fixed inset-0 bg-black/50 transition-opacity',
-        'data-[state=open]:animate-in data-[state=open]:fade-in',
-        'data-[state=closed]:animate-out data-[state=closed]:fade-out',
+        'fixed inset-0 bg-black/50 z-40 transition-opacity duration-1000',
+        // Enter animation
+        'data-[transition=starting]:opacity-0',
+        // Idle state
+        'data-[transition=idle]:opacity-100',
+        // Exit animation
+        'data-[transition=ending]:opacity-0',
         className,
       )}
       {...rest}
@@ -184,9 +199,23 @@ export function Content({ className, ...rest }) {
     <ModalPrimitives.Content
       className={cn(
         'fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2',
-        'bg-white rounded-lg shadow-lg p-6 max-w-md w-full',
-        'data-[state=open]:animate-in data-[state=open]:fade-in data-[state=open]:zoom-in-95',
-        'data-[state=closed]:animate-out data-[state=closed]:fade-out data-[state=closed]:zoom-out-95',
+        'bg-white rounded-lg shadow-xl p-6 max-w-md w-full mx-4 z-50',
+        'max-h-[90vh] overflow-y-auto',
+        'transition-all duration-1000 ease-out',
+        // Enter animation
+        'data-[transition=starting]:opacity-0',
+        'data-[transition=starting]:scale-95',
+        'data-[transition=starting]:-translate-y-2',
+        // Idle state
+        'data-[transition=idle]:opacity-100',
+        'data-[transition=idle]:scale-100',
+        'data-[transition=idle]:translate-y-0',
+        // Exit animation
+        'data-[transition=ending]:opacity-0',
+        'data-[transition=ending]:scale-95',
+        'data-[transition=ending]:-translate-y-2',
+        'data-[transition=ending]:duration-1000',
+        'data-[transition=ending]:ease-in',
         className,
       )}
       {...rest}
@@ -201,6 +230,7 @@ export function Content({ className, ...rest }) {
 - **Context API**: Root에서 상태와 ID를 관리하고 하위 컴포넌트에 제공
 - **Portal**: `react-dom`의 `createPortal`을 사용하여 body에 직접 렌더링
 - **Focus Trap**: `focus-trap` 라이브러리를 사용하여 포커스 관리
+- **usePresence**: 애니메이션 완료까지 DOM에 요소를 유지하고 전환 상태를 관리
 
 ## Implementation Details
 
@@ -228,6 +258,17 @@ Modal의 Content와 Backdrop은 Portal을 통해 `document.body`에 직접 렌�
 - z-index 문제 해결
 - 스크롤 문제 해결
 - 다른 요소와의 겹침 문제 해결
+
+### Animation Management
+
+Modal은 `usePresence` 훅을 사용하여 애니메이션을 관리합니다:
+
+- **애니메이션 완료 감지**: Web Animations API를 사용하여 CSS 애니메이션이 완료될 때까지 대기
+- **DOM 유지**: Exit 애니메이션이 완료될 때까지 요소를 DOM에 유지
+- **상태 전환**: `starting` → `idle` → `ending` → `undefined` 순서로 상태 전환
+- **중간 취소 처리**: 애니메이션 중간에 상태가 변경되면 적절히 처리
+
+Content와 Backdrop 모두 `usePresence`를 사용하므로, 각각 독립적으로 애니메이션을 관리합니다.
 
 ## Examples
 
