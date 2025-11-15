@@ -7,7 +7,8 @@ export function Example() {
         <Modal.Root>
           <Modal.Trigger>Trigger</Modal.Trigger>
           <Modal.Portal>
-            <Modal.Content>
+            <Modal.Backdrop className="fixed inset-0 bg-black/50" />
+            <Modal.Content className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 p-4 flex flex-col items-center justify-center bg-white">
               <Modal.Title>Title</Modal.Title>
               <Modal.Description>Description</Modal.Description>
               <Modal.CloseTrigger>Close</Modal.CloseTrigger>

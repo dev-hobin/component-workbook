@@ -1,7 +1,7 @@
-import { UncontrolledExample } from './components/tabs/examples'
+import { Example } from './components/modal/examples'
 
 function App() {
-  return <UncontrolledExample />
+  return <Example />
 }
 
 export default App
