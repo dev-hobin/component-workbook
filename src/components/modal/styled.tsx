@@ -42,9 +42,13 @@ export function Backdrop({ className, ...rest }: BackdropProps) {
   return (
     <ModalPrimitives.Backdrop
       className={cn(
-        'fixed inset-0 bg-black/50 z-40',
-        'data-[state=open]:animate-in data-[state=open]:fade-in',
-        'data-[state=closed]:animate-out data-[state=closed]:fade-out',
+        'fixed inset-0 bg-black/50 z-40 transition-opacity duration-150',
+        // Enter animation (starting)
+        'data-[transition=starting]:opacity-0',
+        // Idle state (fully visible)
+        'data-[transition=idle]:opacity-100',
+        // Exit animation (ending)
+        'data-[transition=ending]:opacity-0',
         className,
       )}
       {...rest}
@@ -59,9 +63,22 @@ export function Content({ className, ...rest }: ContentProps) {
         'fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2',
         'bg-white rounded-lg shadow-xl p-6 max-w-md w-full mx-4 z-50',
         'max-h-[90vh] overflow-y-auto',
-        'data-[state=open]:animate-in data-[state=open]:fade-in data-[state=open]:zoom-in-95 data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%]',
-        'data-[state=closed]:animate-out data-[state=closed]:fade-out data-[state=closed]:zoom-out-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%]',
         'focus:outline-none',
+        'transition-all duration-200 ease-out',
+        // Enter animation (starting)
+        'data-[transition=starting]:opacity-0',
+        'data-[transition=starting]:scale-95',
+        'data-[transition=starting]:-translate-y-2',
+        // Idle state (fully visible)
+        'data-[transition=idle]:opacity-100',
+        'data-[transition=idle]:scale-100',
+        'data-[transition=idle]:translate-y-0',
+        // Exit animation (ending)
+        'data-[transition=ending]:opacity-0',
+        'data-[transition=ending]:scale-95',
+        'data-[transition=ending]:-translate-y-2',
+        'data-[transition=ending]:duration-150',
+        'data-[transition=ending]:ease-in',
         className,
       )}
       {...rest}

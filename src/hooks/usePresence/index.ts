@@ -1,15 +1,14 @@
-import { useState } from 'react'
-// import ReactDOM from 'react-dom'
-// import { useStableCallback } from '../useStableCallback'
+import { useLayoutEffect, useState } from 'react'
+import { useLatestRef } from '../useLatestRef'
 
 type TransitionState = 'starting' | 'idle' | 'ending' | undefined
 
 export function usePresence({
   isVisible,
-  // resolveElement: resolveElementFn,
+  resolveElement: resolveElementFn,
 }: {
   isVisible: boolean
-  // resolveElement: () => Element
+  resolveElement: () => Element | null
 }): {
   isPresent: boolean
   transitionState: TransitionState
@@ -18,13 +17,84 @@ export function usePresence({
     isVisible ? 'idle' : undefined,
   )
 
-  if (isVisible && transitionState === undefined) {
-    setTransitionState('starting')
-  }
+  const resolveElementRef = useLatestRef(resolveElementFn)
+  const isVisibleRef = useLatestRef(isVisible)
+  const transitionStateRef = useLatestRef(transitionState)
 
-  if (!isVisible && transitionState === 'idle') {
-    setTransitionState('ending')
-  }
+  useLayoutEffect(() => {
+    let rafId: number | null = null
+    const scheduleTransitionUpdate = (nextState: TransitionState) => {
+      rafId = requestAnimationFrame(() => {
+        if (isVisibleRef.current !== isVisible) {
+          return
+        }
+        if (transitionStateRef.current !== transitionState) {
+          return
+        }
+        setTransitionState(nextState)
+      })
+    }
+
+    const waitForAnimations = (callback: () => void): void => {
+      const element = resolveElementRef.current()
+      if (element === null) {
+        return
+      }
+
+      Promise.all(
+        element
+          .getAnimations({ subtree: true })
+          .map((animation) => animation.finished),
+      ).finally(() => {
+        callback()
+      })
+    }
+
+    switch (transitionState) {
+      case 'starting': {
+        if (isVisible) {
+          waitForAnimations(() => scheduleTransitionUpdate('idle'))
+        } else {
+          waitForAnimations(() => scheduleTransitionUpdate('ending'))
+        }
+        break
+      }
+      case 'idle': {
+        if (isVisible) {
+          return
+        }
+        waitForAnimations(() => scheduleTransitionUpdate('ending'))
+        break
+      }
+      case 'ending': {
+        if (isVisible) {
+          waitForAnimations(() => scheduleTransitionUpdate('idle'))
+        } else {
+          waitForAnimations(() => scheduleTransitionUpdate(undefined))
+        }
+        break
+      }
+      default: {
+        if (!isVisible) {
+          return
+        }
+        scheduleTransitionUpdate('starting')
+        break
+      }
+    }
+
+    return () => {
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId)
+      }
+    }
+  }, [
+    isVisible,
+    isVisibleRef,
+    resolveElementRef,
+    transitionState,
+    transitionStateRef,
+  ])
 
   return {
     isPresent: Boolean(transitionState),

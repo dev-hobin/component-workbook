@@ -13,7 +13,8 @@ export function UncontrolledExample() {
               <Modal.Title>Modal Title</Modal.Title>
               <Modal.Description>
                 This is an uncontrolled modal. The modal state is managed
-                internally.
+                internally. Notice the smooth enter and exit animations powered
+                by usePresence.
               </Modal.Description>
               <div className="mt-4 space-y-2">
                 <input
@@ -69,7 +70,8 @@ export function ControlledExample() {
             <Modal.Content>
               <Modal.Title>Controlled Modal</Modal.Title>
               <Modal.Description>
-                This is a controlled modal. The state is managed externally.
+                This is a controlled modal. The state is managed externally. The
+                animations work seamlessly with controlled state.
               </Modal.Description>
               <div className="mt-6 flex justify-end gap-2">
                 <Modal.CloseTrigger>Close</Modal.CloseTrigger>
@@ -237,7 +239,8 @@ export function NestedModalExample() {
                   <Modal.Title>First Modal</Modal.Title>
                   <Modal.Description>
                     This is the first modal. You can open a nested modal from
-                    here. Try adjusting the settings in the control panel.
+                    here. Try adjusting the settings in the control panel. Both
+                    modals have smooth enter/exit animations.
                   </Modal.Description>
                   <div className="mt-4 space-y-2">
                     <div className="text-xs text-gray-500 space-y-1">
@@ -265,7 +268,9 @@ export function NestedModalExample() {
                           <Modal.Title>Nested Modal</Modal.Title>
                           <Modal.Description>
                             This is a nested modal. Notice how the backdrop is
-                            darker. Each modal can have different settings.
+                            darker. Each modal can have different settings. The
+                            animations are synchronized with the transition
+                            states.
                           </Modal.Description>
                           <div className="mt-4 space-y-2">
                             <div className="text-xs text-gray-500 space-y-1">

@@ -11,6 +11,7 @@ import { type ComponentPropsWithoutRef } from 'react'
 import { createPortal } from 'react-dom'
 import * as focusTrap from 'focus-trap'
 import { useStableCallback } from '../../hooks/useStableCallback'
+import { usePresence } from '../../hooks/usePresence'
 
 function isFocusInside(containers: (HTMLElement | null)[]): boolean {
   const activeElement = document.activeElement
@@ -91,6 +92,11 @@ export function Root({
     defaultProp: defaultOpenProp,
   })
 
+  const { isPresent: isContentPresent } = usePresence({
+    isVisible: open,
+    resolveElement: () => document.getElementById(contentId),
+  })
+
   const openModal = () => {
     setOpen(true)
   }
@@ -101,7 +107,7 @@ export function Root({
 
   const closeModalStableCallback = useStableCallback(closeModal)
   useEffect(() => {
-    if (!open || !closeOnEscape) {
+    if (!isContentPresent || !closeOnEscape) {
       return
     }
 
@@ -126,7 +132,13 @@ export function Root({
     return () => {
       window.removeEventListener('keydown', handler)
     }
-  }, [backdropId, closeModalStableCallback, closeOnEscape, contentId, open])
+  }, [
+    backdropId,
+    closeModalStableCallback,
+    closeOnEscape,
+    contentId,
+    isContentPresent,
+  ])
 
   const initialFocusCallback = useStableCallback(() => {
     if (typeof initialFocus === 'function') {
@@ -136,7 +148,7 @@ export function Root({
     return initialFocus
   })
   useEffect(() => {
-    if (!open || !contentId) {
+    if (!isContentPresent) {
       return
     }
 
@@ -157,11 +169,11 @@ export function Root({
       trap.deactivate()
     }
   }, [
-    contentId,
+    isContentPresent,
     initialFocusCallback,
-    open,
     closeOnOutsideClick,
     closeOnEscape,
+    contentId,
   ])
 
   useLayoutEffect(() => {
@@ -245,8 +257,13 @@ export function Content(props: ContentProps) {
     descriptionId: undefined,
   })
 
+  const { isPresent, transitionState } = usePresence({
+    isVisible: open,
+    resolveElement: () => document.getElementById(idRules.contentId),
+  })
+
   useLayoutEffect(() => {
-    if (!open) {
+    if (!isPresent) {
       return
     }
 
@@ -257,9 +274,9 @@ export function Content(props: ContentProps) {
       titleId: isTitleExist ? idRules.titleId : undefined,
       descriptionId: isDescriptionExist ? idRules.descriptionId : undefined,
     })
-  }, [idRules.titleId, idRules.descriptionId, open])
+  }, [idRules.titleId, idRules.descriptionId, isPresent])
 
-  if (!open) {
+  if (!isPresent) {
     return null
   }
 
@@ -271,6 +288,7 @@ export function Content(props: ContentProps) {
       aria-labelledby={ariaIds.titleId}
       aria-describedby={ariaIds.descriptionId}
       data-state={open ? 'open' : 'closed'}
+      data-transition={transitionState}
       {...props}
     />
   )
@@ -280,7 +298,12 @@ export type BackdropProps = ComponentPropsWithoutRef<'div'>
 export function Backdrop({ onClick, ...rest }: BackdropProps) {
   const { closeModal, open, idRules, closeOnOutsideClick } = useModalContext()
 
-  if (!open) {
+  const { isPresent, transitionState } = usePresence({
+    isVisible: open,
+    resolveElement: () => document.getElementById(idRules.backdropId),
+  })
+
+  if (!isPresent) {
     return null
   }
 
@@ -294,6 +317,7 @@ export function Backdrop({ onClick, ...rest }: BackdropProps) {
         onClick?.(event)
       }}
       data-state={open ? 'open' : 'closed'}
+      data-transition={transitionState}
       {...rest}
     />
   )
