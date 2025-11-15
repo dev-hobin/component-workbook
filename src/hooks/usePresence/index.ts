@@ -55,7 +55,7 @@ export function usePresence({
         if (isVisible) {
           waitForAnimations(() => scheduleTransitionUpdate('idle'))
         } else {
-          waitForAnimations(() => scheduleTransitionUpdate('ending'))
+          scheduleTransitionUpdate('ending')
         }
         break
       }
@@ -63,12 +63,12 @@ export function usePresence({
         if (isVisible) {
           return
         }
-        waitForAnimations(() => scheduleTransitionUpdate('ending'))
+        scheduleTransitionUpdate('ending')
         break
       }
       case 'ending': {
         if (isVisible) {
-          waitForAnimations(() => scheduleTransitionUpdate('idle'))
+          scheduleTransitionUpdate('idle')
         } else {
           waitForAnimations(() => scheduleTransitionUpdate(undefined))
         }
