@@ -1,5 +1,12 @@
 import { useControllableState } from '@radix-ui/react-use-controllable-state'
-import React, { createContext, useContext, useEffect, useId } from 'react'
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useState,
+} from 'react'
 import { type ComponentPropsWithoutRef } from 'react'
 import { createPortal } from 'react-dom'
 import * as focusTrap from 'focus-trap'
@@ -185,13 +192,41 @@ export function CloseTrigger({ onClick, ...rest }: CloseTriggerProps) {
 export type ContentProps = ComponentPropsWithoutRef<'div'>
 export function Content(props: ContentProps) {
   const { open, idRules } = useModalContext()
+  const [ariaIds, setAriaIds] = useState<{
+    titleId: string | undefined
+    descriptionId: string | undefined
+  }>({
+    titleId: undefined,
+    descriptionId: undefined,
+  })
+
+  useLayoutEffect(() => {
+    if (!open) {
+      return
+    }
+
+    const isTitleExist = !!document.getElementById(idRules.titleId)
+    const isDescriptionExist = !!document.getElementById(idRules.descriptionId)
+
+    setAriaIds({
+      titleId: isTitleExist ? idRules.titleId : undefined,
+      descriptionId: isDescriptionExist ? idRules.descriptionId : undefined,
+    })
+  }, [idRules.titleId, idRules.descriptionId, open])
 
   if (!open) {
     return null
   }
 
   return (
-    <div id={idRules.contentId} role="dialog" aria-modal="true" {...props} />
+    <div
+      id={idRules.contentId}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={ariaIds.titleId}
+      aria-describedby={ariaIds.descriptionId}
+      {...props}
+    />
   )
 }
 
