@@ -4,7 +4,9 @@ export function Example() {
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-8">
       <div className="max-w-2xl w-full">
-        <Modal.Root>
+        <Modal.Root
+          initialFocus={() => document.getElementById('initial-focus')}
+        >
           <Modal.Trigger>Trigger</Modal.Trigger>
           <Modal.Portal>
             <Modal.Backdrop className="fixed inset-0 bg-black/50" />
@@ -12,7 +14,7 @@ export function Example() {
               <Modal.Title>Title</Modal.Title>
               <Modal.Description>Description</Modal.Description>
               <input type="text" />
-              <input type="text" />
+              <input id="initial-focus" type="text" />
               <input type="text" />
               <button type="button">Button</button>
               <Modal.CloseTrigger>Close</Modal.CloseTrigger>

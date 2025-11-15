@@ -45,6 +45,7 @@ export type RootProps = {
     triggerId?: string
     closeTriggerId?: string
   }
+  initialFocus?: HTMLElement | (() => HTMLElement | null)
 }
 export function Root({
   children,
@@ -52,6 +53,7 @@ export function Root({
   onOpenChange: onOpenChangeProp,
   defaultOpen: defaultOpenProp = false,
   idRules,
+  initialFocus,
 }: RootProps) {
   const defaultId = useId()
   const rootId = idRules?.rootId ?? defaultId
@@ -96,6 +98,13 @@ export function Root({
     }
   }, [closeModalStableCallback, open])
 
+  const initialFocusCallback = useStableCallback(() => {
+    if (typeof initialFocus === 'function') {
+      return initialFocus()
+    }
+
+    return initialFocus
+  })
   useEffect(() => {
     if (!open || !contentId) {
       return
@@ -106,12 +115,16 @@ export function Root({
       return
     }
 
-    const trap = focusTrap.createFocusTrap(contentEl).activate()
+    const trap = focusTrap
+      .createFocusTrap(contentEl, {
+        initialFocus: initialFocusCallback() ?? undefined,
+      })
+      .activate()
 
     return () => {
       trap.deactivate()
     }
-  }, [contentId, open])
+  }, [contentId, initialFocusCallback, open])
 
   return (
     <ModalContext.Provider
