@@ -164,6 +164,19 @@ export function Root({
     closeOnEscape,
   ])
 
+  useLayoutEffect(() => {
+    if (!open) {
+      return
+    }
+
+    const overflowStyle = getComputedStyle(document.body).overflow
+    document.body.style.overflow = 'hidden'
+
+    return () => {
+      document.body.style.overflow = overflowStyle
+    }
+  }, [open])
+
   return (
     <ModalContext.Provider
       value={{
