@@ -12,6 +12,15 @@ import { createPortal } from 'react-dom'
 import * as focusTrap from 'focus-trap'
 import { useStableCallback } from '../../hooks/useStableCallback'
 
+function isFocusInside(containers: (HTMLElement | null)[]): boolean {
+  const activeElement = document.activeElement
+  if (!activeElement) return false
+
+  return containers
+    .filter((container): container is HTMLElement => Boolean(container))
+    .some((container) => container.contains(activeElement))
+}
+
 const ModalContext = createContext<
   | {
       open: boolean
@@ -95,6 +104,15 @@ export function Root({
       if (event.key !== 'Escape') {
         return
       }
+      if (
+        !isFocusInside([
+          document.getElementById(backdropId),
+          document.getElementById(contentId),
+        ])
+      ) {
+        return
+      }
+
       closeModalStableCallback()
     }
 
@@ -103,7 +121,7 @@ export function Root({
     return () => {
       window.removeEventListener('keydown', handler)
     }
-  }, [closeModalStableCallback, open])
+  }, [backdropId, closeModalStableCallback, contentId, open])
 
   const initialFocusCallback = useStableCallback(() => {
     if (typeof initialFocus === 'function') {
