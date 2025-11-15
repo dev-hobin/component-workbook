@@ -64,6 +64,7 @@ export type RootProps = {
   }
   initialFocus?: HTMLElement | (() => HTMLElement | null)
   closeOnOutsideClick?: boolean
+  closeOnEscape?: boolean
 }
 export function Root({
   children,
@@ -73,6 +74,7 @@ export function Root({
   idRules,
   initialFocus,
   closeOnOutsideClick = false,
+  closeOnEscape = true,
 }: RootProps) {
   const defaultId = useId()
   const rootId = idRules?.rootId ?? defaultId
@@ -99,7 +101,7 @@ export function Root({
 
   const closeModalStableCallback = useStableCallback(closeModal)
   useEffect(() => {
-    if (!open) {
+    if (!open || !closeOnEscape) {
       return
     }
 
@@ -124,7 +126,7 @@ export function Root({
     return () => {
       window.removeEventListener('keydown', handler)
     }
-  }, [backdropId, closeModalStableCallback, contentId, open])
+  }, [backdropId, closeModalStableCallback, closeOnEscape, contentId, open])
 
   const initialFocusCallback = useStableCallback(() => {
     if (typeof initialFocus === 'function') {
@@ -147,13 +149,20 @@ export function Root({
       .createFocusTrap(contentEl, {
         initialFocus: initialFocusCallback() ?? undefined,
         allowOutsideClick: closeOnOutsideClick,
+        escapeDeactivates: closeOnEscape,
       })
       .activate()
 
     return () => {
       trap.deactivate()
     }
-  }, [contentId, initialFocusCallback, open, closeOnOutsideClick])
+  }, [
+    contentId,
+    initialFocusCallback,
+    open,
+    closeOnOutsideClick,
+    closeOnEscape,
+  ])
 
   return (
     <ModalContext.Provider

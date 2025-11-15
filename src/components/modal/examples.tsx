@@ -17,7 +17,7 @@ export function Example() {
               <button type="button">Button</button>
               <Modal.CloseTrigger>Close</Modal.CloseTrigger>
 
-              <Modal.Root closeOnOutsideClick>
+              <Modal.Root closeOnOutsideClick closeOnEscape={false}>
                 <Modal.Trigger>Trigger2</Modal.Trigger>
                 <Modal.Portal>
                   <Modal.Backdrop className="fixed inset-0 bg-black/50" />
