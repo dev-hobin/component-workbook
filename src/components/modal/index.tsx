@@ -1,10 +1,25 @@
 import { useControllableState } from '@radix-ui/react-use-controllable-state'
-import React, { createContext, useContext } from 'react'
+import React, { createContext, useContext, useEffect, useId } from 'react'
 import { type ComponentPropsWithoutRef } from 'react'
 import { createPortal } from 'react-dom'
+import { useStableCallback } from '../../hooks/useStableCallback'
 
 const ModalContext = createContext<
-  { open: boolean; openModal: () => void; closeModal: () => void } | undefined
+  | {
+      open: boolean
+      openModal: () => void
+      closeModal: () => void
+      idRules: {
+        rootId: string
+        backdropId: string
+        contentId: string
+        titleId: string
+        descriptionId: string
+        triggerId: string
+        closeTriggerId: string
+      }
+    }
+  | undefined
 >(undefined)
 
 function useModalContext() {
@@ -20,13 +35,32 @@ export type RootProps = {
   onOpenChange?: (open: boolean) => void
   defaultOpen?: boolean
   children: React.ReactNode
+  idRules?: {
+    rootId?: string
+    backdropId?: string
+    contentId?: string
+    titleId?: string
+    descriptionId?: string
+    triggerId?: string
+    closeTriggerId?: string
+  }
 }
 export function Root({
   children,
   open: openProp,
   onOpenChange: onOpenChangeProp,
   defaultOpen: defaultOpenProp = false,
+  idRules,
 }: RootProps) {
+  const defaultId = useId()
+  const rootId = idRules?.rootId ?? defaultId
+  const backdropId = idRules?.backdropId ?? `${rootId}-backdrop`
+  const contentId = idRules?.contentId ?? `${rootId}-content`
+  const titleId = idRules?.titleId ?? `${rootId}-title`
+  const descriptionId = idRules?.descriptionId ?? `${rootId}-description`
+  const triggerId = idRules?.triggerId ?? `${rootId}-trigger`
+  const closeTriggerId = idRules?.closeTriggerId ?? `${rootId}-close-trigger`
+
   const [open, setOpen] = useControllableState({
     prop: openProp,
     onChange: onOpenChangeProp,
@@ -41,8 +75,43 @@ export function Root({
     setOpen(false)
   }
 
+  const closeModalStableCallback = useStableCallback(closeModal)
+  useEffect(() => {
+    if (!open) {
+      return
+    }
+
+    const handler = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') {
+        return
+      }
+      closeModalStableCallback()
+    }
+
+    window.addEventListener('keydown', handler)
+
+    return () => {
+      window.removeEventListener('keydown', handler)
+    }
+  }, [closeModalStableCallback, open])
+
   return (
-    <ModalContext.Provider value={{ open, openModal, closeModal }}>
+    <ModalContext.Provider
+      value={{
+        open,
+        openModal,
+        closeModal,
+        idRules: {
+          rootId,
+          backdropId,
+          contentId,
+          titleId,
+          descriptionId,
+          triggerId,
+          closeTriggerId,
+        },
+      }}
+    >
       {children}
     </ModalContext.Provider>
   )
@@ -50,10 +119,11 @@ export function Root({
 
 export type TriggerProps = ComponentPropsWithoutRef<'button'>
 export function Trigger({ onClick, ...rest }: TriggerProps) {
-  const { openModal } = useModalContext()
+  const { openModal, idRules } = useModalContext()
 
   return (
     <button
+      id={idRules.triggerId}
       type="button"
       onClick={(event) => {
         openModal()
@@ -66,10 +136,11 @@ export function Trigger({ onClick, ...rest }: TriggerProps) {
 
 export type CloseTriggerProps = ComponentPropsWithoutRef<'button'>
 export function CloseTrigger({ onClick, ...rest }: CloseTriggerProps) {
-  const { closeModal } = useModalContext()
+  const { closeModal, idRules } = useModalContext()
 
   return (
     <button
+      id={idRules.closeTriggerId}
       type="button"
       onClick={(event) => {
         closeModal()
@@ -82,34 +153,38 @@ export function CloseTrigger({ onClick, ...rest }: CloseTriggerProps) {
 
 export type ContentProps = ComponentPropsWithoutRef<'div'>
 export function Content(props: ContentProps) {
-  const { open } = useModalContext()
+  const { open, idRules } = useModalContext()
 
   if (!open) {
     return null
   }
 
-  return <div role="dialog" aria-modal="true" {...props} />
+  return (
+    <div id={idRules.contentId} role="dialog" aria-modal="true" {...props} />
+  )
 }
 
 export type BackdropProps = ComponentPropsWithoutRef<'div'>
 export function Backdrop(props: BackdropProps) {
-  const { open } = useModalContext()
+  const { open, idRules } = useModalContext()
 
   if (!open) {
     return null
   }
 
-  return <div {...props} />
+  return <div id={idRules.backdropId} {...props} />
 }
 
 export type TitleProps = ComponentPropsWithoutRef<'h2'>
 export function Title(props: TitleProps) {
-  return <h2 {...props} />
+  const { idRules } = useModalContext()
+  return <h2 id={idRules.titleId} {...props} />
 }
 
 export type DescriptionProps = ComponentPropsWithoutRef<'p'>
 export function Description(props: DescriptionProps) {
-  return <p {...props} />
+  const { idRules } = useModalContext()
+  return <p id={idRules.descriptionId} {...props} />
 }
 
 export type PortalProps = {
