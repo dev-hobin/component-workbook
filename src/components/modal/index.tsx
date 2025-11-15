@@ -35,6 +35,7 @@ const ModalContext = createContext<
         triggerId: string
         closeTriggerId: string
       }
+      closeOnOutsideClick: boolean
     }
   | undefined
 >(undefined)
@@ -62,6 +63,7 @@ export type RootProps = {
     closeTriggerId?: string
   }
   initialFocus?: HTMLElement | (() => HTMLElement | null)
+  closeOnOutsideClick?: boolean
 }
 export function Root({
   children,
@@ -70,6 +72,7 @@ export function Root({
   defaultOpen: defaultOpenProp = false,
   idRules,
   initialFocus,
+  closeOnOutsideClick = false,
 }: RootProps) {
   const defaultId = useId()
   const rootId = idRules?.rootId ?? defaultId
@@ -143,13 +146,14 @@ export function Root({
     const trap = focusTrap
       .createFocusTrap(contentEl, {
         initialFocus: initialFocusCallback() ?? undefined,
+        allowOutsideClick: closeOnOutsideClick,
       })
       .activate()
 
     return () => {
       trap.deactivate()
     }
-  }, [contentId, initialFocusCallback, open])
+  }, [contentId, initialFocusCallback, open, closeOnOutsideClick])
 
   return (
     <ModalContext.Provider
@@ -166,6 +170,7 @@ export function Root({
           triggerId,
           closeTriggerId,
         },
+        closeOnOutsideClick,
       }}
     >
       {children}
@@ -249,14 +254,25 @@ export function Content(props: ContentProps) {
 }
 
 export type BackdropProps = ComponentPropsWithoutRef<'div'>
-export function Backdrop(props: BackdropProps) {
-  const { open, idRules } = useModalContext()
+export function Backdrop({ onClick, ...rest }: BackdropProps) {
+  const { closeModal, open, idRules, closeOnOutsideClick } = useModalContext()
 
   if (!open) {
     return null
   }
 
-  return <div id={idRules.backdropId} {...props} />
+  return (
+    <div
+      id={idRules.backdropId}
+      onClick={(event) => {
+        if (closeOnOutsideClick) {
+          closeModal()
+        }
+        onClick?.(event)
+      }}
+      {...rest}
+    />
+  )
 }
 
 export type TitleProps = ComponentPropsWithoutRef<'h2'>
