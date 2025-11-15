@@ -1,7 +1,7 @@
-import { Example } from './components/modal/examples'
+import { NestedModalExample } from './components/modal/examples'
 
 function App() {
-  return <Example />
+  return <NestedModalExample />
 }
 
 export default App
