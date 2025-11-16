@@ -2,8 +2,11 @@ import { useControllableState } from '@radix-ui/react-use-controllable-state'
 import {
   createContext,
   useContext,
+  useEffect,
   useId,
   useLayoutEffect,
+  useRef,
+  useState,
   type ComponentPropsWithoutRef,
   type CSSProperties,
 } from 'react'
@@ -23,7 +26,13 @@ import { useLatestRef } from '../../hooks/useLatestRef'
 const MenuContext = createContext<
   | {
       open: boolean
-      openMenu: () => void
+      openMenu: ({
+        initialFocus,
+      }: {
+        initialFocus: 'first-item' | 'last-item'
+      }) => void
+      initialFocusType: 'first-item' | 'last-item'
+      activedescendant?: string
       closeMenu: () => void
       idRules: {
         rootId: string
@@ -68,20 +77,6 @@ export function Root({
   idRules,
   children,
 }: RootProps) {
-  const [open, setOpen] = useControllableState({
-    prop: openProp,
-    onChange: onOpenChange,
-    defaultProp: defaultOpen ?? false,
-  })
-
-  const openMenu = () => {
-    setOpen(true)
-  }
-
-  const closeMenu = () => {
-    setOpen(false)
-  }
-
   const defaultId = useId()
   const rootId = idRules?.rootId ?? defaultId
   const triggerId = idRules?.triggerId ?? `${rootId}-trigger`
@@ -94,12 +89,130 @@ export function Root({
   const linkItemId =
     idRules?.linkItemId ?? ((value) => `${rootId}-link-item-${value}`)
 
+  const [open, setOpen] = useControllableState({
+    prop: openProp,
+    onChange: onOpenChange,
+    defaultProp: defaultOpen ?? false,
+  })
+  const initialFocusTypeRef = useRef<'first-item' | 'last-item'>('first-item')
+  const [activedescendant, setActivedescendant] = useState<string | undefined>(
+    undefined,
+  )
+
+  const openMenu = ({
+    initialFocus,
+  }: {
+    initialFocus: 'first-item' | 'last-item'
+  }) => {
+    initialFocusTypeRef.current = initialFocus
+    setOpen(true)
+  }
+
+  const closeMenu = () => {
+    initialFocusTypeRef.current = 'first-item'
+    setOpen(false)
+  }
+
+  const { isPresent: isContentPresent } = usePresence({
+    isVisible: open,
+    resolveElement: () => document.getElementById(contentId),
+  })
+
+  const openMenuCallbackRef = useLatestRef(openMenu)
+  const activedescendantRef = useLatestRef(activedescendant)
+  useEffect(() => {
+    const triggerEl = document.getElementById(triggerId)
+    if (!triggerEl) {
+      return
+    }
+
+    const handler = (event: KeyboardEvent) => {
+      if (document.activeElement !== triggerEl) {
+        return
+      }
+
+      if (!open) {
+        if (event.key === 'ArrowDown') {
+          openMenuCallbackRef.current({ initialFocus: 'first-item' })
+        } else if (event.key === 'ArrowUp') {
+          openMenuCallbackRef.current({ initialFocus: 'last-item' })
+        }
+        return
+      }
+
+      const contentEl = document.getElementById(contentId)
+      if (!contentEl) {
+        return
+      }
+
+      const menuItems = Array.from(
+        contentEl.querySelectorAll<HTMLElement>('[role="menuitem"]'),
+      )
+      const currentIndex = menuItems.findIndex(
+        (item) => item.id === activedescendantRef.current,
+      )
+
+      if (currentIndex === -1) {
+        return
+      }
+
+      if (event.key === 'ArrowDown') {
+        const nextIndex = currentIndex + 1
+        if (nextIndex >= menuItems.length) {
+          return
+        }
+
+        setActivedescendant(menuItems[nextIndex].id)
+      } else if (event.key === 'ArrowUp') {
+        const previousIndex = currentIndex - 1
+        if (previousIndex < 0) {
+          return
+        }
+
+        setActivedescendant(menuItems[previousIndex].id)
+      }
+    }
+
+    window.addEventListener('keydown', handler)
+
+    return () => {
+      window.removeEventListener('keydown', handler)
+    }
+  }, [activedescendantRef, contentId, open, openMenuCallbackRef, triggerId])
+
+  useLayoutEffect(() => {
+    if (!isContentPresent) {
+      return
+    }
+
+    const contentEl = document.getElementById(contentId)
+    if (!contentEl) {
+      return
+    }
+
+    const menuItems = Array.from(
+      contentEl.querySelectorAll('[role="menuitem"]'),
+    )
+
+    if (initialFocusTypeRef.current === 'first-item') {
+      setActivedescendant(menuItems[0]?.id)
+    } else if (initialFocusTypeRef.current === 'last-item') {
+      setActivedescendant(menuItems[menuItems.length - 1]?.id)
+    }
+
+    return () => {
+      initialFocusTypeRef.current = 'first-item'
+      setActivedescendant(undefined)
+    }
+  }, [contentId, isContentPresent])
+
   return (
     <MenuContext.Provider
       value={{
         open,
         openMenu,
         closeMenu,
+        activedescendant,
         idRules: {
           rootId,
           triggerId,
@@ -109,6 +222,7 @@ export function Root({
           actionItemId,
           linkItemId,
         },
+        initialFocusType: initialFocusTypeRef.current,
       }}
     >
       {children}
@@ -128,10 +242,13 @@ export function Trigger({ children, onClick, ...rest }: TriggerProps) {
         if (open) {
           closeMenu()
         } else {
-          openMenu()
+          openMenu({ initialFocus: 'first-item' })
         }
         onClick?.(event)
       }}
+      aria-haspopup="menu"
+      aria-expanded={open ? 'true' : 'false'}
+      aria-controls={idRules.contentId}
       {...rest}
     >
       {children}
@@ -296,7 +413,7 @@ export function PositionerArrow({
 
 export type ContentProps = ComponentPropsWithoutRef<'div'>
 export function Content({ children, ...rest }: ContentProps) {
-  const { open, idRules } = useMenuContext()
+  const { open, idRules, activedescendant } = useMenuContext()
 
   const { isPresent } = usePresence({
     isVisible: open,
@@ -308,7 +425,13 @@ export function Content({ children, ...rest }: ContentProps) {
   }
 
   return (
-    <div id={idRules.contentId} {...rest}>
+    <div
+      role="menu"
+      id={idRules.contentId}
+      aria-labelledby={idRules.triggerId}
+      aria-activedescendant={activedescendant}
+      {...rest}
+    >
       {children}
     </div>
   )
@@ -320,11 +443,28 @@ export type ActionItemProps = Omit<
 > & {
   value: string
 }
-export function ActionItem({ children, value, ...rest }: ActionItemProps) {
-  const { idRules } = useMenuContext()
+export function ActionItem({
+  children,
+  onClick,
+  value,
+  ...rest
+}: ActionItemProps) {
+  const { idRules, closeMenu, activedescendant } = useMenuContext()
+  const id = idRules.actionItemId(value)
+  const isActive = activedescendant === id
 
   return (
-    <button type="button" id={idRules.actionItemId(value)} {...rest}>
+    <button
+      role="menuitem"
+      type="button"
+      id={id}
+      data-active={isActive ? 'true' : undefined}
+      onClick={(event) => {
+        closeMenu()
+        onClick?.(event)
+      }}
+      {...rest}
+    >
       {children}
     </button>
   )
@@ -333,11 +473,22 @@ export function ActionItem({ children, value, ...rest }: ActionItemProps) {
 export type LinkItemProps = Omit<ComponentPropsWithoutRef<'a'>, 'value'> & {
   value: string
 }
-export function LinkItem({ children, value, ...rest }: LinkItemProps) {
-  const { idRules } = useMenuContext()
+export function LinkItem({ children, onClick, value, ...rest }: LinkItemProps) {
+  const { idRules, closeMenu, activedescendant } = useMenuContext()
+  const id = idRules.linkItemId(value)
+  const isActive = activedescendant === id
 
   return (
-    <a id={idRules.linkItemId(value)} {...rest}>
+    <a
+      role="menuitem"
+      id={id}
+      data-active={isActive ? 'true' : undefined}
+      onClick={(event) => {
+        closeMenu()
+        onClick?.(event)
+      }}
+      {...rest}
+    >
       {children}
     </a>
   )
