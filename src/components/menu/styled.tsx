@@ -61,6 +61,7 @@ export function ActionItem({ className, ...rest }: ActionItemProps) {
     <MenuPrimitives.ActionItem
       className={cn(
         'w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 focus:outline-none focus:bg-gray-100 transition-colors',
+        'data-[active=true]:bg-blue-50 data-[active=true]:text-blue-700',
         className,
       )}
       {...rest}
@@ -73,6 +74,7 @@ export function LinkItem({ className, ...rest }: LinkItemProps) {
     <MenuPrimitives.LinkItem
       className={cn(
         'block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 focus:outline-none focus:bg-gray-100 transition-colors no-underline',
+        'data-[active=true]:bg-blue-50 data-[active=true]:text-blue-700',
         className,
       )}
       {...rest}
