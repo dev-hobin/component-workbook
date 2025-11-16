@@ -119,7 +119,10 @@ export function Root({
   })
 
   const openMenuCallbackRef = useLatestRef(openMenu)
+  const closeMenuCallbackRef = useLatestRef(closeMenu)
   const activedescendantRef = useLatestRef(activedescendant)
+
+  // 방향키 핸들링
   useEffect(() => {
     const triggerEl = document.getElementById(triggerId)
     if (!triggerEl) {
@@ -180,6 +183,7 @@ export function Root({
     }
   }, [activedescendantRef, contentId, open, openMenuCallbackRef, triggerId])
 
+  // 메뉴 열렸을 경우 초기 active descendant 설정
   useLayoutEffect(() => {
     if (!isContentPresent) {
       return
@@ -205,6 +209,71 @@ export function Root({
       setActivedescendant(undefined)
     }
   }, [contentId, isContentPresent])
+
+  // ESC 키 누르면 메뉴 닫기
+  useEffect(() => {
+    if (!open || !activedescendant) {
+      return
+    }
+
+    const handler = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') {
+        return
+      }
+      closeMenuCallbackRef.current()
+    }
+
+    window.addEventListener('keydown', handler)
+    return () => {
+      window.removeEventListener('keydown', handler)
+    }
+  }, [activedescendant, closeMenuCallbackRef, open])
+
+  // 메뉴 열렸을 경우 탭 이동 방지
+  useEffect(() => {
+    if (!open) {
+      return
+    }
+
+    const handler = (event: KeyboardEvent) => {
+      if (event.key !== 'Tab') {
+        return
+      }
+      event.preventDefault()
+    }
+
+    window.addEventListener('keydown', handler)
+    return () => {
+      window.removeEventListener('keydown', handler)
+    }
+  }, [activedescendant, closeMenuCallbackRef, open])
+
+  useEffect(() => {
+    if (!open) {
+      return
+    }
+
+    const handler = (event: PointerEvent) => {
+      if (!(event.target instanceof HTMLElement)) {
+        return
+      }
+
+      // Content나 Trigger 내부 클릭은 무시
+      if (
+        event.target.closest(`#${contentId}`) ||
+        event.target.closest(`#${triggerId}`)
+      ) {
+        return
+      }
+
+      closeMenuCallbackRef.current()
+    }
+
+    window.addEventListener('click', handler)
+    return () => {
+      window.removeEventListener('click', handler)
+    }
+  }, [closeMenuCallbackRef, contentId, open, triggerId])
 
   return (
     <MenuContext.Provider
@@ -427,6 +496,7 @@ export function Content({ children, ...rest }: ContentProps) {
   return (
     <div
       role="menu"
+      tabIndex={-1}
       id={idRules.contentId}
       aria-labelledby={idRules.triggerId}
       aria-activedescendant={activedescendant}
