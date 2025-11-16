@@ -9,10 +9,10 @@ export function UncontrolledExample() {
           <Menu.Positioner offset={8}>
             <Menu.PositionerArrow />
             <Menu.Content>
-              <Menu.ActionItem>Action Item 1</Menu.ActionItem>
-              <Menu.ActionItem>Action Item 2</Menu.ActionItem>
-              <Menu.LinkItem>Link Item 1</Menu.LinkItem>
-              <Menu.LinkItem>Link Item 2</Menu.LinkItem>
+              <Menu.ActionItem value="item-1">Action Item 1</Menu.ActionItem>
+              <Menu.ActionItem value="item-2">Action Item 2</Menu.ActionItem>
+              <Menu.LinkItem value="link-item-1">Link Item 1</Menu.LinkItem>
+              <Menu.LinkItem value="link-item-2">Link Item 2</Menu.LinkItem>
             </Menu.Content>
           </Menu.Positioner>
         </Menu.Root>

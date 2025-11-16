@@ -31,8 +31,8 @@ const MenuContext = createContext<
         positionerId: string
         positionerArrowId: string
         contentId: string
-        actionItemId: string
-        linkItemId: string
+        actionItemId: (value: string) => string
+        linkItemId: (value: string) => string
       }
     }
   | undefined
@@ -56,8 +56,8 @@ export type RootProps = {
     positionerId?: string
     positionerArrowId?: string
     contentId?: string
-    actionItemId?: string
-    linkItemId?: string
+    actionItemId?: (value: string) => string
+    linkItemId?: (value: string) => string
   }
   children: React.ReactNode
 }
@@ -89,8 +89,10 @@ export function Root({
   const positionerArrowId =
     idRules?.positionerArrowId ?? `${rootId}-positioner-arrow`
   const contentId = idRules?.contentId ?? `${rootId}-content`
-  const actionItemId = idRules?.actionItemId ?? `${rootId}-action-item`
-  const linkItemId = idRules?.linkItemId ?? `${rootId}-link-item`
+  const actionItemId =
+    idRules?.actionItemId ?? ((value) => `${rootId}-action-item-${value}`)
+  const linkItemId =
+    idRules?.linkItemId ?? ((value) => `${rootId}-link-item-${value}`)
 
   return (
     <MenuContext.Provider
@@ -117,8 +119,6 @@ export function Root({
 export type TriggerProps = ComponentPropsWithoutRef<'button'>
 export function Trigger({ children, onClick, ...rest }: TriggerProps) {
   const { open, openMenu, closeMenu, idRules } = useMenuContext()
-
-  console.log('open', open)
 
   return (
     <button
@@ -314,23 +314,30 @@ export function Content({ children, ...rest }: ContentProps) {
   )
 }
 
-export type ActionItemProps = ComponentPropsWithoutRef<'button'>
-export function ActionItem({ children, ...rest }: ActionItemProps) {
+export type ActionItemProps = Omit<
+  ComponentPropsWithoutRef<'button'>,
+  'value'
+> & {
+  value: string
+}
+export function ActionItem({ children, value, ...rest }: ActionItemProps) {
   const { idRules } = useMenuContext()
 
   return (
-    <button type="button" id={idRules.actionItemId} {...rest}>
+    <button type="button" id={idRules.actionItemId(value)} {...rest}>
       {children}
     </button>
   )
 }
 
-export type LinkItemProps = ComponentPropsWithoutRef<'a'>
-export function LinkItem({ children, ...rest }: LinkItemProps) {
+export type LinkItemProps = Omit<ComponentPropsWithoutRef<'a'>, 'value'> & {
+  value: string
+}
+export function LinkItem({ children, value, ...rest }: LinkItemProps) {
   const { idRules } = useMenuContext()
 
   return (
-    <a id={idRules.linkItemId} {...rest}>
+    <a id={idRules.linkItemId(value)} {...rest}>
       {children}
     </a>
   )
