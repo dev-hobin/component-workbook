@@ -23,6 +23,19 @@ import {
 } from '@floating-ui/dom'
 import { useLatestRef } from '../../hooks/useLatestRef'
 
+const CommonContext = createContext<
+  | { activeItems: string[]; setActiveItems: (items: string[]) => void }
+  | undefined
+>(undefined)
+
+function useCommonContext() {
+  const context = useContext(CommonContext)
+  if (!context) {
+    throw new Error('useCommonContext must be used within a Menu.Root')
+  }
+  return context
+}
+
 const MenuContext = createContext<
   | {
       open: boolean
@@ -34,6 +47,7 @@ const MenuContext = createContext<
       initialFocusType: 'first-item' | 'last-item'
       activedescendant?: string
       closeMenu: () => void
+      depth: number
       idRules: {
         rootId: string
         triggerId: string
@@ -70,6 +84,26 @@ export type RootProps = {
   }
   children: React.ReactNode
 }
+
+export function MenuRoot(props: RootProps) {
+  const commonContext = useContext(CommonContext)
+  if (commonContext) {
+    return <Root {...props} />
+  }
+
+  return <MenuTopRoot {...props} />
+}
+
+export function MenuTopRoot(props: RootProps) {
+  const [activeItems, setActiveItems] = useState<string[]>([])
+
+  return (
+    <CommonContext.Provider value={{ activeItems, setActiveItems }}>
+      <Root {...props} />
+    </CommonContext.Provider>
+  )
+}
+
 export function Root({
   open: openProp,
   onOpenChange,
@@ -77,6 +111,9 @@ export function Root({
   idRules,
   children,
 }: RootProps) {
+  const commonContext = useCommonContext()
+  const parentContext = useContext(MenuContext)
+
   const defaultId = useId()
   const rootId = idRules?.rootId ?? defaultId
   const triggerId = idRules?.triggerId ?? `${rootId}-trigger`
@@ -98,6 +135,7 @@ export function Root({
   const [activedescendant, setActivedescendant] = useState<string | undefined>(
     undefined,
   )
+  const depthRef = useRef(parentContext ? parentContext.depth + 1 : 0)
 
   const openMenu = ({
     initialFocus,
@@ -105,11 +143,18 @@ export function Root({
     initialFocus: 'first-item' | 'last-item'
   }) => {
     initialFocusTypeRef.current = initialFocus
+    commonContext.setActiveItems([
+      ...commonContext.activeItems.slice(0, depthRef.current),
+      triggerId,
+    ])
     setOpen(true)
   }
 
   const closeMenu = () => {
     initialFocusTypeRef.current = 'first-item'
+    commonContext.setActiveItems(
+      commonContext.activeItems.slice(0, depthRef.current),
+    )
     setOpen(false)
   }
 
@@ -125,7 +170,7 @@ export function Root({
   // 방향키 핸들링
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
-      if (!open) {
+      if (!open && depthRef.current === 0) {
         if (event.key === 'ArrowDown') {
           openMenuCallbackRef.current({ initialFocus: 'first-item' })
         } else if (event.key === 'ArrowUp') {
@@ -136,6 +181,9 @@ export function Root({
 
       const contentEl = document.getElementById(contentId)
       if (!contentEl) {
+        return
+      }
+      if (commonContext.activeItems.length !== depthRef.current + 1) {
         return
       }
 
@@ -172,7 +220,64 @@ export function Root({
     return () => {
       window.removeEventListener('keydown', handler)
     }
-  }, [activedescendantRef, contentId, open, openMenuCallbackRef, triggerId])
+  }, [
+    activedescendantRef,
+    commonContext.activeItems.length,
+    contentId,
+    open,
+    openMenuCallbackRef,
+    triggerId,
+  ])
+
+  // 서브메뉴 열기
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      const contentEl = document.getElementById(contentId)
+      if (!contentEl) {
+        return
+      }
+
+      if (event.key === 'ArrowRight') {
+        if (!activedescendantRef.current) {
+          return
+        }
+
+        const activedescendantEl = document.getElementById(
+          activedescendantRef.current,
+        )
+        if (
+          commonContext.activeItems.length === depthRef.current + 1 &&
+          activedescendantEl?.ariaHasPopup
+        ) {
+          activedescendantEl.click()
+          return
+        }
+      } else if (event.key === 'ArrowLeft') {
+        if (
+          commonContext.activeItems[commonContext.activeItems.length - 1] ===
+            triggerId &&
+          depthRef.current > 0
+        ) {
+          closeMenuCallbackRef.current()
+          return
+        }
+      }
+    }
+
+    window.addEventListener('keydown', handler)
+    return () => {
+      window.removeEventListener('keydown', handler)
+    }
+  }, [
+    activedescendantRef,
+    closeMenuCallbackRef,
+    commonContext.activeItems,
+    commonContext.activeItems.length,
+    contentId,
+    open,
+    openMenuCallbackRef,
+    triggerId,
+  ])
 
   // 메뉴 열렸을 경우 초기 active descendant 설정
   useLayoutEffect(() => {
@@ -220,25 +325,6 @@ export function Root({
     }
   }, [activedescendant, closeMenuCallbackRef, open])
 
-  // 메뉴 열렸을 경우 탭 이동 방지
-  useEffect(() => {
-    if (!open) {
-      return
-    }
-
-    const handler = (event: KeyboardEvent) => {
-      if (event.key !== 'Tab') {
-        return
-      }
-      event.preventDefault()
-    }
-
-    window.addEventListener('keydown', handler)
-    return () => {
-      window.removeEventListener('keydown', handler)
-    }
-  }, [activedescendant, closeMenuCallbackRef, open])
-
   useEffect(() => {
     if (!open) {
       return
@@ -273,6 +359,7 @@ export function Root({
         openMenu,
         closeMenu,
         activedescendant,
+        depth: depthRef.current,
         idRules: {
           rootId,
           triggerId,
@@ -292,12 +379,18 @@ export function Root({
 
 export type TriggerProps = ComponentPropsWithoutRef<'button'>
 export function Trigger({ children, onClick, ...rest }: TriggerProps) {
-  const { open, openMenu, closeMenu, idRules } = useMenuContext()
+  const { open, openMenu, closeMenu, idRules, depth, activedescendant } =
+    useMenuContext()
+
+  const id = idRules.triggerId
+  const isActive = activedescendant === id
 
   return (
     <button
+      role={depth !== 0 ? 'menuitem' : undefined}
       type="button"
-      id={idRules.triggerId}
+      id={id}
+      data-active={isActive ? 'true' : undefined}
       onClick={(event) => {
         if (open) {
           closeMenu()
@@ -569,6 +662,7 @@ export function Portal({
 }
 
 const Menu = {
+  MenuRoot,
   Root,
   Trigger,
   Positioner,

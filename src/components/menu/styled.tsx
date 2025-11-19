@@ -11,7 +11,7 @@ import MenuPrimitives, {
 import { cn } from '../../utils/cn'
 
 export function Root(props: RootProps) {
-  return <MenuPrimitives.Root {...props} />
+  return <MenuPrimitives.MenuRoot {...props} />
 }
 
 export function Trigger({ className, ...rest }: TriggerProps) {
