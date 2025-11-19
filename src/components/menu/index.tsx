@@ -124,16 +124,7 @@ export function Root({
 
   // 방향키 핸들링
   useEffect(() => {
-    const triggerEl = document.getElementById(triggerId)
-    if (!triggerEl) {
-      return
-    }
-
     const handler = (event: KeyboardEvent) => {
-      if (document.activeElement !== triggerEl) {
-        return
-      }
-
       if (!open) {
         if (event.key === 'ArrowDown') {
           openMenuCallbackRef.current({ initialFocus: 'first-item' })
