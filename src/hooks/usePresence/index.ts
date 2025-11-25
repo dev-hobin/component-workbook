@@ -78,7 +78,8 @@ export function usePresence({
         if (!isVisible) {
           return
         }
-        scheduleTransitionUpdate('starting')
+        setTransitionState('starting')
+        // scheduleTransitionUpdate('starting')
         break
       }
     }

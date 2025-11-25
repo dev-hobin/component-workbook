@@ -2,8 +2,11 @@ import { useControllableState } from '@radix-ui/react-use-controllable-state'
 import {
   createContext,
   useContext,
+  useEffect,
   useId,
   useLayoutEffect,
+  useRef,
+  useState,
   type ComponentPropsWithoutRef,
   type CSSProperties,
 } from 'react'
@@ -23,16 +26,23 @@ import { useLatestRef } from '../../hooks/useLatestRef'
 const MenuContext = createContext<
   | {
       open: boolean
-      openMenu: () => void
+
+      openMenu: ({
+        initialFocusType,
+      }: {
+        initialFocusType: 'first-item' | 'last-item'
+      }) => void
       closeMenu: () => void
+
+      focusedItemId: string | null
+      setFocusedItemId: (itemId: string | null) => void
+
       idRules: {
         rootId: string
         triggerId: string
-        subTriggerId: string
         positionerId: string
         positionerArrowId: string
         contentId: string
-        subContentId: string
         actionItemId: (value: string) => string
         linkItemId: (value: string) => string
       }
@@ -76,16 +86,16 @@ export function Root({
   const defaultId = useId()
   const rootId = idRules?.rootId ?? defaultId
   const triggerId = idRules?.triggerId ?? `${rootId}-trigger`
-  const subTriggerId = idRules?.subTriggerId ?? `${rootId}-subtrigger`
   const positionerId = idRules?.positionerId ?? `${rootId}-positioner`
   const positionerArrowId =
     idRules?.positionerArrowId ?? `${rootId}-positioner-arrow`
   const contentId = idRules?.contentId ?? `${rootId}-content`
-  const subContentId = idRules?.subContentId ?? `${rootId}-subcontent`
   const actionItemId =
     idRules?.actionItemId ?? ((value) => `${rootId}-action-item-${value}`)
   const linkItemId =
     idRules?.linkItemId ?? ((value) => `${rootId}-link-item-${value}`)
+
+  const initialFocusTypeRef = useRef<'first-item' | 'last-item'>('first-item')
 
   const [open, setOpen] = useControllableState({
     prop: openProp,
@@ -93,13 +103,149 @@ export function Root({
     defaultProp: defaultOpen ?? false,
   })
 
-  const openMenu = () => {
+  const [focusedItemId, setFocusedItemId] = useState<string | null>(null)
+
+  const openMenu = ({
+    initialFocusType,
+  }: {
+    initialFocusType: 'first-item' | 'last-item'
+  }) => {
     setOpen(true)
+    initialFocusTypeRef.current = initialFocusType
   }
 
   const closeMenu = () => {
     setOpen(false)
+    const triggerEl = document.getElementById(triggerId)
+    if (!triggerEl) {
+      return
+    }
+
+    triggerEl.focus()
   }
+
+  const openMenuRef = useLatestRef(openMenu)
+
+  const { isPresent: isContentPresent } = usePresence({
+    isVisible: open,
+    resolveElement: () => document.getElementById(contentId),
+  })
+
+  useEffect(() => {
+    if (!isContentPresent) {
+      return
+    }
+
+    const contentEl = document.getElementById(contentId)
+    if (!contentEl) {
+      return
+    }
+
+    const menuItems = Array.from(
+      contentEl.querySelectorAll<HTMLElement>('[role="menuitem"]'),
+    )
+
+    if (menuItems.length === 0) {
+      return
+    }
+
+    if (initialFocusTypeRef.current === 'last-item') {
+      menuItems[menuItems.length - 1]?.focus()
+      setFocusedItemId(menuItems[menuItems.length - 1]?.id)
+    } else {
+      menuItems[0]?.focus()
+      setFocusedItemId(menuItems[0]?.id)
+    }
+  }, [isContentPresent, contentId, triggerId])
+
+  useEffect(() => {
+    const triggerEl = document.getElementById(triggerId)
+    if (!triggerEl) {
+      return
+    }
+
+    if (isContentPresent) {
+      return
+    }
+
+    const handleOpenMenu = (event: KeyboardEvent) => {
+      if (triggerEl.getAttribute('role') === 'menuitem') {
+        if (event.key === 'ArrowRight') {
+          event.preventDefault()
+          openMenuRef.current({ initialFocusType: 'first-item' })
+        }
+      } else {
+        if (event.key === 'ArrowDown') {
+          event.preventDefault()
+          openMenuRef.current({ initialFocusType: 'first-item' })
+        } else if (event.key === 'ArrowUp') {
+          event.preventDefault()
+          openMenuRef.current({ initialFocusType: 'last-item' })
+        }
+      }
+    }
+
+    triggerEl.addEventListener('keydown', handleOpenMenu)
+    return () => {
+      triggerEl.removeEventListener('keydown', handleOpenMenu)
+    }
+  }, [isContentPresent, openMenuRef, triggerId])
+
+  const focusedItemIdRef = useLatestRef(focusedItemId)
+  useEffect(() => {
+    if (!isContentPresent) {
+      return
+    }
+
+    const contentEl = document.getElementById(contentId)
+    if (!contentEl) {
+      return
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (focusedItemIdRef.current === null) {
+        return
+      }
+
+      const isArrowDown = event.key === 'ArrowDown'
+      const isArrowUp = event.key === 'ArrowUp'
+
+      if (!isArrowDown && !isArrowUp) {
+        return
+      }
+
+      event.preventDefault()
+
+      const menuItems = Array.from(
+        contentEl.querySelectorAll<HTMLElement>('[role="menuitem"]'),
+      )
+
+      if (menuItems.length === 0) {
+        return
+      }
+
+      const currentIndex = menuItems.findIndex(
+        (item) => item.id === focusedItemIdRef.current,
+      )
+
+      if (currentIndex === -1) {
+        return
+      }
+
+      const nextIndex = isArrowDown
+        ? (currentIndex + 1) % menuItems.length // 순환
+        : (currentIndex - 1 + menuItems.length) % menuItems.length // 순환
+
+      const nextItem = menuItems[nextIndex]
+      setFocusedItemId(nextItem.id)
+      nextItem.focus()
+    }
+
+    contentEl.addEventListener('keydown', handleKeyDown)
+    return () => {
+      contentEl.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [contentId, focusedItemIdRef, isContentPresent])
 
   return (
     <MenuContext.Provider
@@ -107,14 +253,16 @@ export function Root({
         open,
         openMenu,
         closeMenu,
+
+        focusedItemId,
+        setFocusedItemId,
+
         idRules: {
           rootId,
           triggerId,
-          subTriggerId,
           positionerId,
           positionerArrowId,
           contentId,
-          subContentId,
           actionItemId,
           linkItemId,
         },
@@ -139,7 +287,7 @@ export function Trigger({ children, onClick, ...rest }: TriggerProps) {
         if (open) {
           closeMenu()
         } else {
-          openMenu()
+          openMenu({ initialFocusType: 'first-item' })
         }
         onClick?.(event)
       }}
@@ -180,22 +328,24 @@ export function Content({ children, ...rest }: ContentProps) {
 
 export type SubTriggerProps = ComponentPropsWithoutRef<'button'>
 export function SubTrigger({ children, onClick, ...rest }: SubTriggerProps) {
-  const { open, openMenu, closeMenu, idRules } = useMenuContext()
+  const { open, openMenu, closeMenu, idRules, focusedItemId } = useMenuContext()
 
   const id = idRules.triggerId
 
   return (
     <button
+      role="menuitem"
       type="button"
       id={id}
       onClick={(event) => {
         if (open) {
           closeMenu()
         } else {
-          openMenu()
+          openMenu({ initialFocusType: 'first-item' })
         }
         onClick?.(event)
       }}
+      tabIndex={focusedItemId === id ? 0 : -1}
       aria-haspopup="menu"
       aria-expanded={open ? 'true' : 'false'}
       aria-controls={idRules.contentId}
@@ -398,7 +548,7 @@ export function ActionItem({
   value,
   ...rest
 }: ActionItemProps) {
-  const { idRules, closeMenu } = useMenuContext()
+  const { idRules, closeMenu, focusedItemId } = useMenuContext()
   const id = idRules.actionItemId(value)
 
   return (
@@ -410,6 +560,7 @@ export function ActionItem({
         closeMenu()
         onClick?.(event)
       }}
+      tabIndex={focusedItemId === id ? 0 : -1}
       {...rest}
     >
       {children}
@@ -421,7 +572,7 @@ export type LinkItemProps = Omit<ComponentPropsWithoutRef<'a'>, 'value'> & {
   value: string
 }
 export function LinkItem({ children, onClick, value, ...rest }: LinkItemProps) {
-  const { idRules, closeMenu } = useMenuContext()
+  const { idRules, closeMenu, focusedItemId } = useMenuContext()
   const id = idRules.linkItemId(value)
 
   return (
@@ -432,6 +583,7 @@ export function LinkItem({ children, onClick, value, ...rest }: LinkItemProps) {
         closeMenu()
         onClick?.(event)
       }}
+      tabIndex={focusedItemId === id ? 0 : -1}
       {...rest}
     >
       {children}

@@ -14,32 +14,40 @@ export function UncontrolledExample() {
           </p>
           <Menu.Root>
             <Menu.Trigger>Open Menu</Menu.Trigger>
-            <Menu.Positioner offset={8}>
-              <Menu.PositionerArrow />
-              <Menu.Content>
-                <Menu.ActionItem value="item-1">Action Item 1</Menu.ActionItem>
-                <Menu.ActionItem value="item-2">Action Item 2</Menu.ActionItem>
-                <Menu.Root>
-                  <Menu.SubTrigger className="w-full">
-                    Open Menu 2
-                  </Menu.SubTrigger>
-                  <Menu.Positioner offset={8} placement="right">
-                    <Menu.PositionerArrow />
-                    <Menu.SubContent>
-                      <Menu.ActionItem value="item-1">
-                        Action Item 1
-                      </Menu.ActionItem>
-                      <Menu.ActionItem value="item-2">
-                        Action Item 2
-                      </Menu.ActionItem>
-                      <Menu.ActionItem value="item-3">
-                        Action Item 3
-                      </Menu.ActionItem>
-                    </Menu.SubContent>
-                  </Menu.Positioner>
-                </Menu.Root>
-              </Menu.Content>
-            </Menu.Positioner>
+            <Menu.Portal>
+              <Menu.Positioner offset={8}>
+                <Menu.PositionerArrow />
+                <Menu.Content>
+                  <Menu.ActionItem value="item-1">
+                    Action Item 1
+                  </Menu.ActionItem>
+                  <Menu.ActionItem value="item-2">
+                    Action Item 2
+                  </Menu.ActionItem>
+                  <Menu.Root>
+                    <Menu.SubTrigger className="w-full">
+                      Open Menu 2
+                    </Menu.SubTrigger>
+                    <Menu.Portal>
+                      <Menu.Positioner offset={8} placement="right">
+                        <Menu.PositionerArrow />
+                        <Menu.SubContent>
+                          <Menu.ActionItem value="item-1">
+                            Action Item 1
+                          </Menu.ActionItem>
+                          <Menu.ActionItem value="item-2">
+                            Action Item 2
+                          </Menu.ActionItem>
+                          <Menu.ActionItem value="item-3">
+                            Action Item 3
+                          </Menu.ActionItem>
+                        </Menu.SubContent>
+                      </Menu.Positioner>
+                    </Menu.Portal>
+                  </Menu.Root>
+                </Menu.Content>
+              </Menu.Positioner>
+            </Menu.Portal>
           </Menu.Root>
         </div>
       </div>
