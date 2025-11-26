@@ -86,13 +86,24 @@ function useMenuContext() {
 }
 
 function useMenuTreeContext() {
-  return useContext(MenuTreeContext)
+  const context = useContext(MenuTreeContext)
+  if (!context) {
+    throw new Error('useMenuTreeContext must be used within a Menu.Root')
+  }
+  return context
 }
 
 export type RootProps = {
+  // 트리 전체(openPath) 제어용 – TopRoot에서만 의미 있음
+  openPath?: string[]
+  defaultOpenPath?: string[]
+  onOpenPathChange?: (path: string[]) => void
+
+  // (옵션) 최상위 메뉴 자체의 open 여부
   open?: boolean
   onOpenChange?: (open: boolean) => void
   defaultOpen?: boolean
+
   idRules?: {
     rootId?: string
     triggerId?: string
@@ -107,7 +118,7 @@ export type RootProps = {
 }
 
 export function Root(props: RootProps) {
-  const tree = useMenuTreeContext()
+  const tree = useContext(MenuTreeContext)
 
   // 아직 트리 컨텍스트가 없으면 → 이 Root가 최상위
   if (!tree) {
@@ -118,13 +129,22 @@ export function Root(props: RootProps) {
   return <SubRoot {...props} />
 }
 
-function TopRoot(props: RootProps) {
-  const [openPath, setOpenPath] = useState<string[]>([])
+function TopRoot({
+  openPath: openPathProp,
+  defaultOpenPath,
+  onOpenPathChange,
+  ...rest
+}: RootProps) {
+  const [openPath, setOpenPath] = useControllableState<string[]>({
+    prop: openPathProp,
+    defaultProp: defaultOpenPath ?? [],
+    onChange: onOpenPathChange,
+  })
 
   return (
     <MenuTreeContext.Provider value={{ openPath, setOpenPath }}>
       {/* TopRoot 자신도 SubRoot를 통해 렌더링하는 게 핵심 */}
-      <SubRoot {...props} />
+      <SubRoot {...rest} />
     </MenuTreeContext.Provider>
   )
 }
@@ -140,6 +160,7 @@ export function SubRoot({
   const tree = useMenuTreeContext()
 
   const isTopLevel = !parentMenuContext
+  const isSubMenu = !!parentMenuContext
 
   const defaultId = useId()
 
@@ -162,9 +183,7 @@ export function SubRoot({
     defaultProp: defaultOpen ?? false,
   })
 
-  const open = isTopLevel
-    ? localOpen
-    : !!(tree && tree.openPath.includes(rootId))
+  const open = isTopLevel ? localOpen : tree.openPath.includes(rootId)
 
   const [activeItemId, setActiveItemId] = useState<string | null>(null)
 
@@ -179,28 +198,26 @@ export function SubRoot({
 
     initialFocusTypeRef.current = initialFocusType
 
-    if (tree) {
-      const parentRootId = parentMenuContext?.idRules.rootId
-      const selfId = rootId
+    const parentRootId = parentMenuContext?.idRules.rootId
+    const selfId = rootId
 
-      tree.setOpenPath((prev) => {
-        // 부모가 없으면 이 메뉴부터 시작하는 경로
-        if (!parentRootId) {
-          return [selfId]
-        }
+    tree.setOpenPath((prev) => {
+      // 부모가 없으면 이 메뉴부터 시작하는 경로
+      if (!parentRootId) {
+        return [selfId]
+      }
 
-        const parentIndex = prev.indexOf(parentRootId)
+      const parentIndex = prev.indexOf(parentRootId)
 
-        // 이전 경로에 부모가 없으면, 부모 + 나로 새 경로 생성
-        if (parentIndex === -1) {
-          return [parentRootId, selfId]
-        }
+      // 이전 경로에 부모가 없으면, 부모 + 나로 새 경로 생성
+      if (parentIndex === -1) {
+        return [parentRootId, selfId]
+      }
 
-        // 부모까지의 경로 + 나
-        const base = prev.slice(0, parentIndex + 1)
-        return [...base, selfId]
-      })
-    }
+      // 부모까지의 경로 + 나
+      const base = prev.slice(0, parentIndex + 1)
+      return [...base, selfId]
+    })
   }
 
   const closeMenu = () => {
@@ -210,15 +227,13 @@ export function SubRoot({
 
     setActiveItemId(null)
 
-    if (tree) {
-      const selfId = rootId
-      tree.setOpenPath((prev) => {
-        const index = prev.indexOf(selfId)
-        if (index === -1) return prev
-        // 나 이후의 경로는 잘라낸다 (나 포함 이전까지만 유지)
-        return prev.slice(0, index)
-      })
-    }
+    const selfId = rootId
+    tree.setOpenPath((prev) => {
+      const index = prev.indexOf(selfId)
+      if (index === -1) return prev
+      // 나 이후의 경로는 잘라낸다 (나 포함 이전까지만 유지)
+      return prev.slice(0, index)
+    })
 
     const triggerEl = dom.getTriggerElement({ triggerId })
     if (!triggerEl) {
@@ -320,6 +335,7 @@ export function SubRoot({
       }
 
       event.preventDefault()
+      event.stopPropagation()
 
       const menuItems = dom.getMenuItems({ rootId })
 
@@ -361,29 +377,25 @@ export function SubRoot({
     }
 
     const handleTab = (event: KeyboardEvent) => {
-      if (!isFocusWithin(contentEl)) {
-        return
-      }
-
-      if (event.key !== 'Tab') {
-        return
-      }
-
-      if (!event.shiftKey) {
-        return
-      }
+      if (event.key !== 'Tab') return
+      if (!event.shiftKey) return
+      if (!isFocusWithin(contentEl)) return
 
       event.preventDefault()
       closeMenuRef.current()
+
+      // 🔥 서브메뉴라면 여기서 이벤트 버블링 차단
+      if (isSubMenu) {
+        event.stopPropagation()
+      }
     }
 
     contentEl.addEventListener('keydown', handleTab)
     return () => {
       contentEl.removeEventListener('keydown', handleTab)
     }
-  }, [closeMenuRef, contentId, isContentPresent])
+  }, [closeMenuRef, contentId, isContentPresent, isSubMenu])
 
-  const isSubMenu = parentMenuContext !== undefined
   useEffect(() => {
     if (!isContentPresent) {
       return
