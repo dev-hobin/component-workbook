@@ -40,7 +40,7 @@ const dom = {
     document.getElementById(itemId),
 }
 
-type MenuContextType = {
+type MenuContextValue = {
   open: boolean
 
   openMenu: ({
@@ -65,8 +65,17 @@ type MenuContextType = {
 }
 
 const MenuContext = createContext<
-  (MenuContextType & { parentMenuContext?: MenuContextType }) | undefined
+  (MenuContextValue & { parentMenuContext?: MenuContextValue }) | undefined
 >(undefined)
+
+type MenuTreeContextValue = {
+  openPath: string[]
+  setOpenPath: React.Dispatch<React.SetStateAction<string[]>>
+}
+
+const MenuTreeContext = createContext<MenuTreeContextValue | undefined>(
+  undefined,
+)
 
 function useMenuContext() {
   const context = useContext(MenuContext)
@@ -74,6 +83,10 @@ function useMenuContext() {
     throw new Error('useMenuContext must be used within a Menu.Root')
   }
   return context
+}
+
+function useMenuTreeContext() {
+  return useContext(MenuTreeContext)
 }
 
 export type RootProps = {
@@ -93,7 +106,30 @@ export type RootProps = {
   children: React.ReactNode
 }
 
-export function Root({
+export function Root(props: RootProps) {
+  const tree = useMenuTreeContext()
+
+  // 아직 트리 컨텍스트가 없으면 → 이 Root가 최상위
+  if (!tree) {
+    return <TopRoot {...props} />
+  }
+
+  // 이미 트리 안에서 호출된 Root → 서브메뉴용 Root
+  return <SubRoot {...props} />
+}
+
+function TopRoot(props: RootProps) {
+  const [openPath, setOpenPath] = useState<string[]>([])
+
+  return (
+    <MenuTreeContext.Provider value={{ openPath, setOpenPath }}>
+      {/* TopRoot 자신도 SubRoot를 통해 렌더링하는 게 핵심 */}
+      <SubRoot {...props} />
+    </MenuTreeContext.Provider>
+  )
+}
+
+export function SubRoot({
   open: openProp,
   onOpenChange,
   defaultOpen,
@@ -101,6 +137,7 @@ export function Root({
   children,
 }: RootProps) {
   const parentMenuContext = useContext(MenuContext)
+  const tree = useMenuTreeContext()
 
   const defaultId = useId()
 
@@ -132,11 +169,45 @@ export function Root({
   }) => {
     setOpen(true)
     initialFocusTypeRef.current = initialFocusType
+
+    if (tree) {
+      const parentRootId = parentMenuContext?.idRules.rootId
+      const selfId = rootId
+
+      tree.setOpenPath((prev) => {
+        // 부모가 없으면 이 메뉴부터 시작하는 경로
+        if (!parentRootId) {
+          return [selfId]
+        }
+
+        const parentIndex = prev.indexOf(parentRootId)
+
+        // 이전 경로에 부모가 없으면, 부모 + 나로 새 경로 생성
+        if (parentIndex === -1) {
+          return [parentRootId, selfId]
+        }
+
+        // 부모까지의 경로 + 나
+        const base = prev.slice(0, parentIndex + 1)
+        return [...base, selfId]
+      })
+    }
   }
 
   const closeMenu = () => {
     setOpen(false)
     setActiveItemId(null)
+
+    if (tree) {
+      const selfId = rootId
+      tree.setOpenPath((prev) => {
+        const index = prev.indexOf(selfId)
+        if (index === -1) return prev
+        // 나 이후의 경로는 잘라낸다 (나 포함 이전까지만 유지)
+        return prev.slice(0, index)
+      })
+    }
+
     const triggerEl = dom.getTriggerElement({ triggerId })
     if (!triggerEl) {
       return
@@ -336,6 +407,18 @@ export function Root({
       contentEl.removeEventListener('keydown', handleKeyDown)
     }
   }, [closeMenuRef, contentId, isContentPresent, isSubMenu])
+
+  // ✅ 새로 추가할 effect: 중첩 Root는 openPath를 따라가게 동기화
+  useEffect(() => {
+    if (!tree) return
+    if (!parentMenuContext) return // 최상위 Root는 건들지 않음
+
+    const shouldBeOpen = tree.openPath.includes(rootId)
+
+    if (open !== shouldBeOpen) {
+      setOpen(shouldBeOpen)
+    }
+  }, [tree, tree?.openPath, rootId, open, parentMenuContext, setOpen])
 
   return (
     <MenuContext.Provider

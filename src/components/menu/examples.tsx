@@ -12,7 +12,7 @@ export function UncontrolledExample() {
             the menu. The activedescendant is set automatically based on
             initialFocus.
           </p>
-          <Menu.Root>
+          <Menu.Root defaultOpen>
             <Menu.Trigger>Open Menu</Menu.Trigger>
             <Menu.Portal>
               <Menu.Positioner offset={8}>
@@ -24,6 +24,27 @@ export function UncontrolledExample() {
                   <Menu.ActionItem value="item-2">
                     Action Item 2
                   </Menu.ActionItem>
+                  <Menu.Root>
+                    <Menu.SubTrigger className="w-full">
+                      Open Menu 2
+                    </Menu.SubTrigger>
+                    <Menu.Portal>
+                      <Menu.Positioner offset={8} placement="right">
+                        <Menu.PositionerArrow />
+                        <Menu.SubContent>
+                          <Menu.ActionItem value="item-1">
+                            Action Item 1
+                          </Menu.ActionItem>
+                          <Menu.ActionItem value="item-2">
+                            Action Item 2
+                          </Menu.ActionItem>
+                          <Menu.ActionItem value="item-3">
+                            Action Item 3
+                          </Menu.ActionItem>
+                        </Menu.SubContent>
+                      </Menu.Positioner>
+                    </Menu.Portal>
+                  </Menu.Root>
                   <Menu.Root>
                     <Menu.SubTrigger className="w-full">
                       Open Menu 2
