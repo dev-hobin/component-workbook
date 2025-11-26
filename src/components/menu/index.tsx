@@ -311,12 +311,11 @@ export function Root({
       return
     }
 
-    const handleArrowLeft = (event: KeyboardEvent) => {
-      if (!isSubMenu) {
-        return
-      }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const isEscape = event.key === 'Escape'
+      const isArrowLeft = event.key === 'ArrowLeft'
 
-      if (event.key !== 'ArrowLeft') {
+      if (!isEscape && !isArrowLeft) {
         return
       }
 
@@ -324,13 +323,17 @@ export function Root({
         return
       }
 
+      if (isArrowLeft && !isSubMenu) {
+        return
+      }
+
       event.preventDefault()
       closeMenuRef.current()
     }
 
-    contentEl.addEventListener('keydown', handleArrowLeft)
+    contentEl.addEventListener('keydown', handleKeyDown)
     return () => {
-      contentEl.removeEventListener('keydown', handleArrowLeft)
+      contentEl.removeEventListener('keydown', handleKeyDown)
     }
   }, [closeMenuRef, contentId, isContentPresent, isSubMenu])
 
