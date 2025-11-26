@@ -99,11 +99,6 @@ export type RootProps = {
   defaultOpenPath?: string[]
   onOpenPathChange?: (path: string[]) => void
 
-  // (옵션) 최상위 메뉴 자체의 open 여부
-  open?: boolean
-  onOpenChange?: (open: boolean) => void
-  defaultOpen?: boolean
-
   idRules?: {
     rootId?: string
     triggerId?: string
@@ -149,13 +144,7 @@ function TopRoot({
   )
 }
 
-export function SubRoot({
-  open: openProp,
-  onOpenChange,
-  defaultOpen,
-  idRules: idRulesProp,
-  children,
-}: RootProps) {
+export function SubRoot({ idRules: idRulesProp, children }: RootProps) {
   const parentMenuContext = useContext(MenuContext)
   const tree = useMenuTreeContext()
 
@@ -177,13 +166,9 @@ export function SubRoot({
 
   const initialFocusTypeRef = useRef<'first-item' | 'last-item'>('first-item')
 
-  const [localOpen, setLocalOpen] = useControllableState({
-    prop: openProp,
-    onChange: onOpenChange,
-    defaultProp: defaultOpen ?? false,
-  })
-
-  const open = isTopLevel ? localOpen : tree.openPath.includes(rootId)
+  const open = isTopLevel
+    ? tree.openPath.length > 0 && tree.openPath[0] === rootId // 루트는 경로의 첫 요소
+    : tree.openPath.includes(rootId)
 
   const [activeItemId, setActiveItemId] = useState<string | null>(null)
 
@@ -192,10 +177,6 @@ export function SubRoot({
   }: {
     initialFocusType: 'first-item' | 'last-item'
   }) => {
-    if (isTopLevel) {
-      setLocalOpen(true)
-    }
-
     initialFocusTypeRef.current = initialFocusType
 
     const parentRootId = parentMenuContext?.idRules.rootId
@@ -221,10 +202,6 @@ export function SubRoot({
   }
 
   const closeMenu = () => {
-    if (isTopLevel) {
-      setLocalOpen(false)
-    }
-
     setActiveItemId(null)
 
     const selfId = rootId
@@ -431,25 +408,6 @@ export function SubRoot({
       contentEl.removeEventListener('keydown', handleKeyDown)
     }
   }, [closeMenuRef, contentId, isContentPresent, isSubMenu])
-
-  // ✅ 최상위 Root가 열렸는데 트리 경로가 비어 있으면, 루트부터 시작하는 경로로 세팅
-  useEffect(() => {
-    if (!isTopLevel) return
-    if (!tree) return
-    if (!open) return
-
-    // 이미 루트가 경로의 시작이면 손대지 않음
-    if (tree.openPath[0] === rootId) return
-
-    tree.setOpenPath((prev) => {
-      // 이미 다른 루트가 있을 수도 있지만,
-      // 이 TopRoot 입장에서는 자기 rootId를 0번으로 두는 게 자연스러움
-      if (!prev.length) {
-        return [rootId]
-      }
-      return [rootId, ...prev.slice(1)]
-    })
-  }, [isTopLevel, tree, open, rootId])
 
   return (
     <MenuContext.Provider
