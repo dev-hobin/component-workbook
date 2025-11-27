@@ -354,24 +354,36 @@ export function SubRoot({ idRules: idRulesProp, children }: RootProps) {
     }
 
     const handleTab = (event: KeyboardEvent) => {
-      if (event.key !== 'Tab') return
-      if (!event.shiftKey) return
-      if (!isFocusWithin(contentEl)) return
-
-      event.preventDefault()
-      closeMenuRef.current()
-
-      // 🔥 서브메뉴라면 여기서 이벤트 버블링 차단
-      if (isSubMenu) {
-        event.stopPropagation()
+      if (event.key !== 'Tab') {
+        return
       }
+      if (!isFocusWithin(contentEl)) {
+        return
+      }
+
+      // Shift+Tab: 현재 메뉴만 닫고, 포커스는 trigger 로
+      if (event.shiftKey) {
+        event.preventDefault()
+        closeMenuRef.current()
+
+        // 서브메뉴면 상위 메뉴까지 닫히지 않도록 버블링도 막기
+        if (isSubMenu) {
+          event.stopPropagation()
+        }
+        return
+      }
+
+      // Tab 으로 메뉴를 벗어날 때 전체 메뉴 트리 닫기
+      // (Tab 기본 동작은 그대로 두고, openPath만 비워줌)
+      tree.setOpenPath([])
     }
 
+    console.log('1')
     contentEl.addEventListener('keydown', handleTab)
     return () => {
       contentEl.removeEventListener('keydown', handleTab)
     }
-  }, [closeMenuRef, contentId, isContentPresent, isSubMenu])
+  }, [closeMenuRef, contentId, isContentPresent, isSubMenu, tree])
 
   useEffect(() => {
     if (!isContentPresent) {
