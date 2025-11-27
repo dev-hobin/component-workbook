@@ -1,6 +1,9 @@
+import { useState } from 'react'
 import NestedMenu from './nested'
 
-export function UncontrolledExample() {
+export function ControlledExample() {
+  const [openPath, setOpenPath] = useState<string[]>([])
+
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-8">
       <div className="max-w-2xl w-full space-y-8">
@@ -11,13 +14,42 @@ export function UncontrolledExample() {
             the menu. The activedescendant is set automatically based on
             initialFocus.
           </p>
-          <NestedMenu.Root>
+          <div className="flex gap-2 p-2 border border-gray-300">
+            <button onClick={() => setOpenPath(['root'])}>Open Menu</button>
+            <button onClick={() => setOpenPath(['root', 'sub1'])}>
+              Open Sub 1
+            </button>
+            <button onClick={() => setOpenPath(['root', 'sub2'])}>
+              Open Sub 2
+            </button>
+            <button onClick={() => setOpenPath([])}>Close ALL</button>
+          </div>
+          <NestedMenu.Root
+            // openPath={openPath}
+            // onOpenPathChange={setOpenPath}
+            defaultOpenPath={['root', 'sub2']}
+            idRules={{
+              rootId: 'root',
+              triggerId: 'root-trigger',
+              contentId: 'root-content',
+              actionItemId: (value) => `root-action-item-${value}`,
+              linkItemId: (value) => `root-link-item-${value}`,
+            }}
+          >
             <NestedMenu.Trigger>Root</NestedMenu.Trigger>
             <NestedMenu.Positioner>
               <NestedMenu.Content>
                 <NestedMenu.ActionItem value="a">A</NestedMenu.ActionItem>
 
-                <NestedMenu.Root>
+                <NestedMenu.Root
+                  idRules={{
+                    rootId: 'sub1',
+                    triggerId: 'sub1-trigger',
+                    contentId: 'sub1-content',
+                    actionItemId: (value) => `sub1-action-item-${value}`,
+                    linkItemId: (value) => `sub1-link-item-${value}`,
+                  }}
+                >
                   <NestedMenu.SubTrigger>Sub 1</NestedMenu.SubTrigger>
                   <NestedMenu.Positioner placement="right">
                     <NestedMenu.SubContent>
@@ -28,7 +60,15 @@ export function UncontrolledExample() {
                   </NestedMenu.Positioner>
                 </NestedMenu.Root>
 
-                <NestedMenu.Root>
+                <NestedMenu.Root
+                  idRules={{
+                    rootId: 'sub2',
+                    triggerId: 'sub2-trigger',
+                    contentId: 'sub2-content',
+                    actionItemId: (value) => `sub2-action-item-${value}`,
+                    linkItemId: (value) => `sub2-link-item-${value}`,
+                  }}
+                >
                   <NestedMenu.SubTrigger>Sub 2</NestedMenu.SubTrigger>
                   <NestedMenu.Positioner placement="right">
                     <NestedMenu.SubContent>

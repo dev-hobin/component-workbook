@@ -164,7 +164,7 @@ export function SubRoot({ idRules: idRulesProp, children }: RootProps) {
   const linkItemId =
     idRulesProp?.linkItemId ?? ((value) => `${rootId}-link-item-${value}`)
 
-  const initialFocusTypeRef = useRef<'first-item' | 'last-item'>('first-item')
+  const initialFocusTypeRef = useRef<'first-item' | 'last-item' | null>(null)
 
   const open = isTopLevel
     ? tree.openPath.length > 0 && tree.openPath[0] === rootId // 루트는 경로의 첫 요소
@@ -175,7 +175,7 @@ export function SubRoot({ idRules: idRulesProp, children }: RootProps) {
   const openMenu = ({
     initialFocusType,
   }: {
-    initialFocusType: 'first-item' | 'last-item'
+    initialFocusType: 'first-item' | 'last-item' | null
   }) => {
     initialFocusTypeRef.current = initialFocusType
 
@@ -202,6 +202,7 @@ export function SubRoot({ idRules: idRulesProp, children }: RootProps) {
   }
 
   const closeMenu = () => {
+    initialFocusTypeRef.current = null
     setActiveItemId(null)
 
     const selfId = rootId
@@ -228,6 +229,10 @@ export function SubRoot({ idRules: idRulesProp, children }: RootProps) {
 
   useLayoutEffect(() => {
     if (!isContentPresent) {
+      return
+    }
+
+    if (initialFocusTypeRef.current === null) {
       return
     }
 
@@ -261,32 +266,60 @@ export function SubRoot({ idRules: idRulesProp, children }: RootProps) {
       return
     }
 
-    if (isContentPresent) {
-      return
-    }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const isArrowDown = event.key === 'ArrowDown'
+      const isArrowUp = event.key === 'ArrowUp'
+      const isArrowRight = event.key === 'ArrowRight'
 
-    const handleOpenMenu = (event: KeyboardEvent) => {
-      if (triggerEl.getAttribute('role') === 'menuitem') {
-        if (event.key === 'ArrowRight') {
-          event.preventDefault()
+      const isSubTrigger = triggerEl.getAttribute('role') === 'menuitem'
+
+      // 서브 트리거 (menuitem 역할)
+      if (isSubTrigger) {
+        if (!isArrowRight) return
+
+        event.preventDefault()
+
+        if (!isContentPresent) {
+          // 서브메뉴가 닫혀 있을 때: 열고 첫 아이템 포커스
           openMenuRef.current({ initialFocusType: 'first-item' })
+        } else {
+          // 서브메뉴가 이미 열려 있을 때: 첫 아이템으로 진입
+          const items = dom.getMenuItems({ rootId })
+          if (items.length === 0) return
+          setActiveItemId(items[0].id)
         }
+
+        return
+      }
+
+      // Top-level Trigger (button 역할)
+      if (!isArrowDown && !isArrowUp) {
+        return
+      }
+
+      event.preventDefault()
+
+      if (!isContentPresent) {
+        // 닫혀 있을 때: ARIA 패턴대로 열면서 포커스 위치 결정
+        openMenuRef.current({
+          initialFocusType: isArrowUp ? 'last-item' : 'first-item',
+        })
       } else {
-        if (event.key === 'ArrowDown') {
-          event.preventDefault()
-          openMenuRef.current({ initialFocusType: 'first-item' })
-        } else if (event.key === 'ArrowUp') {
-          event.preventDefault()
-          openMenuRef.current({ initialFocusType: 'last-item' })
-        }
+        // 이미 열려 있을 때: 메뉴 안으로 진입
+        const items = dom.getMenuItems({ rootId })
+        if (items.length === 0) return
+
+        const target = isArrowUp ? items[items.length - 1] : items[0]
+
+        setActiveItemId(target.id)
       }
     }
 
-    triggerEl.addEventListener('keydown', handleOpenMenu)
+    triggerEl.addEventListener('keydown', handleKeyDown)
     return () => {
-      triggerEl.removeEventListener('keydown', handleOpenMenu)
+      triggerEl.removeEventListener('keydown', handleKeyDown)
     }
-  }, [isContentPresent, openMenuRef, triggerId])
+  }, [isContentPresent, openMenuRef, triggerId, rootId, setActiveItemId])
 
   const activeItemIdRef = useLatestRef(activeItemId)
   useEffect(() => {

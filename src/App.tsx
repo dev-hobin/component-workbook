@@ -1,7 +1,7 @@
-import { UncontrolledExample } from './components/menu/examples'
+import { ControlledExample } from './components/menu/examples'
 
 function App() {
-  return <UncontrolledExample />
+  return <ControlledExample />
 }
 
 export default App
