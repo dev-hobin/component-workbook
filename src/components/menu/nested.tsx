@@ -412,6 +412,8 @@ export function SubRoot({ idRules: idRulesProp, children }: RootProps) {
       }
 
       event.preventDefault()
+      event.stopPropagation()
+
       closeMenuRef.current()
     }
 
