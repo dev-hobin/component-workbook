@@ -827,7 +827,10 @@ export function ActionItem({
   value: itemId,
   ...rest
 }: ActionItemProps) {
-  const { rootId, closeMenu, activeItemId } = useMenuContext()
+  const { rootId, activeItemId } = useMenuContext()
+
+  const tree = useMenuTreeContext()
+  const registry = MenuSystem.useCompositeRegistry()
 
   const { domId, ref } = MenuSystem.useCompositeItemRegistration(
     'item',
@@ -844,7 +847,19 @@ export function ActionItem({
       type="button"
       id={domId}
       onClick={(event) => {
-        closeMenu()
+        // 1) 클릭 직전에 top-level 메뉴 id 기억
+        const topMenuId = tree.openedMenus[0]
+
+        // 2) 메뉴 트리 전체 닫기
+        tree.setOpenedMenus([])
+
+        // 3) 최상위 trigger로 포커스 복원
+        if (topMenuId) {
+          const topTrigger = registry.get('trigger', topMenuId)
+          topTrigger?.node.focus()
+        }
+
+        // 4) 사용자 onClick 호출
         onClick?.(event)
       }}
       tabIndex={activeItemId === itemId ? 0 : -1}
@@ -862,9 +877,12 @@ export function LinkItem({
   children,
   onClick,
   value: itemId,
+  onKeyDown,
   ...rest
 }: LinkItemProps) {
-  const { rootId, closeMenu, activeItemId } = useMenuContext()
+  const { rootId, activeItemId } = useMenuContext()
+  const tree = useMenuTreeContext()
+  const registry = MenuSystem.useCompositeRegistry()
 
   const { domId, ref } = MenuSystem.useCompositeItemRegistration(
     'item',
@@ -880,8 +898,25 @@ export function LinkItem({
       role="menuitem"
       id={domId}
       onClick={(event) => {
-        closeMenu()
+        const topMenuId = tree.openedMenus[0]
+
+        tree.setOpenedMenus([])
+
+        if (topMenuId) {
+          const topTrigger = registry.get('trigger', topMenuId)
+          topTrigger?.node.focus()
+        }
+
         onClick?.(event)
+      }}
+      onKeyDown={(event) => {
+        // 스페이스바를 버튼처럼 동작시키기
+        if (event.key === ' ' || event.key === 'Spacebar') {
+          event.preventDefault()
+          // 클릭과 동일한 흐름 태우기 (위 onClick 로직 재사용)
+          ;(event.currentTarget as HTMLAnchorElement).click()
+        }
+        onKeyDown?.(event)
       }}
       tabIndex={activeItemId === itemId ? 0 : -1}
       {...rest}
