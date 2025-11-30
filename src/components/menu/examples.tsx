@@ -5,19 +5,23 @@ export function NestedMenuExample() {
     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-8">
       <div className="max-w-2xl w-full">
         <Menu.Root>
-          <Menu.Trigger>Root</Menu.Trigger>
+          <Menu.Trigger>메뉴</Menu.Trigger>
           <Menu.Portal>
             <Menu.Positioner offset={8}>
               <Menu.Content>
-                <Menu.ActionItem value="a">A</Menu.ActionItem>
+                <Menu.ActionItem value="a">메뉴 1</Menu.ActionItem>
 
                 <Menu.SubRoot>
-                  <Menu.SubTrigger>Sub 1</Menu.SubTrigger>
+                  <Menu.SubTrigger>서브메뉴 1</Menu.SubTrigger>
                   <Menu.Portal>
                     <Menu.Positioner placement="right-start" offset={8}>
                       <Menu.SubContent>
-                        <Menu.ActionItem value="s1-1">S1-1</Menu.ActionItem>
-                        <Menu.ActionItem value="s1-2">S1-2</Menu.ActionItem>
+                        <Menu.ActionItem value="s1-1">
+                          액션 아이템 1-1
+                        </Menu.ActionItem>
+                        <Menu.ActionItem value="s1-2">
+                          액션 아이템 1-2
+                        </Menu.ActionItem>
                       </Menu.SubContent>
                       {/* <Menu.PositionerArrow /> */}
                     </Menu.Positioner>
@@ -25,13 +29,15 @@ export function NestedMenuExample() {
                 </Menu.SubRoot>
 
                 <Menu.SubRoot>
-                  <Menu.SubTrigger>Sub 2</Menu.SubTrigger>
+                  <Menu.SubTrigger>서브메뉴 2</Menu.SubTrigger>
                   <Menu.Portal>
                     <Menu.Positioner placement="right-start" offset={8}>
                       <Menu.SubContent>
-                        <Menu.ActionItem value="s2-1">S2-1</Menu.ActionItem>
+                        <Menu.ActionItem value="s2-1">
+                          액션 아이템 2-1
+                        </Menu.ActionItem>
                         <Menu.LinkItem value="s2-2" href="#">
-                          S2-2 (Link)
+                          링크 아이템 2-2
                         </Menu.LinkItem>
                       </Menu.SubContent>
                       {/* <Menu.PositionerArrow /> */}
@@ -39,9 +45,9 @@ export function NestedMenuExample() {
                   </Menu.Portal>
                 </Menu.SubRoot>
 
-                <Menu.ActionItem value="b">B</Menu.ActionItem>
+                <Menu.ActionItem value="b">액션 아이템 1</Menu.ActionItem>
                 <Menu.LinkItem value="c" href="#">
-                  C (Link)
+                  링크 아이템 1
                 </Menu.LinkItem>
               </Menu.Content>
               {/* <Menu.PositionerArrow /> */}

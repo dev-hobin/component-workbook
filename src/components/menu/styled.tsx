@@ -89,7 +89,7 @@ export function Content({ className, ...rest }: ContentProps) {
     <MenuPrimitives.Content
       className={cn(
         'bg-white border border-gray-200 rounded-md shadow-lg',
-        'py-1 min-w-32',
+        'py-1 min-w-fit flex flex-col',
         'focus:outline-none',
         'relative z-10',
         'transition-all duration-200 ease-out',
@@ -119,7 +119,7 @@ export function SubContent({ className, ...rest }: SubContentProps) {
     <MenuPrimitives.SubContent
       className={cn(
         'bg-white border border-gray-200 rounded-md shadow-lg',
-        'py-1 min-w-32',
+        'py-1 min-w-fit flex flex-col',
         'focus:outline-none',
         'relative z-10',
         'transition-all duration-200 ease-out',
