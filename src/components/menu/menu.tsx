@@ -835,13 +835,20 @@ export function PositionerArrow({
   style,
   ...rest
 }: PositionerArrowProps) {
-  const { rootId } = useMenuContext()
+  const { rootId, open } = useMenuContext()
+
+  const registry = MenuSystem.useCompositeRegistry()
 
   const { domId, ref } = MenuSystem.useCompositeItemRegistration(
     'arrow',
     rootId,
     { meta: { rootId } },
   )
+
+  const { transitionState } = usePresence({
+    isVisible: open,
+    resolveElement: () => registry.get('arrow', rootId)?.node ?? null,
+  })
 
   return (
     <div
@@ -854,6 +861,7 @@ export function PositionerArrow({
         transform: 'rotate(45deg)',
         ...style,
       }}
+      data-transition={transitionState}
       {...rest}
     >
       {children}

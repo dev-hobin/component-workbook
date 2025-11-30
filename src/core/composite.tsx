@@ -87,15 +87,15 @@ export function createCompositeSystem<
   ItemId extends string | number,
   Meta extends object,
 >(config: CompositeConfig<Role>) {
-  type Ctx = {
+  type Context = {
     scopeId: string
     makeDomId: IdStrategy<Role, ItemId>
     registry: CompositeRegistry<Role, ItemId, Meta>
   }
 
-  const CompositeContext = React.createContext<Ctx | null>(null)
+  const CompositeContext = React.createContext<Context | null>(null)
 
-  function useCompositeContext(): Ctx {
+  function useCompositeContext(): Context {
     const ctx = React.useContext(CompositeContext)
     if (!ctx) {
       throw new Error(
@@ -126,7 +126,7 @@ export function createCompositeSystem<
       createCompositeRegistry<Role, ItemId, Meta>(),
     ).current
 
-    const value = React.useMemo<Ctx>(
+    const value = React.useMemo<Context>(
       () => ({ scopeId, makeDomId, registry }),
       [scopeId, makeDomId, registry],
     )

@@ -65,6 +65,18 @@ export function PositionerArrow({ className, ...rest }: PositionerArrowProps) {
       className={cn(
         'bg-white border border-gray-200',
         'pointer-events-none',
+        'transition-all duration-200 ease-out',
+        // Enter animation (starting) - 페이드 인과 스케일
+        'data-[transition=starting]:opacity-0',
+        'data-[transition=starting]:scale-0',
+        // Idle state (fully visible)
+        'data-[transition=idle]:opacity-100',
+        'data-[transition=idle]:scale-100',
+        // Exit animation (ending) - 페이드 아웃과 스케일
+        'data-[transition=ending]:opacity-0',
+        'data-[transition=ending]:scale-0',
+        'data-[transition=ending]:duration-150',
+        'data-[transition=ending]:ease-in',
         className,
       )}
       {...rest}
