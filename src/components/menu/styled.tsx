@@ -80,6 +80,21 @@ export function Content({ className, ...rest }: ContentProps) {
         'py-1 min-w-32',
         'focus:outline-none',
         'relative z-10',
+        'transition-all duration-200 ease-out',
+        // Enter animation (starting) - 위에서 아래로 나타남
+        'data-[transition=starting]:opacity-0',
+        'data-[transition=starting]:scale-95',
+        'data-[transition=starting]:translate-y-[-8px]',
+        // Idle state (fully visible)
+        'data-[transition=idle]:opacity-100',
+        'data-[transition=idle]:scale-100',
+        'data-[transition=idle]:translate-y-0',
+        // Exit animation (ending) - 위로 사라짐
+        'data-[transition=ending]:opacity-0',
+        'data-[transition=ending]:scale-95',
+        'data-[transition=ending]:translate-y-[-8px]',
+        'data-[transition=ending]:duration-150',
+        'data-[transition=ending]:ease-in',
         className,
       )}
       {...rest}
@@ -95,6 +110,21 @@ export function SubContent({ className, ...rest }: SubContentProps) {
         'py-1 min-w-32',
         'focus:outline-none',
         'relative z-10',
+        'transition-all duration-200 ease-out',
+        // Enter animation (starting) - 왼쪽에서 오른쪽으로 나타남
+        'data-[transition=starting]:opacity-0',
+        'data-[transition=starting]:scale-95',
+        'data-[transition=starting]:translate-x-[-8px]',
+        // Idle state (fully visible)
+        'data-[transition=idle]:opacity-100',
+        'data-[transition=idle]:scale-100',
+        'data-[transition=idle]:translate-x-0',
+        // Exit animation (ending) - 왼쪽으로 사라짐
+        'data-[transition=ending]:opacity-0',
+        'data-[transition=ending]:scale-95',
+        'data-[transition=ending]:translate-x-[-8px]',
+        'data-[transition=ending]:duration-150',
+        'data-[transition=ending]:ease-in',
         className,
       )}
       {...rest}

@@ -529,7 +529,7 @@ export function Content({ children, ...rest }: ContentProps) {
     { meta: { rootId } },
   )
 
-  const { isPresent } = usePresence({
+  const { isPresent, transitionState } = usePresence({
     isVisible: open,
     resolveElement: () => registry.get('content', rootId)?.node ?? null,
   })
@@ -544,6 +544,7 @@ export function Content({ children, ...rest }: ContentProps) {
       role="menu"
       id={domId}
       aria-labelledby={registry.getDomId('trigger', rootId)}
+      data-transition={transitionState}
       {...rest}
     >
       {children}
@@ -638,7 +639,7 @@ export function SubContent({ children, ...rest }: SubContentProps) {
     { meta: { rootId } },
   )
 
-  const { isPresent } = usePresence({
+  const { isPresent, transitionState } = usePresence({
     isVisible: open,
     resolveElement: () => registry.get('content', rootId)?.node ?? null,
   })
@@ -653,6 +654,7 @@ export function SubContent({ children, ...rest }: SubContentProps) {
       role="menu"
       id={domId}
       aria-labelledby={registry.getDomId('trigger', rootId)}
+      data-transition={transitionState}
       {...rest}
     >
       {children}

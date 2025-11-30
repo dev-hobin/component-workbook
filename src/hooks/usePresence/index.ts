@@ -14,7 +14,7 @@ export function usePresence({
   transitionState: TransitionState
 } {
   const [transitionState, setTransitionState] = useState<TransitionState>(
-    isVisible ? 'idle' : undefined,
+    isVisible ? 'starting' : undefined,
   )
 
   const resolveElementRef = useLatestRef(resolveElementFn)
