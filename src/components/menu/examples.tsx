@@ -12,25 +12,25 @@ export function NestedMenuExample() {
 
               <Menu.SubRoot>
                 <Menu.SubTrigger>Sub 1</Menu.SubTrigger>
-                <Menu.Positioner placement="right" offset={8}>
+                <Menu.Positioner placement="right-start" offset={8}>
                   <Menu.SubContent>
                     <Menu.ActionItem value="s1-1">S1-1</Menu.ActionItem>
                     <Menu.ActionItem value="s1-2">S1-2</Menu.ActionItem>
                   </Menu.SubContent>
-                  <Menu.PositionerArrow />
+                  {/* <Menu.PositionerArrow /> */}
                 </Menu.Positioner>
               </Menu.SubRoot>
 
               <Menu.SubRoot>
                 <Menu.SubTrigger>Sub 2</Menu.SubTrigger>
-                <Menu.Positioner placement="right" offset={8}>
+                <Menu.Positioner placement="right-start" offset={8}>
                   <Menu.SubContent>
                     <Menu.ActionItem value="s2-1">S2-1</Menu.ActionItem>
                     <Menu.LinkItem value="s2-2" href="#">
                       S2-2 (Link)
                     </Menu.LinkItem>
                   </Menu.SubContent>
-                  <Menu.PositionerArrow />
+                  {/* <Menu.PositionerArrow /> */}
                 </Menu.Positioner>
               </Menu.SubRoot>
 
@@ -39,7 +39,7 @@ export function NestedMenuExample() {
                 C (Link)
               </Menu.LinkItem>
             </Menu.Content>
-            <Menu.PositionerArrow />
+            {/* <Menu.PositionerArrow /> */}
           </Menu.Positioner>
         </Menu.Root>
       </div>
