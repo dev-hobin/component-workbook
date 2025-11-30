@@ -1,7 +1,7 @@
 # Composite System
 
 복잡한 Composite UI(Menu / Nested Menu / TreeView / Listbox / Tabs
-...)를 위한**DOM · ID · 역할(role) 관리 인프라**
+...)를 위한 **DOM · ID · 역할(role) 관리 인프라**
 
 Composite UI는 "여러 역할을 가진 요소들이 하나의 스코프 안에서 협력하며
 동작하는 UI"다.
@@ -155,12 +155,12 @@ Composite UI의 모든 패턴에 재사용 가능하다.
 
 ---
 
-논리적 ID와 DOM ID 혼재 itemId ↔ domId 분리 + 자동 생성
-querySelector 반복 registration 기반 DOM 자동 수집
-중첩 UI 충돌 Provider 단위 스코프 분리
-role 기반 DOM 순회 불편 `entriesByRole`
-DOM 참조 불안정 `getNode(role, itemId)`
-depth/parent/disabled 구조화 어려움 meta 기반 표현 가능
+- 논리적 ID와 DOM ID 혼재 itemId ↔ domId 분리 + 자동 생성
+- querySelector 반복 registration 기반 DOM 자동 수집
+- 중첩 UI 충돌 Provider 단위 스코프 분리
+- role 기반 DOM 순회 불편 `entriesByRole`
+- DOM 참조 불안정 `getNode(role, itemId)`
+- depth/parent/disabled 구조화 어려움 meta 기반 표현 가능
 
 ---
 
