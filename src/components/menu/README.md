@@ -1,30 +1,31 @@
 # Menu Component
 
-접근성을 고려한 메뉴 컴포넌트입니다. 키보드 네비게이션, ARIA 속성, Floating UI 기반 포지셔닝을 지원합니다.
+접근성을 고려한 중첩 메뉴 컴포넌트입니다. Composite System 기반의 DOM 레지스트리, 키보드 네비게이션, ARIA 속성, Floating UI 기반 포지셔닝을 지원합니다.
 
 ## Features
 
-- ✅ **Uncontrolled & Controlled 모드 지원**
+- ✅ **중첩 메뉴 지원** (Nested Menu with SubRoot)
+- ✅ **Composite System 기반** (DOM 레지스트리로 요소 관리)
 - ✅ **Floating UI 기반 포지셔닝** (flip, shift, arrow 지원)
-- ✅ **키보드 네비게이션** (Arrow keys, Escape, Tab 방지)
-- ✅ **activedescendant 패턴** (ARIA 활성 항목 표시)
+- ✅ **키보드 네비게이션** (Arrow keys, Escape, Tab 처리)
+- ✅ **Roving TabIndex 패턴** (키보드 포커스 관리)
 - ✅ **Portal 렌더링 지원**
 - ✅ **애니메이션 완료까지 DOM 유지** (usePresence 기반)
 - ✅ **ActionItem & LinkItem 지원**
 - ✅ **접근성 기능** (ARIA attributes, 키보드 네비게이션)
-- ✅ **자동 ID 관리**
+- ✅ **자동 ID 관리** (Composite System)
 
 ## Installation
 
 ```tsx
-import Menu from './components/menu'
+import Menu from './components/menu/menu'
 // 또는 styled 버전 사용
 import Menu from './components/menu/styled'
 ```
 
 ## Basic Usage
 
-### Uncontrolled Mode
+### Simple Menu
 
 ```tsx
 import Menu from './components/menu/styled'
@@ -34,7 +35,6 @@ function MyComponent() {
     <Menu.Root>
       <Menu.Trigger>Open Menu</Menu.Trigger>
       <Menu.Positioner offset={8}>
-        <Menu.PositionerArrow />
         <Menu.Content>
           <Menu.ActionItem value="item-1">Action Item 1</Menu.ActionItem>
           <Menu.ActionItem value="item-2">Action Item 2</Menu.ActionItem>
@@ -42,6 +42,40 @@ function MyComponent() {
             Documentation
           </Menu.LinkItem>
         </Menu.Content>
+        <Menu.PositionerArrow />
+      </Menu.Positioner>
+    </Menu.Root>
+  )
+}
+```
+
+### Nested Menu
+
+```tsx
+import Menu from './components/menu/styled'
+
+function MyComponent() {
+  return (
+    <Menu.Root>
+      <Menu.Trigger>Root</Menu.Trigger>
+      <Menu.Positioner offset={8}>
+        <Menu.Content>
+          <Menu.ActionItem value="a">A</Menu.ActionItem>
+
+          <Menu.SubRoot>
+            <Menu.SubTrigger>Sub 1</Menu.SubTrigger>
+            <Menu.Positioner placement="right" offset={8}>
+              <Menu.SubContent>
+                <Menu.ActionItem value="s1-1">S1-1</Menu.ActionItem>
+                <Menu.ActionItem value="s1-2">S1-2</Menu.ActionItem>
+              </Menu.SubContent>
+              <Menu.PositionerArrow />
+            </Menu.Positioner>
+          </Menu.SubRoot>
+
+          <Menu.ActionItem value="b">B</Menu.ActionItem>
+        </Menu.Content>
+        <Menu.PositionerArrow />
       </Menu.Positioner>
     </Menu.Root>
   )
@@ -55,17 +89,17 @@ import { useState } from 'react'
 import Menu from './components/menu/styled'
 
 function MyComponent() {
-  const [open, setOpen] = useState(false)
+  const [openedMenus, setOpenedMenus] = useState<string[]>([])
 
   return (
-    <Menu.Root open={open} onOpenChange={setOpen}>
+    <Menu.Root openedMenus={openedMenus} onOpenedMenusChange={setOpenedMenus}>
       <Menu.Trigger>Open Menu</Menu.Trigger>
       <Menu.Positioner offset={8}>
-        <Menu.PositionerArrow />
         <Menu.Content>
           <Menu.ActionItem value="item-1">Action Item 1</Menu.ActionItem>
           <Menu.ActionItem value="item-2">Action Item 2</Menu.ActionItem>
         </Menu.Content>
+        <Menu.PositionerArrow />
       </Menu.Positioner>
     </Menu.Root>
   )
@@ -76,32 +110,40 @@ function MyComponent() {
 
 ### `Menu.Root`
 
-메뉴의 최상위 컨테이너입니다. 상태와 ID를 관리합니다.
+메뉴의 최상위 컨테이너입니다. 메뉴 트리 상태를 관리합니다.
 
 #### Props
 
-| Prop           | Type                      | Default | Description                             |
-| -------------- | ------------------------- | ------- | --------------------------------------- |
-| `open`         | `boolean`                 | -       | Controlled 모드에서 메뉴 열림/닫힘 상태 |
-| `onOpenChange` | `(open: boolean) => void` | -       | Controlled 모드의 onChange 핸들러       |
-| `defaultOpen`  | `boolean`                 | `false` | Uncontrolled 모드의 초기 상태           |
-| `idRules`      | `object`                  | -       | 커스텀 ID 규칙 (자동 생성됨)            |
+| Prop                  | Type                          | Default | Description                           |
+| --------------------- | ----------------------------- | ------- | ------------------------------------- |
+| `menuId`              | `string`                      | -       | 메뉴의 고유 ID (자동 생성됨)          |
+| `openedMenus`         | `string[]`                    | -       | Controlled 모드에서 열린 메뉴 ID 배열 |
+| `onOpenedMenusChange` | `(menuIds: string[]) => void` | -       | Controlled 모드의 onChange 핸들러     |
+| `defaultOpenedMenus`  | `string[]`                    | `[]`    | Uncontrolled 모드의 초기 상태         |
 
-#### idRules
+**참고**: `openedMenus`는 메뉴 트리의 경로를 나타냅니다. 예를 들어 `['root', 'sub1']`은 root 메뉴와 그 하위의 sub1 메뉴가 열려있음을 의미합니다.
 
-| Property            | Type                        | Description               |
-| ------------------- | --------------------------- | ------------------------- |
-| `rootId`            | `string`                    | Root 요소의 ID            |
-| `triggerId`         | `string`                    | Trigger 버튼의 ID         |
-| `positionerId`      | `string`                    | Positioner 요소의 ID      |
-| `positionerArrowId` | `string`                    | PositionerArrow 요소의 ID |
-| `contentId`         | `string`                    | Content 요소의 ID         |
-| `actionItemId`      | `(value: string) => string` | ActionItem ID 생성 함수   |
-| `linkItemId`        | `(value: string) => string` | LinkItem ID 생성 함수     |
+### `Menu.SubRoot`
+
+서브메뉴의 루트 컨테이너입니다. `Menu.Root` 내부에서만 사용할 수 있습니다.
+
+#### Props
+
+| Prop     | Type     | Default | Description                      |
+| -------- | -------- | ------- | -------------------------------- |
+| `menuId` | `string` | -       | 서브메뉴의 고유 ID (자동 생성됨) |
 
 ### `Menu.Trigger`
 
-메뉴를 열고 닫는 트리거 버튼입니다.
+최상위 메뉴를 열고 닫는 트리거 버튼입니다.
+
+#### Props
+
+모든 표준 `button` props를 지원합니다 (`className`, `style` 등).
+
+### `Menu.SubTrigger`
+
+서브메뉴를 열고 닫는 트리거 버튼입니다. `Menu.SubRoot` 내부에서 사용합니다.
 
 #### Props
 
@@ -132,7 +174,15 @@ function MyComponent() {
 
 ### `Menu.Content`
 
-메뉴 아이템들을 포함하는 컨테이너입니다.
+최상위 메뉴 아이템들을 포함하는 컨테이너입니다.
+
+#### Props
+
+모든 표준 `div` props를 지원합니다 (`className`, `style` 등).
+
+### `Menu.SubContent`
+
+서브메뉴 아이템들을 포함하는 컨테이너입니다.
 
 #### Props
 
@@ -182,10 +232,10 @@ function MyComponent() {
 <Menu.Root>
   <Menu.Trigger>Open Menu</Menu.Trigger>
   <Menu.Positioner placement="top" offset={8}>
-    <Menu.PositionerArrow />
     <Menu.Content>
       <Menu.ActionItem value="item-1">Item 1</Menu.ActionItem>
     </Menu.Content>
+    <Menu.PositionerArrow />
   </Menu.Positioner>
 </Menu.Root>
 ```
@@ -197,26 +247,42 @@ function MyComponent() {
   <Menu.Trigger>Open Menu</Menu.Trigger>
   <Menu.Portal>
     <Menu.Positioner offset={8}>
-      <Menu.PositionerArrow />
       <Menu.Content>
         <Menu.ActionItem value="item-1">Item 1</Menu.ActionItem>
       </Menu.Content>
+      <Menu.PositionerArrow />
     </Menu.Positioner>
   </Menu.Portal>
 </Menu.Root>
 ```
 
-### Custom ID Rules
+### Deep Nesting
 
 ```tsx
-<Menu.Root
-  idRules={{
-    rootId: 'my-menu',
-    contentId: 'my-menu-content',
-    actionItemId: (value) => `my-action-${value}`,
-  }}
->
-  {/* 커스텀 ID 사용 */}
+<Menu.Root>
+  <Menu.Trigger>Root</Menu.Trigger>
+  <Menu.Positioner offset={8}>
+    <Menu.Content>
+      <Menu.SubRoot>
+        <Menu.SubTrigger>Level 1</Menu.SubTrigger>
+        <Menu.Positioner placement="right" offset={8}>
+          <Menu.SubContent>
+            <Menu.SubRoot>
+              <Menu.SubTrigger>Level 2</Menu.SubTrigger>
+              <Menu.Positioner placement="right" offset={8}>
+                <Menu.SubContent>
+                  <Menu.ActionItem value="deep">Deep Item</Menu.ActionItem>
+                </Menu.SubContent>
+                <Menu.PositionerArrow />
+              </Menu.Positioner>
+            </Menu.SubRoot>
+          </Menu.SubContent>
+          <Menu.PositionerArrow />
+        </Menu.Positioner>
+      </Menu.SubRoot>
+    </Menu.Content>
+    <Menu.PositionerArrow />
+  </Menu.Positioner>
 </Menu.Root>
 ```
 
@@ -226,7 +292,6 @@ function MyComponent() {
 <Menu.Root>
   <Menu.Trigger>Open Menu</Menu.Trigger>
   <Menu.Positioner offset={8}>
-    <Menu.PositionerArrow />
     <Menu.Content>
       <Menu.ActionItem value="new">New File</Menu.ActionItem>
       <Menu.ActionItem value="open">Open File</Menu.ActionItem>
@@ -237,6 +302,7 @@ function MyComponent() {
         GitHub
       </Menu.LinkItem>
     </Menu.Content>
+    <Menu.PositionerArrow />
   </Menu.Positioner>
 </Menu.Root>
 ```
@@ -245,45 +311,33 @@ function MyComponent() {
 
 컴포넌트는 WAI-ARIA 가이드라인을 따르는 키보드 네비게이션을 지원합니다:
 
-### Trigger에 포커스가 있을 때
+### Top-level Trigger에 포커스가 있을 때
 
-- **ArrowDown**: 메뉴를 열고 첫 번째 아이템에 activedescendant 설정
-- **ArrowUp**: 메뉴를 열고 마지막 아이템에 activedescendant 설정
+- **ArrowDown**: 메뉴를 열고 첫 번째 아이템에 포커스
+- **ArrowUp**: 메뉴를 열고 마지막 아이템에 포커스
+
+### SubTrigger에 포커스가 있을 때
+
+- **ArrowRight**: 서브메뉴를 열고 첫 번째 아이템에 포커스 (메뉴가 닫혀있을 때)
+- **ArrowRight**: 서브메뉴의 첫 번째 아이템으로 포커스 이동 (메뉴가 이미 열려있을 때)
 
 ### 메뉴가 열려있을 때
 
-- **ArrowDown**: 다음 아이템으로 activedescendant 이동
-- **ArrowUp**: 이전 아이템으로 activedescendant 이동
-- **Escape**: 메뉴 닫기
-- **Tab**: Tab 키 이동 방지 (메뉴 내부에 포커스 유지)
+- **ArrowDown**: 다음 아이템으로 포커스 이동 (순환)
+- **ArrowUp**: 이전 아이템으로 포커스 이동 (순환)
+- **ArrowLeft**: 서브메뉴에서 상위 메뉴로 돌아가기 (서브메뉴만)
+- **Escape**: 현재 메뉴 닫기
+- **Shift+Tab**: 현재 메뉴 닫고 트리거로 포커스 이동
+- **Tab**: 메뉴 트리 전체 닫기
 
-## Activedescendant Pattern
+## Roving TabIndex Pattern
 
-Menu 컴포넌트는 ARIA의 `activedescendant` 패턴을 사용합니다:
+Menu 컴포넌트는 Roving TabIndex 패턴을 사용합니다:
 
-- Content 요소에 `aria-activedescendant` 속성이 설정됩니다
-- 활성화된 아이템의 ID가 `aria-activedescendant`에 설정됩니다
-- 활성화된 아이템은 `data-active="true"` 속성을 가집니다
-- 스타일링을 통해 활성화된 아이템을 시각적으로 강조할 수 있습니다
-
-```tsx
-// Content 요소
-<div
-  role="menu"
-  aria-activedescendant="menu-root-action-item-item-1"
->
-  {/* ... */}
-</div>
-
-// 활성화된 ActionItem
-<button
-  role="menuitem"
-  id="menu-root-action-item-item-1"
-  data-active="true"
->
-  Action Item 1
-</button>
-```
+- 활성화된 아이템만 `tabIndex={0}`을 가집니다
+- 나머지 아이템은 `tabIndex={-1}`을 가집니다
+- 키보드 네비게이션으로 활성 아이템이 변경되면 포커스가 자동으로 이동합니다
+- 이 패턴은 ARIA의 `activedescendant` 패턴과 함께 사용됩니다
 
 ## Styling
 
@@ -293,7 +347,13 @@ Menu는 data attributes를 활용해 상태별 스타일링이 가능합니다.
 
 #### ActionItem & LinkItem
 
-- `data-active="true"`: 현재 activedescendant로 설정된 아이템
+- `tabIndex={0}`: 현재 활성화된 아이템
+- `tabIndex={-1}`: 비활성화된 아이템
+
+#### Trigger & SubTrigger
+
+- `aria-expanded="true"`: 메뉴가 열려있을 때
+- `aria-expanded="false"`: 메뉴가 닫혀있을 때
 
 ### Example
 
@@ -304,7 +364,8 @@ export function ActionItem({ className, ...rest }: ActionItemProps) {
     <MenuPrimitives.ActionItem
       className={cn(
         'w-full text-left px-4 py-2 text-sm text-gray-700',
-        'hover:bg-gray-100 focus:outline-none focus:bg-gray-100',
+        'hover:bg-gray-100',
+        'focus:outline-none focus:bg-gray-100',
         'data-[active=true]:bg-blue-50 data-[active=true]:text-blue-700',
         className,
       )}
@@ -316,11 +377,35 @@ export function ActionItem({ className, ...rest }: ActionItemProps) {
 
 ## Architecture
 
-- **Headless UI 패턴**: 로직(`index.tsx`)과 스타일(`styled.tsx`) 분리
-- **Context API**: Root에서 상태와 ID를 관리하고 하위 컴포넌트에 제공
-- **Floating UI**: `@floating-ui/dom`을 사용하여 포지셔닝 계산
-- **usePresence**: 애니메이션 완료까지 DOM에 요소를 유지하고 전환 상태를 관리
-- **Portal**: `react-dom`의 `createPortal`을 사용하여 body에 직접 렌더링 가능
+### Composite System
+
+Menu 컴포넌트는 Composite System을 사용하여 DOM 요소를 관리합니다:
+
+- **Registry**: 모든 메뉴 요소(trigger, content, positioner, arrow, item)를 등록
+- **Role-based Access**: 역할(role)별로 요소를 조회하고 관리
+- **Meta Information**: 각 요소에 메타 정보(rootId 등)를 저장하여 소유 관계 관리
+
+```tsx
+// system.ts
+export const MenuSystem = createCompositeSystem<MenuRole, ItemId, MenuMeta>({
+  namespace: 'menu',
+  roles: ['trigger', 'content', 'positioner', 'arrow', 'item'],
+})
+```
+
+### Menu Tree Management
+
+중첩 메뉴는 `openedMenus` 배열로 관리됩니다:
+
+- 배열의 순서는 메뉴 트리의 경로를 나타냅니다
+- 예: `['root', 'sub1']`은 root 메뉴와 그 하위의 sub1 메뉴가 열려있음
+- 메뉴를 닫으면 해당 메뉴와 그 하위 메뉴들이 모두 닫힙니다
+
+### Headless UI 패턴
+
+- **로직 분리**: `menu.tsx`는 순수 로직만 담당
+- **스타일 분리**: `styled.tsx`는 스타일링만 담당
+- **재사용성**: 로직과 스타일을 독립적으로 교체 가능
 
 ## Implementation Details
 
@@ -339,25 +424,28 @@ Menu는 Floating UI를 사용하여 포지셔닝을 계산합니다:
 Menu는 키보드 네비게이션을 다음과 같이 처리합니다:
 
 1. **Trigger 포커스 시**: ArrowDown/ArrowUp으로 메뉴 열기
-2. **메뉴 열림 시**: ArrowDown/ArrowUp으로 activedescendant 이동
-3. **Escape 키**: 메뉴 닫기
-4. **Tab 키**: 메뉴 내부에서 Tab 이동 방지
+2. **SubTrigger 포커스 시**: ArrowRight으로 서브메뉴 열기/이동
+3. **메뉴 열림 시**: ArrowDown/ArrowUp으로 포커스 이동 (순환)
+4. **서브메뉴에서**: ArrowLeft로 상위 메뉴로 돌아가기
+5. **Escape 키**: 현재 메뉴 닫기
+6. **Tab 키**: 메뉴 트리 전체 닫기
+7. **Shift+Tab**: 현재 메뉴만 닫고 트리거로 포커스 이동
 
-### Activedescendant Management
+### Focus Management
 
-Menu는 내부적으로 activedescendant를 관리합니다:
+Menu는 Roving TabIndex 패턴을 사용합니다:
 
-1. 메뉴가 열릴 때 `initialFocus`에 따라 첫 번째 또는 마지막 아이템에 activedescendant 설정
-2. ArrowDown/ArrowUp 키로 activedescendant 이동
-3. Content의 `aria-activedescendant` 속성에 현재 활성 아이템 ID 설정
-4. 활성 아이템에 `data-active="true"` 속성 추가
+1. 활성화된 아이템만 `tabIndex={0}`을 가집니다
+2. 키보드 네비게이션으로 활성 아이템이 변경되면 포커스가 자동으로 이동합니다
+3. 메뉴가 열릴 때 `initialFocusType`에 따라 첫 번째 또는 마지막 아이템에 포커스가 설정됩니다
 
 ### Click Outside Handling
 
 메뉴가 열려있을 때 외부 클릭을 감지하여 메뉴를 닫습니다:
 
-- Content나 Trigger 내부 클릭은 무시
-- 그 외의 영역 클릭 시 메뉴 닫기
+- Composite Registry에 등록된 모든 노드를 확인
+- 클릭된 요소가 어떤 메뉴 요소에도 포함되지 않으면 "바깥 클릭"으로 간주
+- 전체 메뉴 트리를 닫습니다
 
 ### Animation Management
 
@@ -374,21 +462,16 @@ Positioner와 Content 모두 `usePresence`를 사용하므로, 각각 독립적�
 Menu는 접근성 표준을 준수합니다:
 
 - ✅ **ARIA roles**: `menu`, `menuitem`
-- ✅ **ARIA attributes**: `aria-haspopup`, `aria-expanded`, `aria-controls`, `aria-activedescendant`, `aria-labelledby`
+- ✅ **ARIA attributes**: `aria-haspopup`, `aria-expanded`, `aria-controls`, `aria-labelledby`
 - ✅ **Keyboard navigation**: 화살표 키로 아이템 간 이동
-- ✅ **Focus management**: activedescendant 패턴 사용
-- ✅ **Tab trapping**: 메뉴 내부에서 Tab 키 이동 방지
+- ✅ **Focus management**: Roving TabIndex 패턴 사용
+- ✅ **Click outside**: 외부 클릭 시 메뉴 닫기
 
 ## Examples
 
 실제 사용 예제는 `examples.tsx` 파일을 참고하세요:
 
-- UncontrolledExample
-- ActivedescendantExample
-- MixedItemsExample
-- PlacementExample
-- PortalExample
-- ControlledExample
+- NestedMenuExample
 
 ## TypeScript
 
@@ -397,12 +480,15 @@ Menu는 접근성 표준을 준수합니다:
 ```tsx
 import type {
   RootProps,
+  SubRootProps,
   TriggerProps,
+  SubTriggerProps,
   PositionerProps,
   PositionerArrowProps,
   ContentProps,
+  SubContentProps,
   ActionItemProps,
   LinkItemProps,
   PortalProps,
-} from './components/menu'
+} from './components/menu/menu'
 ```
