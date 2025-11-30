@@ -102,7 +102,7 @@ export function SubRoot(props: SubRootProps) {
 
   // 아직 트리 컨텍스트가 없으면 → 이 Root가 최상위
   if (!tree) {
-    throw new Error('Menu.SubRoot only can usable under Menu.Root')
+    throw new Error('Menu.SubRoot must be used within a Menu.Root')
   }
 
   return <ChildRoot {...props} />
@@ -122,11 +122,17 @@ function ParentRoot({
 
   const registry = MenuSystem.useCompositeRegistry()
 
-  // 바깥 클릭 시 전체 메뉴 닫기
+  //  [ParentRoot] 문서 전체에 pointerdown 리스너를 달아서
+  //    - registry에 등록된 어떤 노드에도 포함되지 않는 클릭이면
+  //      → "바깥 클릭"으로 간주하고 전체 메뉴 트리를 닫는다.
   useEffect(() => {
     // 열려 있는 메뉴가 없으면 리스너 안 깜
-    if (openedMenus.length === 0) return
-    if (typeof document === 'undefined') return
+    if (openedMenus.length === 0) {
+      return
+    }
+    if (typeof document === 'undefined') {
+      return
+    }
 
     const handlePointerDown = (event: PointerEvent) => {
       const target = event.target as Node | null
@@ -234,6 +240,9 @@ export function ChildRoot({ children, menuId }: RootProps) {
     resolveElement: () => registry.get('content', rootId)?.node ?? null,
   })
 
+  // [ChildRoot] 메뉴가 닫힐 때(open === false) 내부 포커스 상태를 초기화:
+  //  - activeItemId를 null로
+  //  - initialFocusTypeRef 도 리셋
   useEffect(() => {
     if (!open) {
       setActiveItemId(null)
@@ -241,6 +250,8 @@ export function ChildRoot({ children, menuId }: RootProps) {
     }
   }, [open])
 
+  // [ChildRoot] 메뉴가 열리고, Content DOM이 실제로 존재(isContentPresent)할 때
+  //  - initialFocusTypeRef 기준으로 첫/마지막 아이템을 골라 activeItemId로 설정
   useEffect(() => {
     if (!open) {
       return
@@ -265,6 +276,8 @@ export function ChildRoot({ children, menuId }: RootProps) {
     setActiveItemId(targetEntry.itemId)
   }, [open, isContentPresent, getMenuItemEntries])
 
+  // [ChildRoot] activeItemId가 바뀔 때 실제 DOM 포커스를 해당 item으로 이동
+  //  - 포커스가 한 번 이동하면 initialFocusTypeRef는 더 이상 필요 없으므로 null로 리셋
   useLayoutEffect(() => {
     if (activeItemId === null) {
       return
@@ -274,6 +287,11 @@ export function ChildRoot({ children, menuId }: RootProps) {
     initialFocusTypeRef.current = null
   }, [activeItemId, registry])
 
+  // [ChildRoot] trigger 엘리먼트에 키보드 핸들러 등록:
+  //   - Top-level trigger:
+  //       ArrowDown / ArrowUp 으로 메뉴 열기 + 첫/마지막 아이템 포커스
+  //   - SubTrigger (role="menuitem"):
+  //       ArrowRight로 서브 메뉴 열기 또는 이미 열린 서브 메뉴의 첫 아이템으로 진입
   useEffect(() => {
     const triggerEntry = registry.get('trigger', rootId)
     const triggerEl = triggerEntry?.node
@@ -340,6 +358,9 @@ export function ChildRoot({ children, menuId }: RootProps) {
   }, [getMenuItemEntries, isContentPresent, openMenuRef, registry, rootId])
 
   const activeItemIdRef = useLatestRef(activeItemId)
+
+  // [ChildRoot] Content 영역에서 ArrowUp / ArrowDown 으로
+  //  - 현재 activeItem 기준으로 위/아래 아이템으로 순환 이동하는 로직
   useEffect(() => {
     if (!isContentPresent) {
       return
@@ -389,6 +410,12 @@ export function ChildRoot({ children, menuId }: RootProps) {
   }, [activeItemIdRef, getMenuItemEntries, isContentPresent, registry, rootId])
 
   const closeMenuRef = useLatestRef(closeMenu)
+
+  // [ChildRoot] Content 영역에서 Tab / Shift+Tab 처리:
+  //  - Shift+Tab:
+  //      현재 메뉴만 닫고(trigger로 포커스 복귀), 서브메뉴인 경우 버블링 막기
+  //  - Tab:
+  //      메뉴 바깥으로 포커스가 나가므로 전체 메뉴 트리 닫기(openedMenus = [])
   useEffect(() => {
     if (!isContentPresent) {
       return
@@ -431,6 +458,12 @@ export function ChildRoot({ children, menuId }: RootProps) {
     }
   }, [closeMenuRef, isContentPresent, isSubMenu, registry, rootId, tree])
 
+  // [ChildRoot] Content 영역에서 Escape / ArrowLeft 처리:
+  //   - Escape:
+  //       언제나 현재 메뉴 닫기
+  //   - ArrowLeft:
+  //       서브메뉴인 경우에만 부모 방향으로 닫기 허용
+  //   - 포커스가 Content 안에 있을 때만 동작
   useEffect(() => {
     if (!isContentPresent) {
       return
@@ -574,7 +607,7 @@ export function SubTrigger({ children, onClick, ...rest }: SubTriggerProps) {
   } = useMenuContext()
 
   if (!parentMenuContext) {
-    throw new Error('Menu.SubTrigger has no parent menu')
+    throw new Error('Menu.SubTrigger must be used within a Menu.Root')
   }
 
   const ownerRootId = parentMenuContext.rootId // 부모 메뉴의 rootId
@@ -705,6 +738,9 @@ export function Positioner({
   const flipOptionsRef = useLatestRef(flipOptions)
   const shiftOptionsRef = useLatestRef(shiftOptions)
 
+  // [Positioner] positioner/arrow 위치 계산 및 autoUpdate:
+  //   - 메뉴가 표시(isPresent)될 때 Floating UI의 autoUpdate를 사용해
+  //     trigger / positioner / arrow 위치를 지속적으로 업데이트
   useLayoutEffect(() => {
     if (!isPresent) return
 
@@ -920,7 +956,9 @@ export function LinkItem({
         onClick?.(event)
       }}
       onKeyDown={(event) => {
-        // 스페이스바를 버튼처럼 동작시키기
+        // [LinkItem] 스페이스바를 버튼처럼 동작시키기:
+        //   - Space 입력 시 기본 스크롤/페이지 이동 막고
+        //   - currentTarget.click() 호출로 onClick 흐름 재사용
         if (event.key === ' ' || event.key === 'Spacebar') {
           event.preventDefault()
           // 클릭과 동일한 흐름 태우기 (위 onClick 로직 재사용)
