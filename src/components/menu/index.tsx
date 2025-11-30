@@ -797,7 +797,7 @@ function isFocusWithin(root: HTMLElement): boolean {
   return root.contains(document.activeElement)
 }
 
-const Menu = {
+const NestedMenu = {
   Root,
   Trigger,
   SubTrigger,
@@ -810,4 +810,4 @@ const Menu = {
   Portal,
 }
 
-export default Menu
+export default NestedMenu

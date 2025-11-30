@@ -104,6 +104,36 @@ function TopRoot({
     onChange: onOpenPathChange,
   })
 
+  const registry = MenuSystem.useCompositeRegistry()
+
+  // 바깥 클릭 시 전체 메뉴 닫기
+  useEffect(() => {
+    // 열려 있는 메뉴가 없으면 리스너 안 깜
+    if (openPath.length === 0) return
+    if (typeof document === 'undefined') return
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null
+      if (!target) return
+
+      // registry에 등록된 모든 노드를 돌면서,
+      // 그 어떤 노드에도 포함되지 않는 클릭이면 "바깥 클릭"으로 간주
+      for (const entry of registry.entries()) {
+        if (entry.node.contains(target)) {
+          return
+        }
+      }
+
+      // 여기까지 왔으면 완전 바깥 -> 전체 트리 닫기
+      setOpenPath([])
+    }
+
+    document.addEventListener('pointerdown', handlePointerDown, true)
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown, true)
+    }
+  }, [openPath.length, registry, setOpenPath])
+
   return (
     <MenuTreeContext.Provider value={{ openPath, setOpenPath }}>
       {/* TopRoot 자신도 SubRoot를 통해 렌더링하는 게 핵심 */}
