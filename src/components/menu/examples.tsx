@@ -2,12 +2,12 @@ import { useState } from 'react'
 import NestedMenu from './nested'
 
 export function ControlledExample() {
-  const [openPath, setOpenPath] = useState<string[]>([])
+  const [openPath, setOpenPath] = useState<string[]>(['1', '2'])
 
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-8">
       <div className="max-w-2xl w-full space-y-8">
-        <div>
+        {/* <div>
           <h2 className="text-xl font-semibold mb-4">Basic Menu</h2>
           <p className="text-sm text-gray-600 mb-4">
             Click the trigger or use ArrowDown/ArrowUp keys when focused to open
@@ -23,65 +23,42 @@ export function ControlledExample() {
               Open Sub 2
             </button>
             <button onClick={() => setOpenPath([])}>Close ALL</button>
-          </div>
-          <NestedMenu.Root
-            // openPath={openPath}
-            // onOpenPathChange={setOpenPath}
-            defaultOpenPath={['root', 'sub2']}
-            idRules={{
-              rootId: 'root',
-              triggerId: 'root-trigger',
-              contentId: 'root-content',
-              actionItemId: (value) => `root-action-item-${value}`,
-              linkItemId: (value) => `root-link-item-${value}`,
-            }}
-          >
-            <NestedMenu.Trigger>Root</NestedMenu.Trigger>
-            <NestedMenu.Positioner>
-              <NestedMenu.Content>
-                <NestedMenu.ActionItem value="a">A</NestedMenu.ActionItem>
+          </div> */}
+        <NestedMenu.Root
+          menuId="1"
+          openPath={openPath}
+          onOpenPathChange={setOpenPath}
+          // defaultOpenPath={['1', '2']}
+        >
+          <NestedMenu.Trigger>Root</NestedMenu.Trigger>
+          <NestedMenu.Positioner>
+            <NestedMenu.Content>
+              <NestedMenu.ActionItem value="a">A</NestedMenu.ActionItem>
 
-                <NestedMenu.Root
-                  idRules={{
-                    rootId: 'sub1',
-                    triggerId: 'sub1-trigger',
-                    contentId: 'sub1-content',
-                    actionItemId: (value) => `sub1-action-item-${value}`,
-                    linkItemId: (value) => `sub1-link-item-${value}`,
-                  }}
-                >
-                  <NestedMenu.SubTrigger>Sub 1</NestedMenu.SubTrigger>
-                  <NestedMenu.Positioner placement="right">
-                    <NestedMenu.SubContent>
-                      <NestedMenu.ActionItem value="s1-1">
-                        S1-1
-                      </NestedMenu.ActionItem>
-                    </NestedMenu.SubContent>
-                  </NestedMenu.Positioner>
-                </NestedMenu.Root>
+              <NestedMenu.Root menuId="2">
+                <NestedMenu.SubTrigger>Sub 1</NestedMenu.SubTrigger>
+                <NestedMenu.Positioner placement="right">
+                  <NestedMenu.SubContent>
+                    <NestedMenu.ActionItem value="s1-1">
+                      S1-1
+                    </NestedMenu.ActionItem>
+                  </NestedMenu.SubContent>
+                </NestedMenu.Positioner>
+              </NestedMenu.Root>
 
-                <NestedMenu.Root
-                  idRules={{
-                    rootId: 'sub2',
-                    triggerId: 'sub2-trigger',
-                    contentId: 'sub2-content',
-                    actionItemId: (value) => `sub2-action-item-${value}`,
-                    linkItemId: (value) => `sub2-link-item-${value}`,
-                  }}
-                >
-                  <NestedMenu.SubTrigger>Sub 2</NestedMenu.SubTrigger>
-                  <NestedMenu.Positioner placement="right">
-                    <NestedMenu.SubContent>
-                      <NestedMenu.ActionItem value="s2-1">
-                        S2-1
-                      </NestedMenu.ActionItem>
-                    </NestedMenu.SubContent>
-                  </NestedMenu.Positioner>
-                </NestedMenu.Root>
-              </NestedMenu.Content>
-            </NestedMenu.Positioner>
-          </NestedMenu.Root>
-        </div>
+              <NestedMenu.Root menuId="3">
+                <NestedMenu.SubTrigger>Sub 2</NestedMenu.SubTrigger>
+                <NestedMenu.Positioner placement="right">
+                  <NestedMenu.SubContent>
+                    <NestedMenu.ActionItem value="s2-1">
+                      S2-1
+                    </NestedMenu.ActionItem>
+                  </NestedMenu.SubContent>
+                </NestedMenu.Positioner>
+              </NestedMenu.Root>
+            </NestedMenu.Content>
+          </NestedMenu.Positioner>
+        </NestedMenu.Root>
       </div>
     </div>
   )

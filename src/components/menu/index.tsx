@@ -23,8 +23,6 @@ import {
 } from '@floating-ui/dom'
 import { useLatestRef } from '../../hooks/useLatestRef'
 
-// [role^="menuitem"][data-ownedby=${ownerId}]:not([data-disabled])
-
 const dom = {
   getTriggerElement: ({ triggerId }: { triggerId: string }) =>
     document.getElementById(triggerId),

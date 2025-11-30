@@ -1,6 +1,7 @@
 import { useControllableState } from '@radix-ui/react-use-controllable-state'
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useId,
@@ -22,46 +23,19 @@ import {
   type Placement,
 } from '@floating-ui/dom'
 import { useLatestRef } from '../../hooks/useLatestRef'
-
-// [role^="menuitem"][data-ownedby=${ownerId}]:not([data-disabled])
-
-const dom = {
-  getTriggerElement: ({ triggerId }: { triggerId: string }) =>
-    document.getElementById(triggerId),
-  getContentElement: ({ contentId }: { contentId: string }) =>
-    document.getElementById(contentId),
-  getMenuItems: ({ rootId }: { rootId: string }) =>
-    Array.from(
-      document?.querySelectorAll<HTMLElement>(
-        `[role^="menuitem"][data-ownedby=${rootId}]:not([data-disabled])`,
-      ) ?? [],
-    ),
-  getMenuItemElement: ({ itemId }: { itemId: string }) =>
-    document.getElementById(itemId),
-}
+import { MenuSystem } from './system'
 
 type MenuContextValue = {
+  rootId: string
   open: boolean
-
   openMenu: ({
     initialFocusType,
   }: {
     initialFocusType: 'first-item' | 'last-item'
   }) => void
   closeMenu: () => void
-
   activeItemId: string | null
   setActiveItemId: (itemId: string | null) => void
-
-  idRules: {
-    rootId: string
-    triggerId: string
-    positionerId: string
-    positionerArrowId: string
-    contentId: string
-    actionItemId: (value: string) => string
-    linkItemId: (value: string) => string
-  }
 }
 
 const MenuContext = createContext<
@@ -94,21 +68,11 @@ function useMenuTreeContext() {
 }
 
 export type RootProps = {
+  menuId?: string
   // 트리 전체(openPath) 제어용 – TopRoot에서만 의미 있음
   openPath?: string[]
   defaultOpenPath?: string[]
   onOpenPathChange?: (path: string[]) => void
-
-  idRules?: {
-    rootId?: string
-    triggerId?: string
-    subTriggerId?: string
-    positionerId?: string
-    positionerArrowId?: string
-    contentId?: string
-    actionItemId?: (value: string) => string
-    linkItemId?: (value: string) => string
-  }
   children: React.ReactNode
 }
 
@@ -117,7 +81,11 @@ export function Root(props: RootProps) {
 
   // 아직 트리 컨텍스트가 없으면 → 이 Root가 최상위
   if (!tree) {
-    return <TopRoot {...props} />
+    return (
+      <MenuSystem.Provider>
+        <TopRoot {...props} />
+      </MenuSystem.Provider>
+    )
   }
 
   // 이미 트리 안에서 호출된 Root → 서브메뉴용 Root
@@ -144,25 +112,16 @@ function TopRoot({
   )
 }
 
-export function SubRoot({ idRules: idRulesProp, children }: RootProps) {
+export function SubRoot({ children, menuId }: RootProps) {
   const parentMenuContext = useContext(MenuContext)
   const tree = useMenuTreeContext()
+  const registry = MenuSystem.useCompositeRegistry()
 
   const isTopLevel = !parentMenuContext
   const isSubMenu = !!parentMenuContext
 
-  const defaultId = useId()
-
-  const rootId = idRulesProp?.rootId ?? defaultId
-  const triggerId = idRulesProp?.triggerId ?? `${rootId}-trigger`
-  const positionerId = idRulesProp?.positionerId ?? `${rootId}-positioner`
-  const positionerArrowId =
-    idRulesProp?.positionerArrowId ?? `${rootId}-positioner-arrow`
-  const contentId = idRulesProp?.contentId ?? `${rootId}-content`
-  const actionItemId =
-    idRulesProp?.actionItemId ?? ((value) => `${rootId}-action-item-${value}`)
-  const linkItemId =
-    idRulesProp?.linkItemId ?? ((value) => `${rootId}-link-item-${value}`)
+  const autoId = useId()
+  const rootId = menuId ?? autoId
 
   const initialFocusTypeRef = useRef<'first-item' | 'last-item' | null>(null)
 
@@ -172,6 +131,12 @@ export function SubRoot({ idRules: idRulesProp, children }: RootProps) {
 
   const [activeItemId, setActiveItemId] = useState<string | null>(null)
 
+  const getMenuItemEntries = useCallback(() => {
+    return Array.from(registry.entriesByRole('item')).filter(
+      (entry) => entry.meta.rootId === rootId,
+    )
+  }, [registry, rootId])
+
   const openMenu = ({
     initialFocusType,
   }: {
@@ -179,23 +144,19 @@ export function SubRoot({ idRules: idRulesProp, children }: RootProps) {
   }) => {
     initialFocusTypeRef.current = initialFocusType
 
-    const parentRootId = parentMenuContext?.idRules.rootId
+    const parentRootId = parentMenuContext?.rootId
     const selfId = rootId
 
     tree.setOpenPath((prev) => {
-      // 부모가 없으면 이 메뉴부터 시작하는 경로
       if (!parentRootId) {
         return [selfId]
       }
 
       const parentIndex = prev.indexOf(parentRootId)
-
-      // 이전 경로에 부모가 없으면, 부모 + 나로 새 경로 생성
       if (parentIndex === -1) {
         return [parentRootId, selfId]
       }
 
-      // 부모까지의 경로 + 나
       const base = prev.slice(0, parentIndex + 1)
       return [...base, selfId]
     })
@@ -208,60 +169,56 @@ export function SubRoot({ idRules: idRulesProp, children }: RootProps) {
     const selfId = rootId
     tree.setOpenPath((prev) => {
       const index = prev.indexOf(selfId)
-      if (index === -1) return prev
-      // 나 이후의 경로는 잘라낸다 (나 포함 이전까지만 유지)
+      if (index === -1) {
+        return prev
+      }
       return prev.slice(0, index)
     })
 
-    const triggerEl = dom.getTriggerElement({ triggerId })
-    if (!triggerEl) {
-      return
-    }
-    triggerEl.focus()
+    const triggerEntry = registry.get('trigger', rootId)
+    triggerEntry?.node.focus()
   }
 
   const openMenuRef = useLatestRef(openMenu)
 
   const { isPresent: isContentPresent } = usePresence({
     isVisible: open,
-    resolveElement: () => dom.getContentElement({ contentId }),
+    resolveElement: () => registry.get('content', rootId)?.node ?? null,
   })
 
   useLayoutEffect(() => {
     if (!isContentPresent) {
       return
     }
-
     if (initialFocusTypeRef.current === null) {
       return
     }
 
-    const contentEl = dom.getContentElement({ contentId })
-    if (!contentEl) {
+    const items = getMenuItemEntries()
+    if (items.length === 0) {
       return
     }
 
-    const menuItemEls = dom.getMenuItems({ rootId })
-    if (menuItemEls.length === 0) {
-      return
-    }
+    const targetEntry =
+      initialFocusTypeRef.current === 'last-item'
+        ? items[items.length - 1]
+        : items[0]
 
-    if (initialFocusTypeRef.current === 'last-item') {
-      setActiveItemId(menuItemEls[menuItemEls.length - 1]?.id ?? null)
-    } else {
-      setActiveItemId(menuItemEls[0]?.id ?? null)
-    }
-  }, [contentId, isContentPresent, rootId, triggerId])
+    setActiveItemId(targetEntry.itemId)
+  }, [getMenuItemEntries, isContentPresent])
 
   useLayoutEffect(() => {
     if (activeItemId === null) {
       return
     }
-    dom.getMenuItemElement({ itemId: activeItemId })?.focus()
-  }, [activeItemId])
+    const entry = registry.get('item', activeItemId)
+    entry?.node.focus()
+    initialFocusTypeRef.current = null
+  }, [activeItemId, registry])
 
   useEffect(() => {
-    const triggerEl = dom.getTriggerElement({ triggerId })
+    const triggerEntry = registry.get('trigger', rootId)
+    const triggerEl = triggerEntry?.node
     if (!triggerEl) {
       return
     }
@@ -284,9 +241,12 @@ export function SubRoot({ idRules: idRulesProp, children }: RootProps) {
           openMenuRef.current({ initialFocusType: 'first-item' })
         } else {
           // 서브메뉴가 이미 열려 있을 때: 첫 아이템으로 진입
-          const items = dom.getMenuItems({ rootId })
-          if (items.length === 0) return
-          setActiveItemId(items[0].id)
+          const items = getMenuItemEntries()
+          if (items.length === 0) {
+            return
+          }
+          const target = items[0]
+          setActiveItemId(target.itemId)
         }
 
         return
@@ -305,13 +265,13 @@ export function SubRoot({ idRules: idRulesProp, children }: RootProps) {
           initialFocusType: isArrowUp ? 'last-item' : 'first-item',
         })
       } else {
-        // 이미 열려 있을 때: 메뉴 안으로 진입
-        const items = dom.getMenuItems({ rootId })
-        if (items.length === 0) return
+        const items = getMenuItemEntries()
+        if (items.length === 0) {
+          return
+        }
 
         const target = isArrowUp ? items[items.length - 1] : items[0]
-
-        setActiveItemId(target.id)
+        setActiveItemId(target.itemId)
       }
     }
 
@@ -319,7 +279,7 @@ export function SubRoot({ idRules: idRulesProp, children }: RootProps) {
     return () => {
       triggerEl.removeEventListener('keydown', handleKeyDown)
     }
-  }, [isContentPresent, openMenuRef, triggerId, rootId, setActiveItemId])
+  }, [getMenuItemEntries, isContentPresent, openMenuRef, registry, rootId])
 
   const activeItemIdRef = useLatestRef(activeItemId)
   useEffect(() => {
@@ -327,7 +287,8 @@ export function SubRoot({ idRules: idRulesProp, children }: RootProps) {
       return
     }
 
-    const contentEl = dom.getContentElement({ contentId })
+    const contentEntry = registry.get('content', rootId)
+    const contentEl = contentEntry?.node
     if (!contentEl) {
       return
     }
@@ -347,33 +308,27 @@ export function SubRoot({ idRules: idRulesProp, children }: RootProps) {
       event.preventDefault()
       event.stopPropagation()
 
-      const menuItems = dom.getMenuItems({ rootId })
+      const items = getMenuItemEntries()
+      if (items.length === 0) return
 
-      if (menuItems.length === 0) {
-        return
-      }
-
-      const currentIndex = menuItems.findIndex(
-        (item) => item.id === activeItemIdRef.current,
+      const currentIndex = items.findIndex(
+        (entry) => entry.itemId === activeItemIdRef.current,
       )
-
-      if (currentIndex === -1) {
-        return
-      }
+      if (currentIndex === -1) return
 
       const nextIndex = isArrowDown
-        ? (currentIndex + 1) % menuItems.length // 순환
-        : (currentIndex - 1 + menuItems.length) % menuItems.length // 순환
+        ? (currentIndex + 1) % items.length
+        : (currentIndex - 1 + items.length) % items.length
 
-      const nextItem = menuItems[nextIndex]
-      setActiveItemId(nextItem.id)
+      const nextEntry = items[nextIndex]
+      setActiveItemId(nextEntry.itemId)
     }
 
     contentEl.addEventListener('keydown', handleKeyDown)
     return () => {
       contentEl.removeEventListener('keydown', handleKeyDown)
     }
-  }, [contentId, activeItemIdRef, isContentPresent, rootId])
+  }, [activeItemIdRef, getMenuItemEntries, isContentPresent, registry, rootId])
 
   const closeMenuRef = useLatestRef(closeMenu)
   useEffect(() => {
@@ -381,7 +336,8 @@ export function SubRoot({ idRules: idRulesProp, children }: RootProps) {
       return
     }
 
-    const contentEl = dom.getContentElement({ contentId })
+    const contentEntry = registry.get('content', rootId)
+    const contentEl = contentEntry?.node
     if (!contentEl) {
       return
     }
@@ -411,19 +367,19 @@ export function SubRoot({ idRules: idRulesProp, children }: RootProps) {
       tree.setOpenPath([])
     }
 
-    console.log('1')
     contentEl.addEventListener('keydown', handleTab)
     return () => {
       contentEl.removeEventListener('keydown', handleTab)
     }
-  }, [closeMenuRef, contentId, isContentPresent, isSubMenu, tree])
+  }, [closeMenuRef, isContentPresent, isSubMenu, registry, rootId, tree])
 
   useEffect(() => {
     if (!isContentPresent) {
       return
     }
 
-    const contentEl = dom.getContentElement({ contentId })
+    const contentEntry = registry.get('content', rootId)
+    const contentEl = contentEntry?.node
     if (!contentEl) {
       return
     }
@@ -454,27 +410,19 @@ export function SubRoot({ idRules: idRulesProp, children }: RootProps) {
     return () => {
       contentEl.removeEventListener('keydown', handleKeyDown)
     }
-  }, [closeMenuRef, contentId, isContentPresent, isSubMenu])
+  }, [closeMenuRef, isContentPresent, isSubMenu, registry, rootId])
 
   return (
     <MenuContext.Provider
       value={{
+        rootId,
+
         open,
         openMenu,
         closeMenu,
 
         activeItemId,
         setActiveItemId,
-
-        idRules: {
-          rootId,
-          triggerId,
-          positionerId,
-          positionerArrowId,
-          contentId,
-          actionItemId,
-          linkItemId,
-        },
 
         parentMenuContext,
       }}
@@ -486,14 +434,23 @@ export function SubRoot({ idRules: idRulesProp, children }: RootProps) {
 
 export type TriggerProps = ComponentPropsWithoutRef<'button'>
 export function Trigger({ children, onClick, ...rest }: TriggerProps) {
-  const { open, openMenu, closeMenu, idRules } = useMenuContext()
+  const { open, openMenu, closeMenu, rootId } = useMenuContext()
 
-  const id = idRules.triggerId
+  const registry = MenuSystem.useCompositeRegistry()
+
+  const { domId, ref } = MenuSystem.useCompositeItemRegistration(
+    'trigger',
+    rootId,
+    {
+      meta: { rootId }, // 나중에 필요하면 더 추가
+    },
+  )
 
   return (
     <button
+      ref={ref}
       type="button"
-      id={id}
+      id={domId}
       onClick={(event) => {
         if (open) {
           closeMenu()
@@ -504,7 +461,7 @@ export function Trigger({ children, onClick, ...rest }: TriggerProps) {
       }}
       aria-haspopup="menu"
       aria-expanded={open ? 'true' : 'false'}
-      aria-controls={idRules.contentId}
+      aria-controls={registry.getDomId('content', rootId)}
       {...rest}
     >
       {children}
@@ -514,11 +471,19 @@ export function Trigger({ children, onClick, ...rest }: TriggerProps) {
 
 export type ContentProps = ComponentPropsWithoutRef<'div'>
 export function Content({ children, ...rest }: ContentProps) {
-  const { open, idRules } = useMenuContext()
+  const { open, rootId } = useMenuContext()
+
+  const registry = MenuSystem.useCompositeRegistry()
+
+  const { domId, ref } = MenuSystem.useCompositeItemRegistration(
+    'content',
+    rootId,
+    { meta: { rootId } },
+  )
 
   const { isPresent } = usePresence({
     isVisible: open,
-    resolveElement: () => document.getElementById(idRules.contentId),
+    resolveElement: () => registry.get('content', rootId)?.node ?? null,
   })
 
   if (!isPresent) {
@@ -527,9 +492,10 @@ export function Content({ children, ...rest }: ContentProps) {
 
   return (
     <div
+      ref={ref}
       role="menu"
-      id={idRules.contentId}
-      aria-labelledby={idRules.triggerId}
+      id={domId}
+      aria-labelledby={registry.getDomId('trigger', rootId)}
       {...rest}
     >
       {children}
@@ -538,38 +504,75 @@ export function Content({ children, ...rest }: ContentProps) {
 }
 
 export type SubTriggerProps = ComponentPropsWithoutRef<'button'>
+
 export function SubTrigger({ children, onClick, ...rest }: SubTriggerProps) {
   const {
     open,
     openMenu,
     closeMenu,
-    idRules,
-    activeItemId,
-    parentMenuContext,
+    rootId, // 이 SubTrigger가 여는 서브메뉴의 rootId
+    parentMenuContext, // 상위 메뉴의 컨텍스트
   } = useMenuContext()
 
-  const id = idRules.triggerId
+  if (!parentMenuContext) {
+    throw new Error('SubTrigger는 서브메뉴 내부에서만 사용 가능합니다.')
+  }
+
+  const ownerRootId = parentMenuContext.rootId // 부모 메뉴의 rootId
+
+  const registry = MenuSystem.useCompositeRegistry()
+
+  // 1) 서브메뉴 입장에서의 trigger 등록
+  const triggerReg = MenuSystem.useCompositeItemRegistration(
+    'trigger',
+    rootId,
+    {
+      meta: { rootId }, // 트리거는 자기 서브메뉴(rootId)에 속함
+    },
+  )
+
+  // 2) 부모 메뉴 입장에서의 item 등록
+  //    itemId도 child rootId를 쓰면, 부모 메뉴의 activeItemId랑 맞춰 쓰기 좋음
+  const itemReg = MenuSystem.useCompositeItemRegistration('item', rootId, {
+    id: triggerReg.domId, // DOM id는 trigger 쪽 id랑 동일하게 맞추기
+    meta: { rootId: ownerRootId }, // 이 item의 "owner 메뉴"는 부모 메뉴
+  })
+
+  // 두 registry ref를 하나의 ref로 합쳐서 button에 달아준다
+  const ref = useCallback(
+    (node: HTMLElement | null) => {
+      triggerReg.ref(node)
+      itemReg.ref(node)
+    },
+    [triggerReg, itemReg],
+  )
+
+  // 부모 메뉴의 activeItemId로 roving tabIndex를 판단
+  const isActiveInParent =
+    parentMenuContext.activeItemId != null &&
+    parentMenuContext.activeItemId === rootId
 
   return (
     <button
+      ref={ref}
       role="menuitem"
       type="button"
-      id={id}
+      id={triggerReg.domId}
       onClick={(event) => {
         if (open) {
+          // 서브메뉴가 열려 있다면 닫기
           closeMenu()
         } else {
+          // 서브메뉴가 닫혀 있다면 열고, 처음 아이템에 포커스
           openMenu({ initialFocusType: 'first-item' })
         }
         onClick?.(event)
       }}
-      tabIndex={activeItemId === id ? 0 : -1}
+      tabIndex={isActiveInParent ? 0 : -1}
       aria-haspopup="menu"
       aria-expanded={open ? 'true' : 'false'}
-      aria-controls={idRules.contentId}
-      data-ownedby={
-        parentMenuContext ? parentMenuContext.idRules.rootId : undefined
-      }
+      aria-controls={registry.getDomId('content', rootId) ?? undefined}
+      data-ownedby={ownerRootId}
       {...rest}
     >
       {children}
@@ -579,11 +582,18 @@ export function SubTrigger({ children, onClick, ...rest }: SubTriggerProps) {
 
 export type SubContentProps = ComponentPropsWithoutRef<'div'>
 export function SubContent({ children, ...rest }: SubContentProps) {
-  const { open, idRules } = useMenuContext()
+  const { open, rootId } = useMenuContext()
+  const registry = MenuSystem.useCompositeRegistry()
+
+  const { domId, ref } = MenuSystem.useCompositeItemRegistration(
+    'content',
+    rootId,
+    { meta: { rootId } },
+  )
 
   const { isPresent } = usePresence({
     isVisible: open,
-    resolveElement: () => document.getElementById(idRules.contentId),
+    resolveElement: () => registry.get('content', rootId)?.node ?? null,
   })
 
   if (!isPresent) {
@@ -592,9 +602,10 @@ export function SubContent({ children, ...rest }: SubContentProps) {
 
   return (
     <div
+      ref={ref}
       role="menu"
-      id={idRules.contentId}
-      aria-labelledby={idRules.triggerId}
+      id={domId}
+      aria-labelledby={registry.getDomId('trigger', rootId)}
       {...rest}
     >
       {children}
@@ -617,36 +628,36 @@ export function Positioner({
   offset: offsetOption = 0,
   arrowOffset: arrowOffsetOption = 4,
 }: PositionerProps) {
-  const { open, idRules } = useMenuContext()
+  const { open, rootId } = useMenuContext()
+  const registry = MenuSystem.useCompositeRegistry()
+
+  const { domId, ref } = MenuSystem.useCompositeItemRegistration(
+    'positioner',
+    rootId,
+    { meta: { rootId } },
+  )
 
   const { isPresent } = usePresence({
     isVisible: open,
-    resolveElement: () => document.getElementById(idRules.positionerId),
+    resolveElement: () => registry.get('positioner', rootId)?.node ?? null,
   })
 
   const flipOptionsRef = useLatestRef(flipOptions)
   const shiftOptionsRef = useLatestRef(shiftOptions)
-  useLayoutEffect(() => {
-    if (!isPresent) {
-      return
-    }
 
-    const triggerEl = document.getElementById(idRules.triggerId)
-    const positionerEl = document.getElementById(idRules.positionerId)
-    if (!triggerEl || !positionerEl) {
-      return
-    }
+  useLayoutEffect(() => {
+    if (!isPresent) return
+
+    const triggerEl = registry.get('trigger', rootId)?.node
+    const positionerEl = registry.get('positioner', rootId)?.node
+    if (!triggerEl || !positionerEl) return
 
     function positionUpdate() {
-      const triggerEl = document.getElementById(idRules.triggerId)
-      const positionerEl = document.getElementById(idRules.positionerId)
-      if (!triggerEl || !positionerEl) {
-        return
-      }
+      const triggerEl = registry.get('trigger', rootId)?.node
+      const positionerEl = registry.get('positioner', rootId)?.node
+      if (!triggerEl || !positionerEl) return
 
-      const positionerArrowEl = document.getElementById(
-        idRules.positionerArrowId,
-      )
+      const arrowEl = registry.get('arrow', rootId)?.node
 
       computePosition(triggerEl, positionerEl, {
         placement,
@@ -654,10 +665,10 @@ export function Positioner({
           offset(offsetOption),
           flip(flipOptionsRef.current),
           shift(shiftOptionsRef.current),
-          ...(positionerArrowEl
+          ...(arrowEl
             ? [
                 arrow({
-                  element: positionerArrowEl,
+                  element: arrowEl,
                 }),
               ]
             : []),
@@ -668,13 +679,10 @@ export function Positioner({
           top: `${y}px`,
         })
 
-        // Accessing the data
-        const arrow = middlewareData.arrow
-        if (!arrow || !positionerArrowEl) {
-          return
-        }
-        const { x: arrowX, y: arrowY } = arrow
+        const arrowData = middlewareData.arrow
+        if (!arrowData || !arrowEl) return
 
+        const { x: arrowX, y: arrowY } = arrowData
         const staticSide = {
           top: 'bottom',
           right: 'left',
@@ -682,7 +690,7 @@ export function Positioner({
           left: 'right',
         }[placement.split('-')[0]]
 
-        Object.assign(positionerArrowEl.style, {
+        Object.assign(arrowEl.style, {
           left: arrowX != null ? `${arrowX}px` : '',
           top: arrowY != null ? `${arrowY}px` : '',
           right: '',
@@ -692,20 +700,12 @@ export function Positioner({
       })
     }
 
-    const autoUpdateCleanup = autoUpdate(
-      triggerEl,
-      positionerEl,
-      positionUpdate,
-    )
-
-    return () => {
-      autoUpdateCleanup()
-    }
+    const cleanup = autoUpdate(triggerEl, positionerEl, positionUpdate)
+    return () => cleanup()
   }, [
     isPresent,
-    idRules.positionerId,
-    idRules.triggerId,
-    idRules.positionerArrowId,
+    registry,
+    rootId,
     placement,
     flipOptionsRef,
     shiftOptionsRef,
@@ -719,7 +719,8 @@ export function Positioner({
 
   return (
     <div
-      id={idRules.positionerId}
+      ref={ref}
+      id={domId}
       style={{
         width: 'max-content',
         position: 'absolute',
@@ -738,11 +739,18 @@ export function PositionerArrow({
   style,
   ...rest
 }: PositionerArrowProps) {
-  const { idRules } = useMenuContext()
+  const { rootId } = useMenuContext()
+
+  const { domId, ref } = MenuSystem.useCompositeItemRegistration(
+    'arrow',
+    rootId,
+    { meta: { rootId } },
+  )
 
   return (
     <div
-      id={idRules.positionerArrowId}
+      ref={ref}
+      id={domId}
       style={{
         position: 'absolute',
         width: 8,
@@ -766,23 +774,31 @@ export type ActionItemProps = Omit<
 export function ActionItem({
   children,
   onClick,
-  value,
+  value: itemId,
   ...rest
 }: ActionItemProps) {
-  const { idRules, closeMenu, activeItemId } = useMenuContext()
-  const id = idRules.actionItemId(value)
+  const { rootId, closeMenu, activeItemId } = useMenuContext()
+
+  const { domId, ref } = MenuSystem.useCompositeItemRegistration(
+    'item',
+    itemId,
+    {
+      meta: { rootId }, // owner menu id
+    },
+  )
 
   return (
     <button
+      ref={ref}
       role="menuitem"
       type="button"
-      id={id}
+      id={domId}
       onClick={(event) => {
         closeMenu()
         onClick?.(event)
       }}
-      tabIndex={activeItemId === id ? 0 : -1}
-      data-ownedby={idRules.rootId}
+      tabIndex={activeItemId === itemId ? 0 : -1}
+      data-ownedby={rootId}
       {...rest}
     >
       {children}
@@ -793,20 +809,33 @@ export function ActionItem({
 export type LinkItemProps = Omit<ComponentPropsWithoutRef<'a'>, 'value'> & {
   value: string
 }
-export function LinkItem({ children, onClick, value, ...rest }: LinkItemProps) {
-  const { idRules, closeMenu, activeItemId } = useMenuContext()
-  const id = idRules.linkItemId(value)
+export function LinkItem({
+  children,
+  onClick,
+  value: itemId,
+  ...rest
+}: LinkItemProps) {
+  const { rootId, closeMenu, activeItemId } = useMenuContext()
+
+  const { domId, ref } = MenuSystem.useCompositeItemRegistration(
+    'item',
+    itemId,
+    {
+      meta: { rootId }, // owner menu id
+    },
+  )
 
   return (
     <a
+      ref={ref}
       role="menuitem"
-      id={id}
+      id={domId}
       onClick={(event) => {
         closeMenu()
         onClick?.(event)
       }}
-      tabIndex={activeItemId === id ? 0 : -1}
-      data-ownedby={idRules.rootId}
+      tabIndex={activeItemId === itemId ? 0 : -1}
+      data-ownedby={rootId}
       {...rest}
     >
       {children}
