@@ -234,7 +234,21 @@ export function ChildRoot({ children, menuId }: RootProps) {
     resolveElement: () => registry.get('content', rootId)?.node ?? null,
   })
 
-  useLayoutEffect(() => {
+  const prevOpenRef = useRef(open)
+  // open → false 로 바뀔 때, 내부 포커스 상태 정리
+  useEffect(() => {
+    if (prevOpenRef.current && !open) {
+      // 방금 닫힌 시점
+      setActiveItemId(null)
+      initialFocusTypeRef.current = null
+    }
+    prevOpenRef.current = open
+  }, [open])
+
+  useEffect(() => {
+    if (!open) {
+      return
+    }
     if (!isContentPresent) {
       return
     }
@@ -253,7 +267,7 @@ export function ChildRoot({ children, menuId }: RootProps) {
         : items[0]
 
     setActiveItemId(targetEntry.itemId)
-  }, [getMenuItemEntries, isContentPresent])
+  }, [getMenuItemEntries, isContentPresent, open])
 
   useLayoutEffect(() => {
     if (activeItemId === null) {
