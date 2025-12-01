@@ -25,8 +25,8 @@ import {
 } from '@floating-ui/dom'
 import { useLatestRef } from '../../hooks/useLatestRef'
 import { MenuSystem } from './system'
-import { composeEventHandlers } from '../../utils/composeEventHandlers'
 import { composeRefs } from '../../utils/composeRefs'
+import { mergeProps } from '../../utils/mergeProps'
 
 type MenuContextValue = {
   rootId: string
@@ -528,7 +528,7 @@ export function ChildRoot({ children, menuId }: RootProps) {
 
 export type TriggerProps = ComponentPropsWithoutRef<'button'>
 export const Trigger = forwardRef<HTMLButtonElement, TriggerProps>(
-  ({ children, onClick, ...rest }, ref) => {
+  ({ children, ...rest }, ref) => {
     const { open, openMenu, closeMenu, rootId } = useMenuContext()
 
     const registry = MenuSystem.useCompositeRegistry()
@@ -543,20 +543,24 @@ export const Trigger = forwardRef<HTMLButtonElement, TriggerProps>(
 
     return (
       <button
-        ref={composeRefs(ref, triggerRef)}
-        type="button"
-        id={domId}
-        onClick={composeEventHandlers(onClick, () => {
-          if (open) {
-            closeMenu()
-          } else {
-            openMenu({ initialFocusType: 'first-item' })
-          }
-        })}
-        aria-haspopup="menu"
-        aria-expanded={open ? 'true' : 'false'}
-        aria-controls={registry.getDomId('content', rootId)}
-        {...rest}
+        ref={composeRefs(triggerRef, ref)}
+        {...mergeProps(
+          {
+            type: 'button',
+            id: domId,
+            onClick: () => {
+              if (open) {
+                closeMenu()
+              } else {
+                openMenu({ initialFocusType: 'first-item' })
+              }
+            },
+            'aria-haspopup': 'menu',
+            'aria-expanded': open ? 'true' : 'false',
+            'aria-controls': registry.getDomId('content', rootId),
+          },
+          rest,
+        )}
       >
         {children}
       </button>
@@ -588,12 +592,16 @@ export const Content = forwardRef<HTMLDivElement, ContentProps>(
 
     return (
       <div
-        ref={composeRefs(ref, contentRef)}
-        role="menu"
-        id={domId}
-        aria-labelledby={registry.getDomId('trigger', rootId)}
-        data-transition={transitionState}
-        {...rest}
+        ref={composeRefs(contentRef, ref)}
+        {...mergeProps(
+          {
+            role: 'menu',
+            id: domId,
+            'aria-labelledby': registry.getDomId('trigger', rootId),
+            'data-transition': transitionState,
+          },
+          rest,
+        )}
       >
         {children}
       </div>
@@ -604,7 +612,7 @@ export const Content = forwardRef<HTMLDivElement, ContentProps>(
 export type SubTriggerProps = ComponentPropsWithoutRef<'button'>
 
 export const SubTrigger = forwardRef<HTMLButtonElement, SubTriggerProps>(
-  ({ children, onClick, ...rest }, ref) => {
+  ({ children, ...rest }, ref) => {
     const {
       open,
       openMenu,
@@ -646,24 +654,26 @@ export const SubTrigger = forwardRef<HTMLButtonElement, SubTriggerProps>(
 
     return (
       <button
-        ref={composeRefs(ref, triggerReg.ref, itemReg.ref)}
-        role="menuitem"
-        type="button"
-        id={triggerReg.domId}
-        onClick={composeEventHandlers(onClick, () => {
-          if (open) {
-            // 서브메뉴가 열려 있다면 닫기
-            closeMenu()
-          } else {
-            // 서브메뉴가 닫혀 있다면 열고, 처음 아이템에 포커스
-            openMenu({ initialFocusType: 'first-item' })
-          }
-        })}
-        tabIndex={isActiveInParent ? 0 : -1}
-        aria-haspopup="menu"
-        aria-expanded={open ? 'true' : 'false'}
-        aria-controls={registry.getDomId('content', rootId) ?? undefined}
-        {...rest}
+        ref={composeRefs(triggerReg.ref, itemReg.ref, ref)}
+        {...mergeProps(
+          {
+            role: 'menuitem',
+            type: 'button',
+            id: triggerReg.domId,
+            onClick: () => {
+              if (open) {
+                closeMenu()
+              } else {
+                openMenu({ initialFocusType: 'first-item' })
+              }
+            },
+            tabIndex: isActiveInParent ? 0 : -1,
+            'aria-haspopup': 'menu',
+            'aria-expanded': open ? 'true' : 'false',
+            'aria-controls': registry.getDomId('content', rootId) ?? undefined,
+          },
+          rest,
+        )}
       >
         {children}
       </button>
@@ -693,12 +703,16 @@ export const SubContent = forwardRef<HTMLDivElement, SubContentProps>(
 
     return (
       <div
-        ref={composeRefs(ref, subContentRef)}
-        role="menu"
-        id={domId}
-        aria-labelledby={registry.getDomId('trigger', rootId)}
-        data-transition={transitionState}
-        {...rest}
+        ref={composeRefs(subContentRef, ref)}
+        {...mergeProps(
+          {
+            role: 'menu',
+            id: domId,
+            'aria-labelledby': registry.getDomId('trigger', rootId),
+            'data-transition': transitionState,
+          },
+          rest,
+        )}
       >
         {children}
       </div>
@@ -723,6 +737,7 @@ export const Positioner = forwardRef<HTMLDivElement, PositionerProps>(
       shiftOptions,
       offset: offsetOption = 0,
       arrowOffset: arrowOffsetOption = 4,
+      ...rest
     },
     ref,
   ) => {
@@ -819,14 +834,19 @@ export const Positioner = forwardRef<HTMLDivElement, PositionerProps>(
 
     return (
       <div
-        ref={composeRefs(ref, positionerRef)}
-        id={domId}
-        style={{
-          width: 'max-content',
-          position: 'absolute',
-          top: 0,
-          left: 0,
-        }}
+        ref={composeRefs(positionerRef, ref)}
+        {...mergeProps(
+          {
+            id: domId,
+            style: {
+              width: 'max-content',
+              position: 'absolute',
+              top: 0,
+              left: 0,
+            },
+          },
+          rest,
+        )}
       >
         {children}
       </div>
@@ -836,7 +856,7 @@ export const Positioner = forwardRef<HTMLDivElement, PositionerProps>(
 
 export type PositionerArrowProps = ComponentPropsWithoutRef<'div'>
 export const PositionerArrow = forwardRef<HTMLDivElement, PositionerArrowProps>(
-  ({ children, style, ...rest }, ref) => {
+  ({ children, ...rest }, ref) => {
     const { rootId, open } = useMenuContext()
 
     const registry = MenuSystem.useCompositeRegistry()
@@ -854,17 +874,20 @@ export const PositionerArrow = forwardRef<HTMLDivElement, PositionerArrowProps>(
 
     return (
       <div
-        ref={composeRefs(ref, arrowRef)}
-        id={domId}
-        style={{
-          position: 'absolute',
-          width: 8,
-          height: 8,
-          transform: 'rotate(45deg)',
-          ...style,
-        }}
-        data-transition={transitionState}
-        {...rest}
+        ref={composeRefs(arrowRef, ref)}
+        {...mergeProps(
+          {
+            id: domId,
+            style: {
+              position: 'absolute',
+              width: 8,
+              height: 8,
+              transform: 'rotate(45deg)',
+            },
+            'data-transition': transitionState,
+          },
+          rest,
+        )}
       >
         {children}
       </div>
@@ -879,7 +902,7 @@ export type ActionItemProps = Omit<
   value: string
 }
 export const ActionItem = forwardRef<HTMLButtonElement, ActionItemProps>(
-  ({ children, onClick, value: itemId, ...rest }, ref) => {
+  ({ children, value: itemId, ...rest }, ref) => {
     const { rootId, activeItemId } = useMenuContext()
 
     const tree = useMenuTreeContext()
@@ -892,25 +915,29 @@ export const ActionItem = forwardRef<HTMLButtonElement, ActionItemProps>(
 
     return (
       <button
-        ref={composeRefs(ref, actionItemRef)}
-        role="menuitem"
-        type="button"
-        id={domId}
-        onClick={composeEventHandlers(onClick, () => {
-          // 1) 클릭 직전에 top-level 메뉴 id 기억
-          const topMenuId = tree.openedMenus[0]
+        ref={composeRefs(actionItemRef, ref)}
+        {...mergeProps(
+          {
+            role: 'menuitem',
+            type: 'button',
+            id: domId,
+            onClick: () => {
+              // 1) 클릭 직전에 top-level 메뉴 id 기억
+              const topMenuId = tree.openedMenus[0]
 
-          // 2) 메뉴 트리 전체 닫기
-          tree.setOpenedMenus([])
+              // 2) 메뉴 트리 전체 닫기
+              tree.setOpenedMenus([])
 
-          // 3) 최상위 trigger로 포커스 복원
-          if (topMenuId) {
-            const topTrigger = registry.get('trigger', topMenuId)
-            topTrigger?.node.focus()
-          }
-        })}
-        tabIndex={activeItemId === itemId ? 0 : -1}
-        {...rest}
+              // 3) 최상위 trigger로 포커스 복원
+              if (topMenuId) {
+                const topTrigger = registry.get('trigger', topMenuId)
+                topTrigger?.node.focus()
+              }
+            },
+            tabIndex: activeItemId === itemId ? 0 : -1,
+          },
+          rest,
+        )}
       >
         {children}
       </button>
@@ -922,7 +949,7 @@ export type LinkItemProps = Omit<ComponentPropsWithoutRef<'a'>, 'value'> & {
   value: string
 }
 export const LinkItem = forwardRef<HTMLAnchorElement, LinkItemProps>(
-  ({ children, onClick, value: itemId, onKeyDown, ...rest }, ref) => {
+  ({ children, value: itemId, ...rest }, ref) => {
     const { rootId, activeItemId } = useMenuContext()
     const tree = useMenuTreeContext()
     const registry = MenuSystem.useCompositeRegistry()
@@ -937,31 +964,35 @@ export const LinkItem = forwardRef<HTMLAnchorElement, LinkItemProps>(
 
     return (
       <a
-        ref={composeRefs(ref, linkItemRef)}
-        role="menuitem"
-        id={domId}
-        onClick={composeEventHandlers(onClick, () => {
-          const topMenuId = tree.openedMenus[0]
+        ref={composeRefs(linkItemRef, ref)}
+        {...mergeProps(
+          {
+            role: 'menuitem',
+            id: domId,
+            onClick: () => {
+              const topMenuId = tree.openedMenus[0]
 
-          tree.setOpenedMenus([])
+              tree.setOpenedMenus([])
 
-          if (topMenuId) {
-            const topTrigger = registry.get('trigger', topMenuId)
-            topTrigger?.node.focus()
-          }
-        })}
-        onKeyDown={composeEventHandlers(onKeyDown, (event) => {
-          // [LinkItem] 스페이스바를 버튼처럼 동작시키기:
-          //   - Space 입력 시 기본 스크롤/페이지 이동 막고
-          //   - currentTarget.click() 호출로 onClick 흐름 재사용
-          if (event.key === ' ' || event.key === 'Spacebar') {
-            event.preventDefault()
-            // 클릭과 동일한 흐름 태우기 (위 onClick 로직 재사용)
-            ;(event.currentTarget as HTMLAnchorElement).click()
-          }
-        })}
-        tabIndex={activeItemId === itemId ? 0 : -1}
-        {...rest}
+              if (topMenuId) {
+                const topTrigger = registry.get('trigger', topMenuId)
+                topTrigger?.node.focus()
+              }
+            },
+            onKeyDown: (event) => {
+              // [LinkItem] 스페이스바를 버튼처럼 동작시키기:
+              //   - Space 입력 시 기본 스크롤/페이지 이동 막고
+              //   - currentTarget.click() 호출로 onClick 흐름 재사용
+              if (event.key === ' ' || event.key === 'Spacebar') {
+                event.preventDefault()
+                // 클릭과 동일한 흐름 태우기 (위 onClick 로직 재사용)
+                ;(event.currentTarget as HTMLAnchorElement).click()
+              }
+            },
+            tabIndex: activeItemId === itemId ? 0 : -1,
+          },
+          rest,
+        )}
       >
         {children}
       </a>

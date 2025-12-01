@@ -36,8 +36,8 @@ export interface ComposeEventHandlersOptions {
  *   />
  */
 export function composeEventHandlers<E extends { defaultPrevented?: boolean }>(
-  external: EventHandler<E>,
   internal: EventHandler<E>,
+  external: EventHandler<E>,
   options: ComposeEventHandlersOptions = {},
 ): (event: E) => void {
   const { checkForDefaultPrevented = true } = options
