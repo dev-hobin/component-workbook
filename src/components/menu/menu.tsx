@@ -24,6 +24,7 @@ import {
 } from '@floating-ui/dom'
 import { useLatestRef } from '../../hooks/useLatestRef'
 import { MenuSystem } from './system'
+import { composeEventHandlers } from '../../utils/composeEventHandlers'
 
 type MenuContextValue = {
   rootId: string
@@ -542,14 +543,13 @@ export function Trigger({ children, onClick, ...rest }: TriggerProps) {
       ref={ref}
       type="button"
       id={domId}
-      onClick={(event) => {
+      onClick={composeEventHandlers(onClick, () => {
         if (open) {
           closeMenu()
         } else {
           openMenu({ initialFocusType: 'first-item' })
         }
-        onClick?.(event)
-      }}
+      })}
       aria-haspopup="menu"
       aria-expanded={open ? 'true' : 'false'}
       aria-controls={registry.getDomId('content', rootId)}
@@ -650,7 +650,7 @@ export function SubTrigger({ children, onClick, ...rest }: SubTriggerProps) {
       role="menuitem"
       type="button"
       id={triggerReg.domId}
-      onClick={(event) => {
+      onClick={composeEventHandlers(onClick, () => {
         if (open) {
           // 서브메뉴가 열려 있다면 닫기
           closeMenu()
@@ -658,8 +658,7 @@ export function SubTrigger({ children, onClick, ...rest }: SubTriggerProps) {
           // 서브메뉴가 닫혀 있다면 열고, 처음 아이템에 포커스
           openMenu({ initialFocusType: 'first-item' })
         }
-        onClick?.(event)
-      }}
+      })}
       tabIndex={isActiveInParent ? 0 : -1}
       aria-haspopup="menu"
       aria-expanded={open ? 'true' : 'false'}
@@ -900,7 +899,7 @@ export function ActionItem({
       role="menuitem"
       type="button"
       id={domId}
-      onClick={(event) => {
+      onClick={composeEventHandlers(onClick, () => {
         // 1) 클릭 직전에 top-level 메뉴 id 기억
         const topMenuId = tree.openedMenus[0]
 
@@ -912,10 +911,7 @@ export function ActionItem({
           const topTrigger = registry.get('trigger', topMenuId)
           topTrigger?.node.focus()
         }
-
-        // 4) 사용자 onClick 호출
-        onClick?.(event)
-      }}
+      })}
       tabIndex={activeItemId === itemId ? 0 : -1}
       {...rest}
     >
@@ -951,7 +947,7 @@ export function LinkItem({
       ref={ref}
       role="menuitem"
       id={domId}
-      onClick={(event) => {
+      onClick={composeEventHandlers(onClick, () => {
         const topMenuId = tree.openedMenus[0]
 
         tree.setOpenedMenus([])
@@ -960,10 +956,8 @@ export function LinkItem({
           const topTrigger = registry.get('trigger', topMenuId)
           topTrigger?.node.focus()
         }
-
-        onClick?.(event)
-      }}
-      onKeyDown={(event) => {
+      })}
+      onKeyDown={composeEventHandlers(onKeyDown, (event) => {
         // [LinkItem] 스페이스바를 버튼처럼 동작시키기:
         //   - Space 입력 시 기본 스크롤/페이지 이동 막고
         //   - currentTarget.click() 호출로 onClick 흐름 재사용
@@ -972,8 +966,7 @@ export function LinkItem({
           // 클릭과 동일한 흐름 태우기 (위 onClick 로직 재사용)
           ;(event.currentTarget as HTMLAnchorElement).click()
         }
-        onKeyDown?.(event)
-      }}
+      })}
       tabIndex={activeItemId === itemId ? 0 : -1}
       {...rest}
     >
