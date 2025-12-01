@@ -1,6 +1,7 @@
 import { useControllableState } from '@radix-ui/react-use-controllable-state'
 import {
   createContext,
+  forwardRef,
   useCallback,
   useContext,
   useEffect,
@@ -25,6 +26,7 @@ import {
 import { useLatestRef } from '../../hooks/useLatestRef'
 import { MenuSystem } from './system'
 import { composeEventHandlers } from '../../utils/composeEventHandlers'
+import { composeRefs } from '../../utils/composeRefs'
 
 type MenuContextValue = {
   rootId: string
@@ -525,184 +527,184 @@ export function ChildRoot({ children, menuId }: RootProps) {
 }
 
 export type TriggerProps = ComponentPropsWithoutRef<'button'>
-export function Trigger({ children, onClick, ...rest }: TriggerProps) {
-  const { open, openMenu, closeMenu, rootId } = useMenuContext()
+export const Trigger = forwardRef<HTMLButtonElement, TriggerProps>(
+  ({ children, onClick, ...rest }, ref) => {
+    const { open, openMenu, closeMenu, rootId } = useMenuContext()
 
-  const registry = MenuSystem.useCompositeRegistry()
+    const registry = MenuSystem.useCompositeRegistry()
 
-  const { domId, ref } = MenuSystem.useCompositeItemRegistration(
-    'trigger',
-    rootId,
-    {
-      meta: { rootId }, // 나중에 필요하면 더 추가
-    },
-  )
+    const { domId, ref: triggerRef } = MenuSystem.useCompositeItemRegistration(
+      'trigger',
+      rootId,
+      {
+        meta: { rootId }, // 나중에 필요하면 더 추가
+      },
+    )
 
-  return (
-    <button
-      ref={ref}
-      type="button"
-      id={domId}
-      onClick={composeEventHandlers(onClick, () => {
-        if (open) {
-          closeMenu()
-        } else {
-          openMenu({ initialFocusType: 'first-item' })
-        }
-      })}
-      aria-haspopup="menu"
-      aria-expanded={open ? 'true' : 'false'}
-      aria-controls={registry.getDomId('content', rootId)}
-      {...rest}
-    >
-      {children}
-    </button>
-  )
-}
+    return (
+      <button
+        ref={composeRefs(ref, triggerRef)}
+        type="button"
+        id={domId}
+        onClick={composeEventHandlers(onClick, () => {
+          if (open) {
+            closeMenu()
+          } else {
+            openMenu({ initialFocusType: 'first-item' })
+          }
+        })}
+        aria-haspopup="menu"
+        aria-expanded={open ? 'true' : 'false'}
+        aria-controls={registry.getDomId('content', rootId)}
+        {...rest}
+      >
+        {children}
+      </button>
+    )
+  },
+)
 
 export type ContentProps = ComponentPropsWithoutRef<'div'>
-export function Content({ children, ...rest }: ContentProps) {
-  const { open, rootId } = useMenuContext()
+export const Content = forwardRef<HTMLDivElement, ContentProps>(
+  ({ children, ...rest }, ref) => {
+    const { open, rootId } = useMenuContext()
 
-  const registry = MenuSystem.useCompositeRegistry()
+    const registry = MenuSystem.useCompositeRegistry()
 
-  const { domId, ref } = MenuSystem.useCompositeItemRegistration(
-    'content',
-    rootId,
-    { meta: { rootId } },
-  )
+    const { domId, ref: contentRef } = MenuSystem.useCompositeItemRegistration(
+      'content',
+      rootId,
+      { meta: { rootId } },
+    )
 
-  const { isPresent, transitionState } = usePresence({
-    isVisible: open,
-    resolveElement: () => registry.get('content', rootId)?.node ?? null,
-  })
+    const { isPresent, transitionState } = usePresence({
+      isVisible: open,
+      resolveElement: () => registry.get('content', rootId)?.node ?? null,
+    })
 
-  if (!isPresent) {
-    return null
-  }
+    if (!isPresent) {
+      return null
+    }
 
-  return (
-    <div
-      ref={ref}
-      role="menu"
-      id={domId}
-      aria-labelledby={registry.getDomId('trigger', rootId)}
-      data-transition={transitionState}
-      {...rest}
-    >
-      {children}
-    </div>
-  )
-}
+    return (
+      <div
+        ref={composeRefs(ref, contentRef)}
+        role="menu"
+        id={domId}
+        aria-labelledby={registry.getDomId('trigger', rootId)}
+        data-transition={transitionState}
+        {...rest}
+      >
+        {children}
+      </div>
+    )
+  },
+)
 
 export type SubTriggerProps = ComponentPropsWithoutRef<'button'>
 
-export function SubTrigger({ children, onClick, ...rest }: SubTriggerProps) {
-  const {
-    open,
-    openMenu,
-    closeMenu,
-    rootId, // 이 SubTrigger가 여는 서브메뉴의 rootId
-    parentMenuContext, // 상위 메뉴의 컨텍스트
-  } = useMenuContext()
+export const SubTrigger = forwardRef<HTMLButtonElement, SubTriggerProps>(
+  ({ children, onClick, ...rest }, ref) => {
+    const {
+      open,
+      openMenu,
+      closeMenu,
+      rootId, // 이 SubTrigger가 여는 서브메뉴의 rootId
+      parentMenuContext, // 상위 메뉴의 컨텍스트
+    } = useMenuContext()
 
-  if (!parentMenuContext) {
-    throw new Error('Menu.SubTrigger must be used within a Menu.Root')
-  }
+    if (!parentMenuContext) {
+      throw new Error('Menu.SubTrigger must be used within a Menu.Root')
+    }
 
-  const ownerRootId = parentMenuContext.rootId // 부모 메뉴의 rootId
+    const ownerRootId = parentMenuContext.rootId // 부모 메뉴의 rootId
 
-  const registry = MenuSystem.useCompositeRegistry()
+    const registry = MenuSystem.useCompositeRegistry()
 
-  // 1) 서브메뉴 입장에서의 trigger 등록
-  const triggerReg = MenuSystem.useCompositeItemRegistration(
-    'trigger',
-    rootId,
-    {
-      meta: { rootId }, // 트리거는 자기 서브메뉴(rootId)에 속함
-    },
-  )
+    // 1) 서브메뉴 입장에서의 trigger 등록
+    const triggerReg = MenuSystem.useCompositeItemRegistration(
+      'trigger',
+      rootId,
+      {
+        meta: { rootId }, // 트리거는 자기 서브메뉴(rootId)에 속함
+      },
+    )
 
-  // 2) 부모 메뉴 입장에서의 item 등록
-  //    itemId도 child rootId를 쓰면, 부모 메뉴의 activeItemId랑 맞춰 쓰기 좋음
-  const itemReg = MenuSystem.useCompositeItemRegistration('item', rootId, {
-    id: triggerReg.domId, // DOM id는 trigger 쪽 id랑 동일하게 맞추기
-    meta: { rootId: ownerRootId }, // 이 item의 "owner 메뉴"는 부모 메뉴
-  })
+    // 2) 부모 메뉴 입장에서의 item 등록
+    //    itemId도 child rootId를 쓰면, 부모 메뉴의 activeItemId랑 맞춰 쓰기 좋음
+    const itemReg = MenuSystem.useCompositeItemRegistration('item', rootId, {
+      id: triggerReg.domId, // DOM id는 trigger 쪽 id랑 동일하게 맞추기
+      meta: { rootId: ownerRootId }, // 이 item의 "owner 메뉴"는 부모 메뉴
+    })
 
-  // 두 registry ref를 하나의 ref로 합쳐서 button에 달아준다
-  const ref = useCallback(
-    (node: HTMLElement | null) => {
-      triggerReg.ref(node)
-      itemReg.ref(node)
-    },
-    [triggerReg, itemReg],
-  )
+    // 두 registry ref를 하나의 ref로 합쳐서 button에 달아준다
 
-  // 부모 메뉴의 activeItemId로 roving tabIndex를 판단
-  const isActiveInParent =
-    parentMenuContext.activeItemId != null &&
-    parentMenuContext.activeItemId === rootId
+    // 부모 메뉴의 activeItemId로 roving tabIndex를 판단
+    const isActiveInParent =
+      parentMenuContext.activeItemId != null &&
+      parentMenuContext.activeItemId === rootId
 
-  return (
-    <button
-      ref={ref}
-      role="menuitem"
-      type="button"
-      id={triggerReg.domId}
-      onClick={composeEventHandlers(onClick, () => {
-        if (open) {
-          // 서브메뉴가 열려 있다면 닫기
-          closeMenu()
-        } else {
-          // 서브메뉴가 닫혀 있다면 열고, 처음 아이템에 포커스
-          openMenu({ initialFocusType: 'first-item' })
-        }
-      })}
-      tabIndex={isActiveInParent ? 0 : -1}
-      aria-haspopup="menu"
-      aria-expanded={open ? 'true' : 'false'}
-      aria-controls={registry.getDomId('content', rootId) ?? undefined}
-      {...rest}
-    >
-      {children}
-    </button>
-  )
-}
+    return (
+      <button
+        ref={composeRefs(ref, triggerReg.ref, itemReg.ref)}
+        role="menuitem"
+        type="button"
+        id={triggerReg.domId}
+        onClick={composeEventHandlers(onClick, () => {
+          if (open) {
+            // 서브메뉴가 열려 있다면 닫기
+            closeMenu()
+          } else {
+            // 서브메뉴가 닫혀 있다면 열고, 처음 아이템에 포커스
+            openMenu({ initialFocusType: 'first-item' })
+          }
+        })}
+        tabIndex={isActiveInParent ? 0 : -1}
+        aria-haspopup="menu"
+        aria-expanded={open ? 'true' : 'false'}
+        aria-controls={registry.getDomId('content', rootId) ?? undefined}
+        {...rest}
+      >
+        {children}
+      </button>
+    )
+  },
+)
 
 export type SubContentProps = ComponentPropsWithoutRef<'div'>
-export function SubContent({ children, ...rest }: SubContentProps) {
-  const { open, rootId } = useMenuContext()
-  const registry = MenuSystem.useCompositeRegistry()
+export const SubContent = forwardRef<HTMLDivElement, SubContentProps>(
+  ({ children, ...rest }, ref) => {
+    const { open, rootId } = useMenuContext()
+    const registry = MenuSystem.useCompositeRegistry()
 
-  const { domId, ref } = MenuSystem.useCompositeItemRegistration(
-    'content',
-    rootId,
-    { meta: { rootId } },
-  )
+    const { domId, ref: subContentRef } =
+      MenuSystem.useCompositeItemRegistration('content', rootId, {
+        meta: { rootId },
+      })
 
-  const { isPresent, transitionState } = usePresence({
-    isVisible: open,
-    resolveElement: () => registry.get('content', rootId)?.node ?? null,
-  })
+    const { isPresent, transitionState } = usePresence({
+      isVisible: open,
+      resolveElement: () => registry.get('content', rootId)?.node ?? null,
+    })
 
-  if (!isPresent) {
-    return null
-  }
+    if (!isPresent) {
+      return null
+    }
 
-  return (
-    <div
-      ref={ref}
-      role="menu"
-      id={domId}
-      aria-labelledby={registry.getDomId('trigger', rootId)}
-      data-transition={transitionState}
-      {...rest}
-    >
-      {children}
-    </div>
-  )
-}
+    return (
+      <div
+        ref={composeRefs(ref, subContentRef)}
+        role="menu"
+        id={domId}
+        aria-labelledby={registry.getDomId('trigger', rootId)}
+        data-transition={transitionState}
+        {...rest}
+      >
+        {children}
+      </div>
+    )
+  },
+)
 
 export type PositionerProps = {
   placement?: Placement
@@ -712,161 +714,163 @@ export type PositionerProps = {
   arrowOffset?: number
 } & ComponentPropsWithoutRef<'div'>
 
-export function Positioner({
-  children,
-  placement = 'bottom',
-  flipOptions,
-  shiftOptions,
-  offset: offsetOption = 0,
-  arrowOffset: arrowOffsetOption = 4,
-}: PositionerProps) {
-  const { open, rootId } = useMenuContext()
-  const registry = MenuSystem.useCompositeRegistry()
+export const Positioner = forwardRef<HTMLDivElement, PositionerProps>(
+  (
+    {
+      children,
+      placement = 'bottom',
+      flipOptions,
+      shiftOptions,
+      offset: offsetOption = 0,
+      arrowOffset: arrowOffsetOption = 4,
+    },
+    ref,
+  ) => {
+    const { open, rootId } = useMenuContext()
+    const registry = MenuSystem.useCompositeRegistry()
 
-  const { domId, ref } = MenuSystem.useCompositeItemRegistration(
-    'positioner',
-    rootId,
-    { meta: { rootId } },
-  )
+    const { domId, ref: positionerRef } =
+      MenuSystem.useCompositeItemRegistration('positioner', rootId, {
+        meta: { rootId },
+      })
 
-  const { isPresent } = usePresence({
-    isVisible: open,
-    resolveElement: () => registry.get('positioner', rootId)?.node ?? null,
-  })
+    const { isPresent } = usePresence({
+      isVisible: open,
+      resolveElement: () => registry.get('positioner', rootId)?.node ?? null,
+    })
 
-  const flipOptionsRef = useLatestRef(flipOptions)
-  const shiftOptionsRef = useLatestRef(shiftOptions)
+    const flipOptionsRef = useLatestRef(flipOptions)
+    const shiftOptionsRef = useLatestRef(shiftOptions)
 
-  // [Positioner] positioner/arrow 위치 계산 및 autoUpdate:
-  //   - 메뉴가 표시(isPresent)될 때 Floating UI의 autoUpdate를 사용해
-  //     trigger / positioner / arrow 위치를 지속적으로 업데이트
-  useLayoutEffect(() => {
-    if (!isPresent) return
+    // [Positioner] positioner/arrow 위치 계산 및 autoUpdate:
+    //   - 메뉴가 표시(isPresent)될 때 Floating UI의 autoUpdate를 사용해
+    //     trigger / positioner / arrow 위치를 지속적으로 업데이트
+    useLayoutEffect(() => {
+      if (!isPresent) return
 
-    const triggerEl = registry.get('trigger', rootId)?.node
-    const positionerEl = registry.get('positioner', rootId)?.node
-    if (!triggerEl || !positionerEl) return
-
-    function positionUpdate() {
       const triggerEl = registry.get('trigger', rootId)?.node
       const positionerEl = registry.get('positioner', rootId)?.node
       if (!triggerEl || !positionerEl) return
 
-      const arrowEl = registry.get('arrow', rootId)?.node
+      function positionUpdate() {
+        const triggerEl = registry.get('trigger', rootId)?.node
+        const positionerEl = registry.get('positioner', rootId)?.node
+        if (!triggerEl || !positionerEl) return
 
-      computePosition(triggerEl, positionerEl, {
-        placement,
-        middleware: [
-          offset(offsetOption),
-          flip(flipOptionsRef.current),
-          shift(shiftOptionsRef.current),
-          ...(arrowEl
-            ? [
-                arrow({
-                  element: arrowEl,
-                }),
-              ]
-            : []),
-        ],
-      }).then(({ x, y, middlewareData }) => {
-        Object.assign(positionerEl.style, {
-          left: `${x}px`,
-          top: `${y}px`,
+        const arrowEl = registry.get('arrow', rootId)?.node
+
+        computePosition(triggerEl, positionerEl, {
+          placement,
+          middleware: [
+            offset(offsetOption),
+            flip(flipOptionsRef.current),
+            shift(shiftOptionsRef.current),
+            ...(arrowEl
+              ? [
+                  arrow({
+                    element: arrowEl,
+                  }),
+                ]
+              : []),
+          ],
+        }).then(({ x, y, middlewareData }) => {
+          Object.assign(positionerEl.style, {
+            left: `${x}px`,
+            top: `${y}px`,
+          })
+
+          const arrowData = middlewareData.arrow
+          if (!arrowData || !arrowEl) return
+
+          const { x: arrowX, y: arrowY } = arrowData
+          const staticSide = {
+            top: 'bottom',
+            right: 'left',
+            bottom: 'top',
+            left: 'right',
+          }[placement.split('-')[0]]
+
+          Object.assign(arrowEl.style, {
+            left: arrowX != null ? `${arrowX}px` : '',
+            top: arrowY != null ? `${arrowY}px` : '',
+            right: '',
+            bottom: '',
+            [staticSide as keyof CSSProperties]: `-${arrowOffsetOption}px`,
+          })
         })
+      }
 
-        const arrowData = middlewareData.arrow
-        if (!arrowData || !arrowEl) return
+      const cleanup = autoUpdate(triggerEl, positionerEl, positionUpdate)
+      return () => cleanup()
+    }, [
+      isPresent,
+      registry,
+      rootId,
+      placement,
+      flipOptionsRef,
+      shiftOptionsRef,
+      offsetOption,
+      arrowOffsetOption,
+    ])
 
-        const { x: arrowX, y: arrowY } = arrowData
-        const staticSide = {
-          top: 'bottom',
-          right: 'left',
-          bottom: 'top',
-          left: 'right',
-        }[placement.split('-')[0]]
-
-        Object.assign(arrowEl.style, {
-          left: arrowX != null ? `${arrowX}px` : '',
-          top: arrowY != null ? `${arrowY}px` : '',
-          right: '',
-          bottom: '',
-          [staticSide as keyof CSSProperties]: `-${arrowOffsetOption}px`,
-        })
-      })
+    if (!isPresent) {
+      return null
     }
 
-    const cleanup = autoUpdate(triggerEl, positionerEl, positionUpdate)
-    return () => cleanup()
-  }, [
-    isPresent,
-    registry,
-    rootId,
-    placement,
-    flipOptionsRef,
-    shiftOptionsRef,
-    offsetOption,
-    arrowOffsetOption,
-  ])
-
-  if (!isPresent) {
-    return null
-  }
-
-  return (
-    <div
-      ref={ref}
-      id={domId}
-      style={{
-        width: 'max-content',
-        position: 'absolute',
-        top: 0,
-        left: 0,
-      }}
-    >
-      {children}
-    </div>
-  )
-}
+    return (
+      <div
+        ref={composeRefs(ref, positionerRef)}
+        id={domId}
+        style={{
+          width: 'max-content',
+          position: 'absolute',
+          top: 0,
+          left: 0,
+        }}
+      >
+        {children}
+      </div>
+    )
+  },
+)
 
 export type PositionerArrowProps = ComponentPropsWithoutRef<'div'>
-export function PositionerArrow({
-  children,
-  style,
-  ...rest
-}: PositionerArrowProps) {
-  const { rootId, open } = useMenuContext()
+export const PositionerArrow = forwardRef<HTMLDivElement, PositionerArrowProps>(
+  ({ children, style, ...rest }, ref) => {
+    const { rootId, open } = useMenuContext()
 
-  const registry = MenuSystem.useCompositeRegistry()
+    const registry = MenuSystem.useCompositeRegistry()
 
-  const { domId, ref } = MenuSystem.useCompositeItemRegistration(
-    'arrow',
-    rootId,
-    { meta: { rootId } },
-  )
+    const { domId, ref: arrowRef } = MenuSystem.useCompositeItemRegistration(
+      'arrow',
+      rootId,
+      { meta: { rootId } },
+    )
 
-  const { transitionState } = usePresence({
-    isVisible: open,
-    resolveElement: () => registry.get('arrow', rootId)?.node ?? null,
-  })
+    const { transitionState } = usePresence({
+      isVisible: open,
+      resolveElement: () => registry.get('arrow', rootId)?.node ?? null,
+    })
 
-  return (
-    <div
-      ref={ref}
-      id={domId}
-      style={{
-        position: 'absolute',
-        width: 8,
-        height: 8,
-        transform: 'rotate(45deg)',
-        ...style,
-      }}
-      data-transition={transitionState}
-      {...rest}
-    >
-      {children}
-    </div>
-  )
-}
+    return (
+      <div
+        ref={composeRefs(ref, arrowRef)}
+        id={domId}
+        style={{
+          position: 'absolute',
+          width: 8,
+          height: 8,
+          transform: 'rotate(45deg)',
+          ...style,
+        }}
+        data-transition={transitionState}
+        {...rest}
+      >
+        {children}
+      </div>
+    )
+  },
+)
 
 export type ActionItemProps = Omit<
   ComponentPropsWithoutRef<'button'>,
@@ -874,106 +878,96 @@ export type ActionItemProps = Omit<
 > & {
   value: string
 }
-export function ActionItem({
-  children,
-  onClick,
-  value: itemId,
-  ...rest
-}: ActionItemProps) {
-  const { rootId, activeItemId } = useMenuContext()
+export const ActionItem = forwardRef<HTMLButtonElement, ActionItemProps>(
+  ({ children, onClick, value: itemId, ...rest }, ref) => {
+    const { rootId, activeItemId } = useMenuContext()
 
-  const tree = useMenuTreeContext()
-  const registry = MenuSystem.useCompositeRegistry()
+    const tree = useMenuTreeContext()
+    const registry = MenuSystem.useCompositeRegistry()
 
-  const { domId, ref } = MenuSystem.useCompositeItemRegistration(
-    'item',
-    itemId,
-    {
-      meta: { rootId }, // owner menu id
-    },
-  )
+    const { domId, ref: actionItemRef } =
+      MenuSystem.useCompositeItemRegistration('item', itemId, {
+        meta: { rootId }, // owner menu id
+      })
 
-  return (
-    <button
-      ref={ref}
-      role="menuitem"
-      type="button"
-      id={domId}
-      onClick={composeEventHandlers(onClick, () => {
-        // 1) 클릭 직전에 top-level 메뉴 id 기억
-        const topMenuId = tree.openedMenus[0]
+    return (
+      <button
+        ref={composeRefs(ref, actionItemRef)}
+        role="menuitem"
+        type="button"
+        id={domId}
+        onClick={composeEventHandlers(onClick, () => {
+          // 1) 클릭 직전에 top-level 메뉴 id 기억
+          const topMenuId = tree.openedMenus[0]
 
-        // 2) 메뉴 트리 전체 닫기
-        tree.setOpenedMenus([])
+          // 2) 메뉴 트리 전체 닫기
+          tree.setOpenedMenus([])
 
-        // 3) 최상위 trigger로 포커스 복원
-        if (topMenuId) {
-          const topTrigger = registry.get('trigger', topMenuId)
-          topTrigger?.node.focus()
-        }
-      })}
-      tabIndex={activeItemId === itemId ? 0 : -1}
-      {...rest}
-    >
-      {children}
-    </button>
-  )
-}
+          // 3) 최상위 trigger로 포커스 복원
+          if (topMenuId) {
+            const topTrigger = registry.get('trigger', topMenuId)
+            topTrigger?.node.focus()
+          }
+        })}
+        tabIndex={activeItemId === itemId ? 0 : -1}
+        {...rest}
+      >
+        {children}
+      </button>
+    )
+  },
+)
 
 export type LinkItemProps = Omit<ComponentPropsWithoutRef<'a'>, 'value'> & {
   value: string
 }
-export function LinkItem({
-  children,
-  onClick,
-  value: itemId,
-  onKeyDown,
-  ...rest
-}: LinkItemProps) {
-  const { rootId, activeItemId } = useMenuContext()
-  const tree = useMenuTreeContext()
-  const registry = MenuSystem.useCompositeRegistry()
+export const LinkItem = forwardRef<HTMLAnchorElement, LinkItemProps>(
+  ({ children, onClick, value: itemId, onKeyDown, ...rest }, ref) => {
+    const { rootId, activeItemId } = useMenuContext()
+    const tree = useMenuTreeContext()
+    const registry = MenuSystem.useCompositeRegistry()
 
-  const { domId, ref } = MenuSystem.useCompositeItemRegistration(
-    'item',
-    itemId,
-    {
-      meta: { rootId }, // owner menu id
-    },
-  )
+    const { domId, ref: linkItemRef } = MenuSystem.useCompositeItemRegistration(
+      'item',
+      itemId,
+      {
+        meta: { rootId }, // owner menu id
+      },
+    )
 
-  return (
-    <a
-      ref={ref}
-      role="menuitem"
-      id={domId}
-      onClick={composeEventHandlers(onClick, () => {
-        const topMenuId = tree.openedMenus[0]
+    return (
+      <a
+        ref={composeRefs(ref, linkItemRef)}
+        role="menuitem"
+        id={domId}
+        onClick={composeEventHandlers(onClick, () => {
+          const topMenuId = tree.openedMenus[0]
 
-        tree.setOpenedMenus([])
+          tree.setOpenedMenus([])
 
-        if (topMenuId) {
-          const topTrigger = registry.get('trigger', topMenuId)
-          topTrigger?.node.focus()
-        }
-      })}
-      onKeyDown={composeEventHandlers(onKeyDown, (event) => {
-        // [LinkItem] 스페이스바를 버튼처럼 동작시키기:
-        //   - Space 입력 시 기본 스크롤/페이지 이동 막고
-        //   - currentTarget.click() 호출로 onClick 흐름 재사용
-        if (event.key === ' ' || event.key === 'Spacebar') {
-          event.preventDefault()
-          // 클릭과 동일한 흐름 태우기 (위 onClick 로직 재사용)
-          ;(event.currentTarget as HTMLAnchorElement).click()
-        }
-      })}
-      tabIndex={activeItemId === itemId ? 0 : -1}
-      {...rest}
-    >
-      {children}
-    </a>
-  )
-}
+          if (topMenuId) {
+            const topTrigger = registry.get('trigger', topMenuId)
+            topTrigger?.node.focus()
+          }
+        })}
+        onKeyDown={composeEventHandlers(onKeyDown, (event) => {
+          // [LinkItem] 스페이스바를 버튼처럼 동작시키기:
+          //   - Space 입력 시 기본 스크롤/페이지 이동 막고
+          //   - currentTarget.click() 호출로 onClick 흐름 재사용
+          if (event.key === ' ' || event.key === 'Spacebar') {
+            event.preventDefault()
+            // 클릭과 동일한 흐름 태우기 (위 onClick 로직 재사용)
+            ;(event.currentTarget as HTMLAnchorElement).click()
+          }
+        })}
+        tabIndex={activeItemId === itemId ? 0 : -1}
+        {...rest}
+      >
+        {children}
+      </a>
+    )
+  },
+)
 
 export type PortalProps = {
   children: React.ReactNode
