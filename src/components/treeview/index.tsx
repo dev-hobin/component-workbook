@@ -1,12 +1,12 @@
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useId,
   useMemo,
   useRef,
   type ComponentPropsWithoutRef,
-  type ReactNode,
 } from 'react'
 import {
   buildVisibleNodes,
@@ -18,7 +18,14 @@ import {
   type VisibleNode,
 } from '../../core/composite-store'
 import { useControllableState } from '@radix-ui/react-use-controllable-state'
-import { getInitialActiveId } from './strategy'
+import {
+  getNextActiveIdByKey,
+  getNextActiveIdHorizontalByKey,
+  getNextExpandedIdsByKey,
+  type TreeViewContext,
+} from './strategy'
+import { TreeViewDomSystem } from './dom'
+import { composeEventHandlers } from '../../utils/composeEventHandlers'
 
 type TreeRole = 'item'
 type TreeExtraMeta = object
@@ -87,7 +94,7 @@ function useTreeLevelContext(): TreeLevelContextValue {
 // Item Context
 // ─────────────────────────────────────────────
 
-type ItemContextValue = { id: NodeId }
+type ItemContextValue = { id: NodeId; domId: string }
 const TreeItemContext = createContext<ItemContextValue | null>(null)
 
 function useTreeItemContext(): ItemContextValue {
@@ -163,42 +170,7 @@ type RootProps = ComponentPropsWithoutRef<'ul'> & {
   onActiveIdChange?: (next: NodeId | null) => void
 }
 
-function Root(props: RootProps) {
-  const existingSystem = useContext(TreeSystemContext)
-
-  // 아직 시스템 컨텍스트가 없으면 → TopRoot
-  if (!existingSystem) {
-    return (
-      <TreeSystemProvider>
-        <TreeLevelContext.Provider value={{ parentId: null }}>
-          <ParentRoot {...props} />
-        </TreeLevelContext.Provider>
-      </TreeSystemProvider>
-    )
-  }
-
-  // 이미 트리 안에서 Root를 쓰는 건 피하고 싶다면:
-  // 여기서 경고/에러를 던지고, SubRoot만 쓰도록 강제해도 됨.
-  throw new Error(
-    '트리 안에서는 TreeView.Root 대신 TreeView.SubRoot를 사용하세요.',
-  )
-}
-
-type SubRootProps = ComponentPropsWithoutRef<'ul'>
-function SubRoot(props: SubRootProps) {
-  useTreeSystemContext() // 트리 안인지 확인
-  const itemContext = useTreeItemContext() // 어떤 Item 아래인지
-
-  const levelValue: TreeLevelContextValue = { parentId: itemContext.id }
-
-  return (
-    <TreeLevelContext.Provider value={levelValue}>
-      <ChildRoot {...props} />
-    </TreeLevelContext.Provider>
-  )
-}
-
-function ParentRoot({
+function Root({
   expandedIds: expandedIdsProp,
   defaultExpandedIds,
   onExpandedIdsChange,
@@ -210,6 +182,8 @@ function ParentRoot({
   onActiveIdChange,
   ...rest
 }: RootProps) {
+  const existingSystem = useContext(TreeSystemContext)
+
   const [expandedIds, setExpandedIds] = useControllableState<NodeId[]>({
     prop: expandedIdsProp,
     defaultProp: defaultExpandedIds ?? [],
@@ -246,20 +220,65 @@ function ParentRoot({
     ],
   )
 
-  console.log('activeId', activeId)
+  // 아직 시스템 컨텍스트가 없으면 → TopRoot
+  if (existingSystem) {
+    // 이미 트리 안에서 Root를 쓰는 건 피하고 싶다면:
+    // 여기서 경고/에러를 던지고, SubRoot만 쓰도록 강제해도 됨.
+    throw new Error(
+      '트리 안에서는 TreeView.Root 대신 TreeView.SubRoot를 사용하세요.',
+    )
+  }
 
   return (
-    <TreeStateContext.Provider value={value}>
-      {/* <DebugVisibleNodes /> */}
-      <InitActiveIdOnce />
-      <ChildRoot {...rest} />
-    </TreeStateContext.Provider>
+    <TreeSystemProvider>
+      <TreeViewDomSystem.Provider>
+        <TreeLevelContext.Provider value={{ parentId: null }}>
+          <TreeStateContext.Provider value={value}>
+            <ParentRoot {...rest} />
+          </TreeStateContext.Provider>
+        </TreeLevelContext.Provider>
+      </TreeViewDomSystem.Provider>
+    </TreeSystemProvider>
   )
+}
+
+type SubRootProps = ComponentPropsWithoutRef<'ul'>
+function SubRoot(props: SubRootProps) {
+  useTreeSystemContext() // 트리 안인지 확인
+
+  const itemContext = useTreeItemContext() // 어떤 Item 아래인지
+  const { expandedIds } = useTreeStateContext()
+
+  const parentId = itemContext.id
+
+  const isExpanded = expandedIds.includes(parentId)
+
+  return (
+    <TreeLevelContext.Provider value={{ parentId }}>
+      <ChildRoot data-expanded={isExpanded} {...props} />
+    </TreeLevelContext.Provider>
+  )
+}
+
+type ParentRootProps = ComponentPropsWithoutRef<'ul'>
+function ParentRoot(props: ParentRootProps) {
+  useTreeFocusEffect()
+
+  return <ChildRoot {...props} />
 }
 
 type ChildRootProps = ComponentPropsWithoutRef<'ul'>
 function ChildRoot(props: ChildRootProps) {
-  return <ul {...props} />
+  const handleKeyDown = useTreeKeyboardNavigation()
+  const { parentId } = useTreeLevelContext()
+
+  return (
+    <ul
+      {...props}
+      role={parentId ? 'group' : 'tree'}
+      onKeyDown={handleKeyDown}
+    />
+  )
 }
 
 type ItemProps = ComponentPropsWithoutRef<'li'> & {
@@ -271,6 +290,8 @@ function Item(props: ItemProps) {
 
   const { store } = useTreeSystemContext()
   const { parentId } = useTreeLevelContext()
+  const visibleNodes = useTreeVisibleNodes()
+  const { activeId, selectedIds, expandedIds } = useTreeStateContext()
 
   const reactId = useId()
   const id: NodeId = useMemo(() => nodeId ?? reactId, [nodeId, reactId])
@@ -281,21 +302,106 @@ function Item(props: ItemProps) {
     role: 'item',
   })
 
-  const itemContextValue = useMemo<ItemContextValue>(() => ({ id }), [id])
+  const labelId = TreeViewDomSystem.useCompositeDomId('label', id)
+  const { domId, ref } = TreeViewDomSystem.useCompositeItemRegistration(
+    'item',
+    id,
+    {
+      id: props.id, // 사용자가 id를 넘겼으면 그걸 우선 사용
+    },
+  )
+
+  const itemContextValue = useMemo<ItemContextValue>(
+    () => ({ id, domId }),
+    [id, domId],
+  )
+
+  const isTabbable = (activeId || visibleNodes[0]?.id) === id
+  const isSelected = selectedIds.includes(id)
+
+  const nodeInfo = visibleNodes.find((n) => n.id === id)
+  const hasChildren = nodeInfo?.hasChildren ?? false
+  const isExpanded = expandedIds.includes(id)
+  const ariaExpanded = hasChildren ? isExpanded : undefined
+  const ariaLevel = nodeInfo ? nodeInfo.depth + 1 : undefined // depth 0 → level 1
+  const ariaPosInSet = nodeInfo ? nodeInfo.index + 1 : undefined
+  const ariaSetSize = nodeInfo ? nodeInfo.size : undefined
+
+  const { handleClick, handleKeyDown } = useTreeItemInteractions({
+    id,
+    hasChildren: nodeInfo?.hasChildren ?? false,
+  })
 
   return (
     <TreeItemContext.Provider value={itemContextValue}>
-      <li {...liProps}>{children}</li>
+      <li
+        {...liProps}
+        ref={ref}
+        id={domId}
+        role="treeitem"
+        tabIndex={isTabbable ? 0 : -1}
+        aria-selected={isSelected}
+        aria-labelledby={labelId ?? domId}
+        aria-expanded={ariaExpanded}
+        aria-level={ariaLevel}
+        aria-posinset={ariaPosInSet}
+        aria-setsize={ariaSetSize}
+        data-selected={isSelected}
+        onClick={composeEventHandlers(handleClick, liProps.onClick)}
+        onKeyDown={composeEventHandlers(handleKeyDown, liProps.onKeyDown)}
+      >
+        {children}
+      </li>
     </TreeItemContext.Provider>
   )
 }
 
-function Indicator() {
-  return <span>Indicator</span>
+function Indicator({ children }: { children?: React.ReactNode }) {
+  const item = useTreeItemContext() // { id, domId }
+  const { selectedIds, expandedIds } = useTreeStateContext()
+
+  const isSelected = selectedIds.includes(item.id)
+  const isExpanded = expandedIds.includes(item.id)
+
+  const { domId, ref } = TreeViewDomSystem.useCompositeItemRegistration(
+    'indicator',
+    item.id,
+  )
+
+  return (
+    <span
+      ref={ref}
+      id={domId}
+      data-selected={isSelected}
+      data-expanded={isExpanded}
+    >
+      {children}
+    </span>
+  )
 }
 
 function Text({ children }: { children?: React.ReactNode }) {
-  return <span>{children}</span>
+  const item = useTreeItemContext() // { id, domId }
+  const { selectedIds, expandedIds } = useTreeStateContext()
+
+  const isSelected = selectedIds.includes(item.id)
+  const isExpanded = expandedIds.includes(item.id)
+
+  const { domId, ref } = TreeViewDomSystem.useCompositeItemRegistration(
+    'label',
+    item.id,
+  )
+
+  return (
+    <span
+      ref={ref}
+      id={domId}
+      data-selected={isSelected}
+      data-expanded={isExpanded}
+    >
+      {children}
+    </span>
+  )
 }
 
 const TreeView = {
@@ -306,38 +412,164 @@ const TreeView = {
   Text,
 }
 
-// function DebugVisibleNodes() {
-//   const visibleNodes = useTreeVisibleNodes()
-
-//   useEffect(() => {
-//     console.log('==== VISIBLE NODES ====')
-//     visibleNodes.forEach((node) => {
-//       console.log(
-//         `id=${node.id}, depth=${node.depth}, parent=${node.parentId}, index=${node.index}`,
-//       )
-//     })
-//     console.log('=======================')
-//   }, [visibleNodes])
-
-//   return null
-// }
-
-function InitActiveIdOnce() {
-  const { activeId, setActiveId } = useTreeStateContext()
+function useTreeKeyboardNavigation(): React.KeyboardEventHandler<HTMLUListElement> {
+  const { activeId, setActiveId, expandedIds, setExpandedIds } =
+    useTreeStateContext()
   const visibleNodes = useTreeVisibleNodes()
+  const baseActiveId = activeId ?? visibleNodes[0]?.id ?? null
+
+  const handleKeyDown = useCallback<
+    React.KeyboardEventHandler<HTMLUListElement>
+  >(
+    (event) => {
+      const key = event.key
+
+      const isVerticalKey =
+        key === 'ArrowUp' ||
+        key === 'ArrowDown' ||
+        key === 'Home' ||
+        key === 'End'
+
+      const isHorizontalKey = key === 'ArrowLeft' || key === 'ArrowRight'
+
+      if (!isVerticalKey && !isHorizontalKey) {
+        return
+      }
+
+      // 스크롤/브라우저 기본 동작 막기
+      event.preventDefault()
+
+      const ctx: TreeViewContext = { visibleNodes }
+
+      let nextActiveId: string | null = baseActiveId
+      let nextExpandedIds = expandedIds
+
+      // 1) 위/아래/Home/End → activeId만 변경
+      if (isVerticalKey) {
+        nextActiveId = getNextActiveIdByKey({
+          state: { activeId: baseActiveId },
+          ctx,
+          key,
+        })
+      }
+
+      // 2) 좌/우 → expandedIds + 수평 active 이동
+      if (isHorizontalKey) {
+        // (1) 펼침/접힘: expandedIds만 담당
+        nextExpandedIds = getNextExpandedIdsByKey({
+          state: { expandedIds, activeId: baseActiveId },
+          ctx,
+          key,
+        })
+
+        // (2) 수평 active 이동: 열린 parent → 첫 자식, child → parent 등
+        nextActiveId = getNextActiveIdHorizontalByKey({
+          state: { expandedIds, activeId: baseActiveId },
+          ctx,
+          key,
+        })
+      }
+
+      if (nextActiveId !== activeId) {
+        setActiveId(nextActiveId)
+      }
+      if (nextExpandedIds !== expandedIds) {
+        setExpandedIds(nextExpandedIds)
+      }
+    },
+    [
+      activeId,
+      baseActiveId,
+      expandedIds,
+      setActiveId,
+      setExpandedIds,
+      visibleNodes,
+    ],
+  )
+
+  return handleKeyDown
+}
+
+function useTreeFocusEffect() {
+  const { activeId } = useTreeStateContext()
+  const domSystem = TreeViewDomSystem.useCompositeContext() // or useCompositeRegistry()
+  const lastFocusedRef = useRef<NodeId | null>(null)
 
   useEffect(() => {
-    const next = getInitialActiveId({
-      state: { activeId },
-      ctx: { visibleNodes },
-    })
+    if (!activeId) return
 
-    if (next !== activeId) {
-      setActiveId(next)
+    const node = domSystem.registry.getNode('item', activeId)
+    if (!node) return
+
+    if (lastFocusedRef.current === activeId) return
+    if (node === document.activeElement) {
+      lastFocusedRef.current = activeId
+      return
     }
-  }, [activeId, setActiveId, visibleNodes])
 
-  return null
+    node.focus()
+    lastFocusedRef.current = activeId
+  }, [activeId, domSystem.registry])
+}
+
+function useTreeItemInteractions(args: { id: NodeId; hasChildren: boolean }) {
+  const { id, hasChildren } = args
+  const { activeId, setActiveId, setExpandedIds, setSelectedIds } =
+    useTreeStateContext()
+
+  const toggleExpanded = useCallback(() => {
+    setExpandedIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    )
+  }, [id, setExpandedIds])
+
+  const selectSingle = useCallback(() => {
+    // 지금은 단일 선택만 지원 (나중에 selectionMode로 확장 가능)
+    setSelectedIds([id])
+  }, [id, setSelectedIds])
+
+  const handleClick: React.MouseEventHandler<HTMLLIElement> = useCallback(
+    (event) => {
+      event.preventDefault()
+      event.stopPropagation()
+
+      // 항상 이 아이템으로 포커스
+      if (activeId !== id) {
+        setActiveId(id)
+      }
+
+      // 폴더면 열고/닫기
+      if (hasChildren) {
+        toggleExpanded()
+      }
+
+      // 폴더든 파일이든 "선택"은 동일하게 수행
+      selectSingle()
+    },
+    [activeId, id, hasChildren, selectSingle, setActiveId, toggleExpanded],
+  )
+
+  const handleKeyDown: React.KeyboardEventHandler<HTMLLIElement> = useCallback(
+    (event) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return
+
+      event.preventDefault()
+      event.stopPropagation()
+
+      if (activeId !== id) {
+        setActiveId(id)
+      }
+
+      if (hasChildren) {
+        toggleExpanded()
+      }
+
+      selectSingle()
+    },
+    [activeId, id, hasChildren, setActiveId, toggleExpanded, selectSingle],
+  )
+
+  return { handleClick, handleKeyDown }
 }
 
 export default TreeView

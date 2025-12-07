@@ -165,6 +165,7 @@ export type VisibleNode<
   parentId: NodeId | null
   depth: number
   index: number // 같은 parent 내에서의 index
+  size: number // 같은 parent 내에서의 총 노드 수
   hasChildren: boolean
   meta: CompositeSnapshot<Role, ExtraMeta>['nodes'] extends ReadonlyMap<
     NodeId,
@@ -189,6 +190,8 @@ export function buildVisibleNodes<
 
   function walk(parentId: NodeId | null, depth: number) {
     const children = childrenByParent.get(parentId) ?? []
+    const size = children.length
+
     children.forEach((id, index) => {
       const meta = nodes.get(id)
       if (!meta) return
@@ -200,6 +203,7 @@ export function buildVisibleNodes<
         parentId,
         depth,
         index,
+        size,
         hasChildren,
         meta,
       }
