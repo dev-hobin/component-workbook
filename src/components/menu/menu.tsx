@@ -189,7 +189,7 @@ export function ChildRoot({ children, menuId }: RootProps) {
   const [activeItemId, setActiveItemId] = useState<string | null>(null)
 
   const getMenuItemEntries = useCallback(() => {
-    return Array.from(registry.entriesByRole('item')).filter(
+    return Array.from(registry.entriesByPart('item')).filter(
       (entry) => entry.meta.rootId === rootId,
     )
   }, [registry, rootId])
@@ -276,7 +276,7 @@ export function ChildRoot({ children, menuId }: RootProps) {
         ? items[items.length - 1]
         : items[0]
 
-    setActiveItemId(targetEntry.itemId)
+    setActiveItemId(targetEntry.nodeId)
   }, [open, isContentPresent, getMenuItemEntries])
 
   // [ChildRoot] activeItemId가 바뀔 때 실제 DOM 포커스를 해당 item으로 이동
@@ -325,7 +325,7 @@ export function ChildRoot({ children, menuId }: RootProps) {
             return
           }
           const target = items[0]
-          setActiveItemId(target.itemId)
+          setActiveItemId(target.nodeId)
         }
 
         return
@@ -350,7 +350,7 @@ export function ChildRoot({ children, menuId }: RootProps) {
         }
 
         const target = isArrowUp ? items[items.length - 1] : items[0]
-        setActiveItemId(target.itemId)
+        setActiveItemId(target.nodeId)
       }
     }
 
@@ -394,7 +394,7 @@ export function ChildRoot({ children, menuId }: RootProps) {
       if (items.length === 0) return
 
       const currentIndex = items.findIndex(
-        (entry) => entry.itemId === activeItemIdRef.current,
+        (entry) => entry.nodeId === activeItemIdRef.current,
       )
       if (currentIndex === -1) return
 
@@ -403,7 +403,7 @@ export function ChildRoot({ children, menuId }: RootProps) {
         : (currentIndex - 1 + items.length) % items.length
 
       const nextEntry = items[nextIndex]
-      setActiveItemId(nextEntry.itemId)
+      setActiveItemId(nextEntry.nodeId)
     }
 
     contentEl.addEventListener('keydown', handleKeyDown)

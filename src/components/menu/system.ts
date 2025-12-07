@@ -9,5 +9,5 @@ type MenuMeta = {
 
 export const MenuSystem = createCompositeSystem<MenuRole, ItemId, MenuMeta>({
   namespace: 'menu',
-  roles: ['trigger', 'content', 'positioner', 'arrow', 'item'],
+  parts: ['trigger', 'content', 'positioner', 'arrow', 'item'],
 })

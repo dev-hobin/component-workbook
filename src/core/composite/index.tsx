@@ -1,96 +1,111 @@
-import React from 'react'
+import React, { useSyncExternalStore } from 'react'
 
-export type CompositeConfig<Role extends string> = {
+export type CompositeConfig<Part extends string> = {
   namespace: string // 'menu', 'tabs', 'list', 'tree' ...
-  roles: readonly Role[]
+  parts: readonly Part[]
 }
 
-export type IdStrategy<Role extends string, ItemId> = (args: {
-  role: Role
+export type IdRule<Part extends string, NodeId> = (args: {
+  part: Part
   scopeId: string
-  itemId: ItemId
+  nodeId: NodeId
 }) => string
 
-export interface CompositeItemMeta<Role extends string, ItemId, Meta> {
-  role: Role
-  itemId: ItemId
+export interface CompositeItemMeta<Part extends string, NodeId, Meta> {
+  part: Part
+  nodeId: NodeId
   domId: string
   node: HTMLElement
   meta: Meta
 }
 
-export interface CompositeRegistry<Role extends string, ItemId, Meta> {
-  register(meta: CompositeItemMeta<Role, ItemId, Meta>): void
-  unregister(role: Role, itemId: ItemId): void
+export interface CompositeRegistry<Part extends string, NodeId, Meta> {
+  register(meta: CompositeItemMeta<Part, NodeId, Meta>): void
+  unregister(part: Part, itemId: NodeId): void
   get(
-    role: Role,
-    itemId: ItemId,
-  ): CompositeItemMeta<Role, ItemId, Meta> | undefined
-  getDomId(role: Role, itemId: ItemId): string | undefined
-  getNode(role: Role, itemId: ItemId): HTMLElement | undefined
-  entries(): Iterable<CompositeItemMeta<Role, ItemId, Meta>>
-  entriesByRole(role: Role): Iterable<CompositeItemMeta<Role, ItemId, Meta>>
+    part: Part,
+    itemId: NodeId,
+  ): CompositeItemMeta<Part, NodeId, Meta> | undefined
+  getDomId(part: Part, nodeId: NodeId): string | undefined
+  getNode(part: Part, nodeId: NodeId): HTMLElement | undefined
+  entries(): Iterable<CompositeItemMeta<Part, NodeId, Meta>>
+  entriesByPart(part: Part): Iterable<CompositeItemMeta<Part, NodeId, Meta>>
+  subscribe(listener: () => void): () => void
 }
 
 type RegistryKey<
-  Role extends string,
+  Part extends string,
   ItemId,
-> = `${Role}::${ItemId & (string | number)}`
+> = `${Part}::${ItemId & (string | number)}`
 
 function createCompositeRegistry<
-  Role extends string,
-  ItemId,
+  Part extends string,
+  NodeId,
   Meta,
->(): CompositeRegistry<Role, ItemId, Meta> {
+>(): CompositeRegistry<Part, NodeId, Meta> {
   const map = new Map<
-    RegistryKey<Role, ItemId>,
-    CompositeItemMeta<Role, ItemId, Meta>
+    RegistryKey<Part, NodeId>,
+    CompositeItemMeta<Part, NodeId, Meta>
   >()
 
-  const makeKey = (role: Role, itemId: ItemId): RegistryKey<Role, ItemId> =>
-    `${role}::${itemId}` as RegistryKey<Role, ItemId>
+  const listeners = new Set<() => void>()
+
+  const makeKey = (part: Part, nodeId: NodeId): RegistryKey<Part, NodeId> =>
+    `${part}::${nodeId}` as RegistryKey<Part, NodeId>
+
+  const notify = () => {
+    listeners.forEach((l) => l())
+  }
 
   return {
     register(meta) {
-      const key = makeKey(meta.role, meta.itemId)
+      const key = makeKey(meta.part, meta.nodeId)
       map.set(key, meta)
+      notify()
     },
-    unregister(role, itemId) {
-      const key = makeKey(role, itemId)
+    unregister(part, nodeId) {
+      const key = makeKey(part, nodeId)
       map.delete(key)
+      notify()
     },
-    get(role, itemId) {
-      const key = makeKey(role, itemId)
+    get(part, nodeId) {
+      const key = makeKey(part, nodeId)
       return map.get(key)
     },
-    getDomId(role, itemId) {
-      const key = makeKey(role, itemId)
+    getDomId(part, nodeId) {
+      const key = makeKey(part, nodeId)
       return map.get(key)?.domId
     },
-    getNode(role, itemId) {
-      const key = makeKey(role, itemId)
+    getNode(part, nodeId) {
+      const key = makeKey(part, nodeId)
       return map.get(key)?.node
     },
     *entries() {
       for (const v of map.values()) yield v
     },
-    *entriesByRole(role) {
+    *entriesByPart(part) {
       for (const v of map.values()) {
-        if (v.role === role) yield v
+        if (v.part === part) yield v
+      }
+    },
+    subscribe(listener) {
+      listeners.add(listener)
+      return () => {
+        listeners.delete(listener)
       }
     },
   }
 }
 
 export function createCompositeSystem<
-  Role extends string,
-  ItemId extends string | number,
+  Part extends string,
+  NodeId extends string | number,
   Meta extends object,
->(config: CompositeConfig<Role>) {
+>(config: CompositeConfig<Part>) {
   type Context = {
     scopeId: string
-    makeDomId: IdStrategy<Role, ItemId>
-    registry: CompositeRegistry<Role, ItemId, Meta>
+    makeDomId: IdRule<Part, NodeId>
+    registry: CompositeRegistry<Part, NodeId, Meta>
   }
 
   const CompositeContext = React.createContext<Context | null>(null)
@@ -105,25 +120,22 @@ export function createCompositeSystem<
     return ctx
   }
 
-  const defaultIdStrategy: IdStrategy<Role, ItemId> = ({
-    role,
-    scopeId,
-    itemId,
-  }) => `${config.namespace}::${scopeId}::${role}-${String(itemId)}`
+  const defaultIdRule: IdRule<Part, NodeId> = ({ part, scopeId, nodeId }) =>
+    `${config.namespace}::${scopeId}::${part}-${String(nodeId)}`
 
   function Provider(props: {
     children: React.ReactNode
-    idStrategy?: IdStrategy<Role, ItemId>
+    idRule?: IdRule<Part, NodeId>
   }) {
     const scopeId = React.useId()
 
     const makeDomId = React.useMemo(
-      () => props.idStrategy ?? defaultIdStrategy,
-      [props.idStrategy],
+      () => props.idRule ?? defaultIdRule,
+      [props.idRule],
     )
 
     const registry = React.useRef(
-      createCompositeRegistry<Role, ItemId, Meta>(),
+      createCompositeRegistry<Part, NodeId, Meta>(),
     ).current
 
     const value = React.useMemo<Context>(
@@ -139,8 +151,8 @@ export function createCompositeSystem<
   }
 
   function useCompositeItemRegistration(
-    role: Role,
-    itemId: ItemId,
+    part: Part,
+    nodeId: NodeId,
     options?: {
       id?: string
       meta?: Meta
@@ -148,28 +160,38 @@ export function createCompositeSystem<
   ) {
     const { scopeId, makeDomId, registry } = useCompositeContext()
 
-    const defaultDomId = makeDomId({ role, scopeId, itemId })
+    const defaultDomId = makeDomId({ part, scopeId, nodeId })
     const domId = options?.id ?? defaultDomId
     const meta = options?.meta ?? ({} as Meta)
 
     const ref = (node: HTMLElement | null) => {
       if (node) {
-        registry.register({ role, itemId, domId, node, meta })
+        registry.register({ part, nodeId, domId, node, meta })
       } else {
-        registry.unregister(role, itemId)
+        registry.unregister(part, nodeId)
       }
     }
 
     return { domId, ref }
   }
 
-  function useCompositeDomId(role: Role, itemId: ItemId | null | undefined) {
-    const { scopeId, makeDomId, registry } = useCompositeContext()
-    if (itemId == null) return undefined
+  function useCompositeDomId(part: Part, nodeId: NodeId | null | undefined) {
+    const { registry } = useCompositeContext()
 
-    const fallback = makeDomId({ role, scopeId, itemId })
-    const registered = registry.getDomId(role, itemId)
-    return registered ?? fallback
+    const getSnapshot = React.useCallback(() => {
+      if (nodeId == null) return undefined
+      return registry.getDomId(part, nodeId)
+    }, [registry, part, nodeId])
+
+    const subscribe = React.useCallback(
+      (listener: () => void) => registry.subscribe(listener),
+      [registry],
+    )
+
+    // key가 바뀌면(다른 노드를 바라보면) 새로운 구독처럼 취급
+    const domId = useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
+
+    return domId
   }
 
   function useCompositeRegistry() {
