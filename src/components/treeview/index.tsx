@@ -530,8 +530,8 @@ function useTreeItemInteractions(args: { id: NodeId; hasChildren: boolean }) {
 
   const handleClick: React.MouseEventHandler<HTMLLIElement> = useCallback(
     (event) => {
+      if (!isSelfTreeItemEvent(event)) return
       event.preventDefault()
-      event.stopPropagation() // TODO: stopPropagation 말고 다른 방식으로 교체
 
       // 항상 이 아이템으로 포커스
       if (activeId !== id) {
@@ -552,9 +552,9 @@ function useTreeItemInteractions(args: { id: NodeId; hasChildren: boolean }) {
   const handleKeyDown: React.KeyboardEventHandler<HTMLLIElement> = useCallback(
     (event) => {
       if (event.key !== 'Enter' && event.key !== ' ') return
+      if (!isSelfTreeItemEvent(event)) return
 
       event.preventDefault()
-      event.stopPropagation() // TODO: stopPropagation 말고 다른 방식으로 교체
 
       if (activeId !== id) {
         setActiveId(id)
@@ -570,6 +570,19 @@ function useTreeItemInteractions(args: { id: NodeId; hasChildren: boolean }) {
   )
 
   return { handleClick, handleKeyDown }
+}
+
+function isSelfTreeItemEvent(
+  event: React.SyntheticEvent<HTMLElement>,
+): boolean {
+  const target = event.target as HTMLElement | null
+  if (!target) return false
+
+  // 이벤트가 발생한 곳에서 가장 가까운 treeitem
+  const owner = target.closest<HTMLElement>('[role="treeitem"]')
+
+  // 그게 지금 핸들러가 달려 있는 li 인지 여부
+  return owner === event.currentTarget
 }
 
 export default TreeView
