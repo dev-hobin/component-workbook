@@ -531,7 +531,7 @@ function useTreeItemInteractions(args: { id: NodeId; hasChildren: boolean }) {
   const handleClick: React.MouseEventHandler<HTMLLIElement> = useCallback(
     (event) => {
       event.preventDefault()
-      event.stopPropagation()
+      event.stopPropagation() // TODO: stopPropagation 말고 다른 방식으로 교체
 
       // 항상 이 아이템으로 포커스
       if (activeId !== id) {
@@ -554,7 +554,7 @@ function useTreeItemInteractions(args: { id: NodeId; hasChildren: boolean }) {
       if (event.key !== 'Enter' && event.key !== ' ') return
 
       event.preventDefault()
-      event.stopPropagation()
+      event.stopPropagation() // TODO: stopPropagation 말고 다른 방식으로 교체
 
       if (activeId !== id) {
         setActiveId(id)

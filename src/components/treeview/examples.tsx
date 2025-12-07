@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react'
 import TreeView from '.'
 
 function FolderIcon() {
@@ -10,7 +11,7 @@ function FileIcon() {
 
 export function Example() {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-950">
+    <div className="relative min-h-screen flex items-center justify-center bg-slate-950">
       <div className="w-[360px] rounded-xl border border-slate-800 bg-slate-900/80 shadow-lg shadow-slate-950/60 p-3">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-sm font-semibold text-slate-100">
@@ -200,6 +201,87 @@ export function Example() {
           로 폴더를 접거나 펼칠 수 있어요.
         </p>
       </div>
+      <KeyPressDisplay />
+    </div>
+  )
+}
+
+export function KeyPressDisplay() {
+  const [key, setKey] = useState<string | null>(null)
+  const timeoutRef = useRef<number | null>(null)
+
+  /** 1) 키 이벤트에서 key 문자열만 업데이트 */
+  useEffect(() => {
+    function handle(e: KeyboardEvent) {
+      let k = e.key
+
+      if (k === ' ') k = 'Space'
+      if (k === 'Enter') k = 'Enter'
+
+      const map: Record<string, string> = {
+        ArrowUp: '↑',
+        ArrowDown: '↓',
+        ArrowLeft: '←',
+        ArrowRight: '→',
+        Escape: 'Esc',
+        Tab: 'Tab',
+      }
+
+      if (map[k]) k = map[k]
+
+      const final = [
+        e.metaKey ? '⌘' : '',
+        e.ctrlKey ? 'Ctrl' : '',
+        e.shiftKey ? 'Shift' : '',
+        e.altKey ? 'Alt' : '',
+        k,
+      ]
+        .filter(Boolean)
+        .join(' + ')
+
+      setKey(final)
+    }
+
+    window.addEventListener('keydown', handle)
+    return () => window.removeEventListener('keydown', handle)
+  }, [])
+
+  /** 2) key 변경될 때마다 타이머 리셋 */
+  useEffect(() => {
+    if (!key) return
+
+    // 기존 타임아웃 제거
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current)
+    }
+
+    // 새로운 타임아웃 생성
+    timeoutRef.current = window.setTimeout(() => {
+      setKey(null)
+      timeoutRef.current = null
+    }, 1200)
+
+    return () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current)
+        timeoutRef.current = null
+      }
+    }
+  }, [key])
+
+  if (!key) return null
+
+  return (
+    <div
+      className="
+        fixed bottom-6 left-1/2 -translate-x-1/2
+        px-3 py-1.5 rounded-md
+        bg-slate-800/80 backdrop-blur
+        text-slate-100 text-sm font-medium
+        shadow-lg shadow-black/40
+      "
+    >
+      {key}
     </div>
   )
 }
