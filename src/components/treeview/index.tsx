@@ -1,4 +1,10 @@
-import { createContext, useContext } from 'react'
+import {
+  createContext,
+  useContext,
+  useMemo,
+  useRef,
+  type ReactNode,
+} from 'react'
 import {
   createCompositeStore,
   type CompositeStore,
@@ -9,59 +15,71 @@ type TreeRole = 'item'
 type TreeExtraMeta = object
 type TreeStore = CompositeStore<TreeRole, TreeExtraMeta>
 
-// Tree 전체 시스템 (스토어 등)
+// store를 담을 컨텍스트
 type TreeSystemContextValue = {
   store: TreeStore
 }
 
-// 현재 레벨 정보 (이 레벨의 parentId)
-type TreeLevelContextValue = {
-  parentId: NodeId | null
-}
-
-// 현재 Item (자기 자신 id) – SubRoot에서 parent로 쓰기 위함
-type TreeItemContextValue = {
-  id: NodeId
-}
-
 const TreeSystemContext = createContext<TreeSystemContextValue | null>(null)
-const TreeLevelContext = createContext<TreeLevelContextValue | null>(null)
-const TreeItemContext = createContext<TreeItemContextValue | null>(null)
 
-// 안전하게 쓰기 위한 헬퍼 훅
-function useTreeSystem(): TreeSystemContextValue {
+function useTreeSystemContext(): TreeSystemContextValue {
   const ctx = useContext(TreeSystemContext)
   if (!ctx) {
     throw new Error(
-      'TreeView 컴포넌트는 TreeView.Root 안에서만 사용할 수 있습니다.',
+      'TreeView.* 컴포넌트는 TreeView.Root 안에서만 사용할 수 있습니다.',
     )
   }
   return ctx
 }
 
-function useTreeLevel(): TreeLevelContextValue {
-  const ctx = useContext(TreeLevelContext)
-  if (!ctx) {
-    throw new Error(
-      'TreeView.Item/SubRoot는 TreeView.Root 안에서만 사용할 수 있습니다.',
-    )
+// TopRoot에서만 써줄 Provider (메뉴의 MenuSystem.Provider 역할)
+function TreeSystemProvider({ children }: { children: React.ReactNode }) {
+  const storeRef = useRef<TreeStore | null>(null)
+  if (!storeRef.current) {
+    storeRef.current = createCompositeStore<TreeRole, TreeExtraMeta>()
   }
-  return ctx
+
+  const value = useMemo<TreeSystemContextValue>(
+    () => ({ store: storeRef.current! }),
+    [],
+  )
+
+  return (
+    <TreeSystemContext.Provider value={value}>
+      {children}
+    </TreeSystemContext.Provider>
+  )
 }
 
-function useTreeItem(optional = false): TreeItemContextValue | null {
-  const ctx = useContext(TreeItemContext)
-  if (!ctx && !optional) {
-    throw new Error(
-      'TreeView.SubRoot는 TreeView.Item 안에서만 사용할 수 있습니다.',
-    )
-  }
-  return ctx
+// ─────────────────────────────────────────────
+// Root
+// ─────────────────────────────────────────────
+
+type RootProps = {
+  children: React.ReactNode
 }
 
-// ========================================================
+export function Root(props: RootProps) {
+  const existingSystem = useContext(TreeSystemContext)
 
-function Root({ children }: { children?: React.ReactNode }) {
+  if (!existingSystem) {
+    return (
+      <TreeSystemProvider>
+        <ParentRoot {...props} />
+      </TreeSystemProvider>
+    )
+  }
+
+  return <ChildRoot {...props} />
+}
+
+function ParentRoot({ children }: { children: ReactNode }) {
+  return <ChildRoot>{children}</ChildRoot>
+}
+
+function ChildRoot({ children }: { children: ReactNode }) {
+  const { store } = useTreeSystemContext()
+
   return <ul>{children}</ul>
 }
 
