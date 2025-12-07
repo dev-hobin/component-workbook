@@ -2,6 +2,8 @@
 // Composite Core Types
 // ─────────────────────────────────────────────
 
+import { useEffect, useSyncExternalStore } from 'react'
+
 export type NodeId = string
 
 /**
@@ -55,7 +57,18 @@ export function createCompositeStore<
   const childrenByParent = new Map<NodeId | null, NodeId[]>()
   const listeners = new Set<() => void>()
 
-  const notify = () => {
+  // 👇 캐싱할 snapshot 객체
+  let snapshot: CompositeSnapshot<Role, ExtraMeta> = {
+    nodes,
+    childrenByParent,
+  }
+
+  const emitChange = () => {
+    // 구조가 바뀐 시점에만 "새 스냅샷 객체"를 만들어서 교체
+    snapshot = {
+      nodes,
+      childrenByParent,
+    }
     listeners.forEach((l) => l())
   }
 
@@ -63,10 +76,8 @@ export function createCompositeStore<
     registerNode(meta) {
       const { id, parentId } = meta
 
-      // 메타 갱신
       nodes.set(id, meta)
 
-      // 부모 → 자식 리스트 갱신
       const existing = childrenByParent.get(parentId)
       if (existing) {
         if (!existing.includes(id)) {
@@ -76,7 +87,7 @@ export function createCompositeStore<
         childrenByParent.set(parentId, [id])
       }
 
-      notify()
+      emitChange()
     },
 
     unregisterNode(id) {
@@ -85,34 +96,24 @@ export function createCompositeStore<
 
       const { parentId } = meta
 
-      // 부모의 children 리스트에서 제거
       const siblings = childrenByParent.get(parentId)
       if (siblings) {
         const idx = siblings.indexOf(id)
-        if (idx !== -1) {
-          siblings.splice(idx, 1)
-        }
+        if (idx !== -1) siblings.splice(idx, 1)
         if (siblings.length === 0) {
           childrenByParent.delete(parentId)
         }
       }
 
-      // 이 노드를 부모로 갖는 children 리스트 제거(자식들은 따로 unregister 해줄 것)
       childrenByParent.delete(id)
-
-      // 메타 삭제
       nodes.delete(id)
 
-      notify()
+      emitChange()
     },
 
     getSnapshot() {
-      // 내부적으로는 mutable Map이지만,
-      // 타입 상으로는 ReadonlyMap으로 노출해서 외부에서 수정 못 하게 가이드.
-      return {
-        nodes,
-        childrenByParent,
-      }
+      // 항상 "캐시된" snapshot 객체를 반환
+      return snapshot
     },
 
     subscribe(listener) {
@@ -122,4 +123,96 @@ export function createCompositeStore<
       }
     },
   }
+}
+
+export function useCompositeNodeRegistration<
+  Role extends string,
+  ExtraMeta extends object,
+>(
+  store: CompositeStore<Role, ExtraMeta>,
+  config: { id: NodeId } & BaseNodeMeta<Role> & ExtraMeta,
+) {
+  // config를 안정적으로 관리하고 싶으면, 호출하는 쪽에서 useMemo로 싸주는 편이 안전
+  useEffect(() => {
+    store.registerNode(config)
+
+    return () => {
+      store.unregisterNode(config.id)
+    }
+  }, [store, config])
+}
+
+export function useCompositeSnapshot<
+  Role extends string = string,
+  ExtraMeta extends object = object,
+>(store: CompositeStore<Role, ExtraMeta>): CompositeSnapshot<Role, ExtraMeta> {
+  return useSyncExternalStore(
+    store.subscribe,
+    store.getSnapshot,
+    store.getSnapshot, // SSR fallback도 동일하게
+  )
+}
+
+// ─────────────────────────────────────────────
+// tree-visible-nodes.ts
+// ─────────────────────────────────────────────
+
+export type VisibleNode<
+  Role extends string = string,
+  ExtraMeta extends object = object,
+> = {
+  id: NodeId
+  parentId: NodeId | null
+  depth: number
+  index: number // 같은 parent 내에서의 index
+  hasChildren: boolean
+  meta: CompositeSnapshot<Role, ExtraMeta>['nodes'] extends ReadonlyMap<
+    NodeId,
+    infer M
+  >
+    ? M
+    : never
+}
+
+export function buildVisibleNodes<
+  Role extends string = string,
+  ExtraMeta extends object = object,
+>(
+  snapshot: CompositeSnapshot<Role, ExtraMeta>,
+  expandedIds: NodeId[],
+  rootParentId: NodeId | null = null,
+): VisibleNode<Role, ExtraMeta>[] {
+  const result: VisibleNode<Role, ExtraMeta>[] = []
+  const expandedSet = new Set(expandedIds)
+
+  const { nodes, childrenByParent } = snapshot
+
+  function walk(parentId: NodeId | null, depth: number) {
+    const children = childrenByParent.get(parentId) ?? []
+    children.forEach((id, index) => {
+      const meta = nodes.get(id)
+      if (!meta) return
+
+      const hasChildren = (childrenByParent.get(id) ?? []).length > 0
+
+      const visibleNode: VisibleNode<Role, ExtraMeta> = {
+        id,
+        parentId,
+        depth,
+        index,
+        hasChildren,
+        meta,
+      }
+      result.push(visibleNode)
+
+      // 이 노드가 expand 되어 있으면 자식도 이어서 탐색
+      if (expandedSet.has(id)) {
+        walk(id, depth + 1)
+      }
+    })
+  }
+
+  walk(rootParentId, 0)
+
+  return result
 }
