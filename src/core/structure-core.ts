@@ -1,3 +1,5 @@
+// structure-core.ts
+
 // ─────────────────────────────────────────────
 // 기본 타입
 // ─────────────────────────────────────────────
@@ -21,17 +23,17 @@ export interface StructureNodeMeta<Role extends string = string> {
 /**
  * 구조 스냅샷.
  *
- * 중요:
- * - childrenByParent 는 "부모-자식 관계"만 표현하고, **순서 정보는 없음**
- * - 순서는 항상 외부(도메인 데이터, React children, DnD state 등)가 책임지고,
- *   buildVisibleNodes 단계에서 주입함.
+ * - childrenByParent 는 "부모-자식 관계 + 순서"를 함께 표현한다.
+ *   배열의 순서가 화면/키보드 탐색에 사용할 순서의 진실이다.
+ * - ReadonlyMap / NodeId[] 로 노출되지만, 내부에서는 깊은 복사된 스냅샷이기 때문에
+ *   외부에서 구조를 mutate 하면 안 된다(타입 상으로도 readonly).
  */
 export interface StructureSnapshot<
   Role extends string = string,
   ExtraMeta extends object = object,
 > {
   nodes: ReadonlyMap<NodeId, StructureNodeMeta<Role> & ExtraMeta>
-  childrenByParent: ReadonlyMap<NodeId | null, ReadonlySet<NodeId>>
+  childrenByParent: ReadonlyMap<NodeId | null, NodeId[]>
 }
 
 /**
@@ -58,22 +60,19 @@ export function createStructureStore<
 >(): StructureStore<Role, ExtraMeta> {
   type Meta = StructureNodeMeta<Role> & ExtraMeta
 
-  // 현재 상태 (mutable)
+  // mutable 내부 상태
   const nodes = new Map<NodeId, Meta>()
-  const childrenByParent = new Map<NodeId | null, Set<NodeId>>()
+  const childrenByParent = new Map<NodeId | null, NodeId[]>()
   const listeners = new Set<() => void>()
 
-  // 불변 스냅샷 (immutable) 캐시
-  let snapshot: StructureSnapshot<Role, ExtraMeta> = buildSnapshot()
-
+  // 🔹 "그 시점"을 고정한 스냅샷을 만들어 주는 함수
   function buildSnapshot(): StructureSnapshot<Role, ExtraMeta> {
-    // Map/Set을 깊은 수준에서 복사해서 "그 시점의 스냅샷"을 고정
     const nodesClone = new Map<NodeId, Meta>(nodes)
 
-    const childrenClone = new Map<NodeId | null, ReadonlySet<NodeId>>(
-      Array.from(childrenByParent.entries(), ([parentId, childrenSet]) => [
+    const childrenClone = new Map<NodeId | null, NodeId[]>(
+      Array.from(childrenByParent.entries(), ([parentId, list]) => [
         parentId,
-        new Set(childrenSet) as ReadonlySet<NodeId>,
+        [...list], // 배열도 복사
       ]),
     )
 
@@ -82,6 +81,9 @@ export function createStructureStore<
       childrenByParent: childrenClone,
     }
   }
+
+  // 항상 최신 상태를 찍어 둔 스냅샷
+  let snapshot: StructureSnapshot<Role, ExtraMeta> = buildSnapshot()
 
   const emitChange = () => {
     snapshot = buildSnapshot()
@@ -94,12 +96,14 @@ export function createStructureStore<
 
       nodes.set(id, meta)
 
-      let children = childrenByParent.get(parentId)
-      if (!children) {
-        children = new Set<NodeId>()
-        childrenByParent.set(parentId, children)
+      const list = childrenByParent.get(parentId)
+      if (list) {
+        if (!list.includes(id)) {
+          list.push(id)
+        }
+      } else {
+        childrenByParent.set(parentId, [id])
       }
-      children.add(id) // 🔸 순서는 저장하지 않고 "멤버십"만 저장
 
       emitChange()
     },
@@ -110,18 +114,17 @@ export function createStructureStore<
 
       const { parentId } = meta
 
-      // 부모의 children Set에서 제거
       const siblings = childrenByParent.get(parentId)
       if (siblings) {
-        siblings.delete(id)
-        if (siblings.size === 0) {
+        const idx = siblings.indexOf(id)
+        if (idx !== -1) siblings.splice(idx, 1)
+        if (siblings.length === 0) {
           childrenByParent.delete(parentId)
         }
       }
 
       // 이 노드를 부모로 가진 children 관계 제거
       childrenByParent.delete(id)
-
       nodes.delete(id)
 
       emitChange()

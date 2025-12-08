@@ -18,7 +18,7 @@ import {
 import { TreeStructureSystem, TreeViewDomSystem } from './system'
 import { composeEventHandlers } from '../../utils/composeEventHandlers'
 import type { NodeId } from '../../core/structure-core'
-import { buildVisibleNodes } from '../../core/tree-visible-nodes'
+import { buildVisibleNodes } from '../../core/build-visible-nodes'
 
 // ─────────────────────────────────────────────
 // Level (parentId 컨텍스트)
