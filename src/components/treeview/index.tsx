@@ -8,15 +8,6 @@ import {
   useRef,
   type ComponentPropsWithoutRef,
 } from 'react'
-import {
-  buildVisibleNodes,
-  createCompositeStore,
-  useCompositeNodeRegistration,
-  useCompositeSnapshot,
-  type CompositeStore,
-  type NodeId,
-  type VisibleNode,
-} from '../../core/composite-store'
 import { useControllableState } from '@radix-ui/react-use-controllable-state'
 import {
   getNextActiveIdByKey,
@@ -24,51 +15,10 @@ import {
   getNextExpandedIdsByKey,
   type TreeViewContext,
 } from './strategy'
-import { TreeViewDomSystem } from './dom'
+import { TreeStructureSystem, TreeViewDomSystem } from './system'
 import { composeEventHandlers } from '../../utils/composeEventHandlers'
-
-type TreeRole = 'item'
-type TreeExtraMeta = object
-type TreeStore = CompositeStore<TreeRole, TreeExtraMeta>
-
-// ─────────────────────────────────────────────
-// Store Context
-// ─────────────────────────────────────────────
-
-type TreeSystemContextValue = {
-  store: TreeStore
-}
-
-const TreeSystemContext = createContext<TreeSystemContextValue | null>(null)
-
-function useTreeSystemContext(): TreeSystemContextValue {
-  const ctx = useContext(TreeSystemContext)
-  if (!ctx) {
-    throw new Error(
-      'TreeView.* 컴포넌트는 TreeView.Root 안에서만 사용할 수 있습니다.',
-    )
-  }
-  return ctx
-}
-
-// TopRoot에서만 써줄 Provider (메뉴의 MenuSystem.Provider 역할)
-function TreeSystemProvider({ children }: { children: React.ReactNode }) {
-  const storeRef = useRef<TreeStore | null>(null)
-  if (!storeRef.current) {
-    storeRef.current = createCompositeStore<TreeRole, TreeExtraMeta>()
-  }
-
-  const value = useMemo<TreeSystemContextValue>(
-    () => ({ store: storeRef.current! }),
-    [],
-  )
-
-  return (
-    <TreeSystemContext.Provider value={value}>
-      {children}
-    </TreeSystemContext.Provider>
-  )
-}
+import type { NodeId } from '../../core/structure-core'
+import { buildVisibleNodes } from '../../core/tree-visible-nodes'
 
 // ─────────────────────────────────────────────
 // Level (parentId 컨텍스트)
@@ -137,17 +87,14 @@ function useTreeStateContext() {
 // ─────────────────────────────────────────────
 
 function useTreeVisibleNodes() {
-  const { store } = useTreeSystemContext()
   const { expandedIds } = useTreeStateContext()
-
-  const snapshot = useCompositeSnapshot(store)
-
+  const snapshot = TreeStructureSystem.useSnapshot()
   const visibleNodes = useMemo(
     () => buildVisibleNodes(snapshot, expandedIds),
     [snapshot, expandedIds],
   )
 
-  return visibleNodes as VisibleNode<TreeRole, TreeExtraMeta>[]
+  return visibleNodes
 }
 
 // ─────────────────────────────────────────────
@@ -182,7 +129,7 @@ function Root({
   onActiveIdChange,
   ...rest
 }: RootProps) {
-  const existingSystem = useContext(TreeSystemContext)
+  const existingSystem = useContext(TreeStructureSystem.Context)
 
   const [expandedIds, setExpandedIds] = useControllableState<NodeId[]>({
     prop: expandedIdsProp,
@@ -230,7 +177,7 @@ function Root({
   }
 
   return (
-    <TreeSystemProvider>
+    <TreeStructureSystem.Provider>
       <TreeViewDomSystem.Provider>
         <TreeLevelContext.Provider value={{ parentId: null }}>
           <TreeStateContext.Provider value={value}>
@@ -238,14 +185,12 @@ function Root({
           </TreeStateContext.Provider>
         </TreeLevelContext.Provider>
       </TreeViewDomSystem.Provider>
-    </TreeSystemProvider>
+    </TreeStructureSystem.Provider>
   )
 }
 
 type SubRootProps = ComponentPropsWithoutRef<'ul'>
 function SubRoot(props: SubRootProps) {
-  useTreeSystemContext() // 트리 안인지 확인
-
   const itemContext = useTreeItemContext() // 어떤 Item 아래인지
   const { expandedIds } = useTreeStateContext()
 
@@ -288,7 +233,6 @@ type ItemProps = ComponentPropsWithoutRef<'li'> & {
 function Item(props: ItemProps) {
   const { nodeId, children, ...liProps } = props
 
-  const { store } = useTreeSystemContext()
   const { parentId } = useTreeLevelContext()
   const visibleNodes = useTreeVisibleNodes()
   const { activeId, selectedIds, expandedIds } = useTreeStateContext()
@@ -296,7 +240,7 @@ function Item(props: ItemProps) {
   const reactId = useId()
   const id: NodeId = useMemo(() => nodeId ?? reactId, [nodeId, reactId])
 
-  useCompositeNodeRegistration(store, {
+  TreeStructureSystem.useNodeRegistration({
     id,
     parentId,
     role: 'item',
@@ -374,7 +318,7 @@ function Indicator({ children }: { children?: React.ReactNode }) {
 }
 
 function Text({ children }: { children?: React.ReactNode }) {
-  const item = useTreeItemContext() // { id, domId }
+  const item = useTreeItemContext()
   const { selectedIds, expandedIds } = useTreeStateContext()
 
   const isSelected = selectedIds.includes(item.id)
