@@ -1,4 +1,6 @@
-// structure-core.ts
+// ─────────────────────────────────────────────
+// 기본 타입
+// ─────────────────────────────────────────────
 
 export type NodeId = string
 
@@ -18,15 +20,18 @@ export interface StructureNodeMeta<Role extends string = string> {
 
 /**
  * 구조 스냅샷.
- * - nodes: 각 id → 메타 정보
- * - childrenByParent: 부모 id → 자식 id 목록
+ *
+ * 중요:
+ * - childrenByParent 는 "부모-자식 관계"만 표현하고, **순서 정보는 없음**
+ * - 순서는 항상 외부(도메인 데이터, React children, DnD state 등)가 책임지고,
+ *   buildVisibleNodes 단계에서 주입함.
  */
 export interface StructureSnapshot<
   Role extends string = string,
   ExtraMeta extends object = object,
 > {
   nodes: ReadonlyMap<NodeId, StructureNodeMeta<Role> & ExtraMeta>
-  childrenByParent: ReadonlyMap<NodeId | null, NodeId[]>
+  childrenByParent: ReadonlyMap<NodeId | null, ReadonlySet<NodeId>>
 }
 
 /**
@@ -53,81 +58,73 @@ export function createStructureStore<
 >(): StructureStore<Role, ExtraMeta> {
   type Meta = StructureNodeMeta<Role> & ExtraMeta
 
+  // 현재 상태 (mutable)
   const nodes = new Map<NodeId, Meta>()
-  const childrenByParent = new Map<NodeId | null, NodeId[]>()
+  const childrenByParent = new Map<NodeId | null, Set<NodeId>>()
   const listeners = new Set<() => void>()
 
-  // 👇 캐싱할 snapshot 객체
-  let snapshot: StructureSnapshot<Role, ExtraMeta> = {
-    nodes,
-    childrenByParent,
+  // 불변 스냅샷 (immutable) 캐시
+  let snapshot: StructureSnapshot<Role, ExtraMeta> = buildSnapshot()
+
+  function buildSnapshot(): StructureSnapshot<Role, ExtraMeta> {
+    // Map/Set을 깊은 수준에서 복사해서 "그 시점의 스냅샷"을 고정
+    const nodesClone = new Map<NodeId, Meta>(nodes)
+
+    const childrenClone = new Map<NodeId | null, ReadonlySet<NodeId>>(
+      Array.from(childrenByParent.entries(), ([parentId, childrenSet]) => [
+        parentId,
+        new Set(childrenSet) as ReadonlySet<NodeId>,
+      ]),
+    )
+
+    return {
+      nodes: nodesClone,
+      childrenByParent: childrenClone,
+    }
   }
 
-  const notify = () => {
-    // 구조가 바뀐 시점에만 "새 스냅샷 객체"를 만들어서 교체
-    snapshot = {
-      nodes,
-      childrenByParent,
-    }
+  const emitChange = () => {
+    snapshot = buildSnapshot()
     listeners.forEach((l) => l())
-  }
-
-  const unregisterNodeRecursive = (id: NodeId) => {
-    const meta = nodes.get(id)
-    if (!meta) return
-
-    // 자식들 먼저 제거
-    const children = childrenByParent.get(id) ?? []
-    for (const childId of children) {
-      unregisterNodeRecursive(childId)
-    }
-    childrenByParent.delete(id)
-
-    // 부모의 children 배열에서 제거
-    const siblings = childrenByParent.get(meta.parentId)
-    if (siblings) {
-      const idx = siblings.indexOf(id)
-      if (idx !== -1) siblings.splice(idx, 1)
-      if (siblings.length === 0) childrenByParent.delete(meta.parentId)
-    }
-
-    nodes.delete(id)
   }
 
   return {
     registerNode(meta) {
       const { id, parentId } = meta
 
-      const prev = nodes.get(id)
-      if (prev && prev.parentId !== parentId) {
-        const prevSiblings = childrenByParent.get(prev.parentId)
-
-        if (prevSiblings) {
-          const idx = prevSiblings.indexOf(id)
-          if (idx !== -1) prevSiblings.splice(idx, 1)
-          if (prevSiblings.length === 0) {
-            childrenByParent.delete(prev.parentId)
-          }
-        }
-      }
-
       nodes.set(id, meta)
 
-      const siblings = childrenByParent.get(parentId)
-      if (siblings) {
-        if (!siblings.includes(id)) {
-          siblings.push(id)
-        }
-      } else {
-        childrenByParent.set(parentId, [id])
+      let children = childrenByParent.get(parentId)
+      if (!children) {
+        children = new Set<NodeId>()
+        childrenByParent.set(parentId, children)
       }
+      children.add(id) // 🔸 순서는 저장하지 않고 "멤버십"만 저장
 
-      notify()
+      emitChange()
     },
 
     unregisterNode(id) {
-      unregisterNodeRecursive(id)
-      notify()
+      const meta = nodes.get(id)
+      if (!meta) return
+
+      const { parentId } = meta
+
+      // 부모의 children Set에서 제거
+      const siblings = childrenByParent.get(parentId)
+      if (siblings) {
+        siblings.delete(id)
+        if (siblings.size === 0) {
+          childrenByParent.delete(parentId)
+        }
+      }
+
+      // 이 노드를 부모로 가진 children 관계 제거
+      childrenByParent.delete(id)
+
+      nodes.delete(id)
+
+      emitChange()
     },
 
     getSnapshot() {
