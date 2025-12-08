@@ -7,6 +7,7 @@ import {
   type NodeId,
   type StructureConfig,
 } from '../core/structure-core'
+import { useLatestRef } from '../hooks/useLatestRef'
 
 export function createStructureSystem<
   Role extends string,
@@ -43,19 +44,21 @@ export function createStructureSystem<
   ) {
     const store = useStructureContext()
 
-    // 검증
     if (!config.roles.includes(configArg.role)) {
       throw new Error(
         `[StructureSystem] 등록하려는 role ${configArg.role}는 허용되지 않은 role입니다.`,
       )
     }
 
+    const configArgRef = useLatestRef(configArg)
     useEffect(() => {
+      const configArg = configArgRef.current
       store.registerNode(configArg)
+
       return () => {
         store.unregisterNode(configArg.id)
       }
-    }, [store, configArg])
+    }, [store, configArgRef])
   }
 
   function useSnapshot() {
