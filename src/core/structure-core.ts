@@ -63,7 +63,7 @@ export function createStructureStore<
     childrenByParent,
   }
 
-  const emitChange = () => {
+  const notify = () => {
     // 구조가 바뀐 시점에만 "새 스냅샷 객체"를 만들어서 교체
     snapshot = {
       nodes,
@@ -72,47 +72,65 @@ export function createStructureStore<
     listeners.forEach((l) => l())
   }
 
+  const unregisterNodeRecursive = (id: NodeId) => {
+    const meta = nodes.get(id)
+    if (!meta) return
+
+    // 자식들 먼저 제거
+    const children = childrenByParent.get(id) ?? []
+    for (const childId of children) {
+      unregisterNodeRecursive(childId)
+    }
+    childrenByParent.delete(id)
+
+    // 부모의 children 배열에서 제거
+    const siblings = childrenByParent.get(meta.parentId)
+    if (siblings) {
+      const idx = siblings.indexOf(id)
+      if (idx !== -1) siblings.splice(idx, 1)
+      if (siblings.length === 0) childrenByParent.delete(meta.parentId)
+    }
+
+    nodes.delete(id)
+  }
+
   return {
     registerNode(meta) {
       const { id, parentId } = meta
 
+      const prev = nodes.get(id)
+      if (prev && prev.parentId !== parentId) {
+        const prevSiblings = childrenByParent.get(prev.parentId)
+
+        if (prevSiblings) {
+          const idx = prevSiblings.indexOf(id)
+          if (idx !== -1) prevSiblings.splice(idx, 1)
+          if (prevSiblings.length === 0) {
+            childrenByParent.delete(prev.parentId)
+          }
+        }
+      }
+
       nodes.set(id, meta)
 
-      const existing = childrenByParent.get(parentId)
-      if (existing) {
-        if (!existing.includes(id)) {
-          existing.push(id)
+      const siblings = childrenByParent.get(parentId)
+      if (siblings) {
+        if (!siblings.includes(id)) {
+          siblings.push(id)
         }
       } else {
         childrenByParent.set(parentId, [id])
       }
 
-      emitChange()
+      notify()
     },
 
     unregisterNode(id) {
-      const meta = nodes.get(id)
-      if (!meta) return
-
-      const { parentId } = meta
-
-      const siblings = childrenByParent.get(parentId)
-      if (siblings) {
-        const idx = siblings.indexOf(id)
-        if (idx !== -1) siblings.splice(idx, 1)
-        if (siblings.length === 0) {
-          childrenByParent.delete(parentId)
-        }
-      }
-
-      childrenByParent.delete(id)
-      nodes.delete(id)
-
-      emitChange()
+      unregisterNodeRecursive(id)
+      notify()
     },
 
     getSnapshot() {
-      // 항상 "캐시된" snapshot 객체를 반환
       return snapshot
     },
 

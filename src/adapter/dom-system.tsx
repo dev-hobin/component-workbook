@@ -32,7 +32,7 @@ export function createDomSystem<
     const ctx = React.useContext(DomContext)
     if (!ctx) {
       throw new Error(
-        `useDomContext must be used within <${config.namespace}.Provider>`,
+        `DomContext must be used within <${config.namespace}.Provider>`,
       )
     }
     return ctx

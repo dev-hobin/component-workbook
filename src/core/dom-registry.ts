@@ -21,12 +21,12 @@ export interface DomRegistry<Part extends string, NodeId, Meta> {
 
 type RegistryKey<
   Part extends string,
-  NodeId,
+  NodeId extends string | number,
 > = `${Part}::${NodeId & (string | number)}`
 
 export function createDomRegistry<
   Part extends string,
-  NodeId,
+  NodeId extends string | number,
   Meta,
 >(): DomRegistry<Part, NodeId, Meta> {
   const map = new Map<

@@ -1,4 +1,8 @@
-import type { NodeId, StructureSnapshot } from './structure-core'
+import type {
+  NodeId,
+  StructureNodeMeta,
+  StructureSnapshot,
+} from './structure-core'
 
 export type VisibleNode<
   Role extends string = string,
@@ -10,12 +14,7 @@ export type VisibleNode<
   index: number // 같은 parent 내에서의 index
   size: number // 같은 parent 내에서의 총 노드 수
   hasChildren: boolean
-  meta: StructureSnapshot<Role, ExtraMeta>['nodes'] extends ReadonlyMap<
-    NodeId,
-    infer M
-  >
-    ? M
-    : never
+  meta: StructureNodeMeta<Role> & ExtraMeta
 }
 
 export function buildVisibleNodes<
