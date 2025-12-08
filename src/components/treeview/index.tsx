@@ -302,14 +302,10 @@ function Item(props: ItemProps) {
     role: 'item',
   })
 
-  const labelId = TreeViewDomSystem.useCompositeDomId('label', id)
-  const { domId, ref } = TreeViewDomSystem.useCompositeItemRegistration(
-    'item',
-    id,
-    {
-      id: props.id, // 사용자가 id를 넘겼으면 그걸 우선 사용
-    },
-  )
+  const labelId = TreeViewDomSystem.useId('label', id)
+  const { domId, ref } = TreeViewDomSystem.useRegistration('item', id, {
+    id: props.id, // 사용자가 id를 넘겼으면 그걸 우선 사용
+  })
 
   const itemContextValue = useMemo<ItemContextValue>(
     () => ({ id, domId }),
@@ -363,10 +359,7 @@ function Indicator({ children }: { children?: React.ReactNode }) {
   const isSelected = selectedIds.includes(item.id)
   const isExpanded = expandedIds.includes(item.id)
 
-  const { domId, ref } = TreeViewDomSystem.useCompositeItemRegistration(
-    'indicator',
-    item.id,
-  )
+  const { domId, ref } = TreeViewDomSystem.useRegistration('indicator', item.id)
 
   return (
     <span
@@ -387,10 +380,7 @@ function Text({ children }: { children?: React.ReactNode }) {
   const isSelected = selectedIds.includes(item.id)
   const isExpanded = expandedIds.includes(item.id)
 
-  const { domId, ref } = TreeViewDomSystem.useCompositeItemRegistration(
-    'label',
-    item.id,
-  )
+  const { domId, ref } = TreeViewDomSystem.useRegistration('label', item.id)
 
   return (
     <span
@@ -492,7 +482,7 @@ function useTreeKeyboardNavigation(): React.KeyboardEventHandler<HTMLUListElemen
 
 function useTreeFocusEffect() {
   const { activeId } = useTreeStateContext()
-  const domSystem = TreeViewDomSystem.useCompositeContext() // or useCompositeRegistry()
+  const domSystem = TreeViewDomSystem.useContext() // or useCompositeRegistry()
   const lastFocusedRef = useRef<NodeId | null>(null)
 
   useEffect(() => {

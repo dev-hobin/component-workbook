@@ -123,7 +123,7 @@ function ParentRoot({
     onChange: onOpenedMenusChange,
   })
 
-  const registry = MenuSystem.useCompositeRegistry()
+  const registry = MenuSystem.useRegistry()
 
   //  [ParentRoot] 문서 전체에 pointerdown 리스너를 달아서
   //    - registry에 등록된 어떤 노드에도 포함되지 않는 클릭이면
@@ -172,7 +172,7 @@ function ParentRoot({
 export function ChildRoot({ children, menuId }: RootProps) {
   const parentMenuContext = useContext(MenuContext)
   const tree = useMenuTreeContext()
-  const registry = MenuSystem.useCompositeRegistry()
+  const registry = MenuSystem.useRegistry()
 
   const isTopLevel = !parentMenuContext
   const isSubMenu = !!parentMenuContext
@@ -531,9 +531,9 @@ export const Trigger = forwardRef<HTMLButtonElement, TriggerProps>(
   ({ children, ...rest }, ref) => {
     const { open, openMenu, closeMenu, rootId } = useMenuContext()
 
-    const registry = MenuSystem.useCompositeRegistry()
+    const registry = MenuSystem.useRegistry()
 
-    const { domId, ref: triggerRef } = MenuSystem.useCompositeItemRegistration(
+    const { domId, ref: triggerRef } = MenuSystem.useRegistration(
       'trigger',
       rootId,
       {
@@ -573,9 +573,9 @@ export const Content = forwardRef<HTMLDivElement, ContentProps>(
   ({ children, ...rest }, ref) => {
     const { open, rootId } = useMenuContext()
 
-    const registry = MenuSystem.useCompositeRegistry()
+    const registry = MenuSystem.useRegistry()
 
-    const { domId, ref: contentRef } = MenuSystem.useCompositeItemRegistration(
+    const { domId, ref: contentRef } = MenuSystem.useRegistration(
       'content',
       rootId,
       { meta: { rootId } },
@@ -627,20 +627,16 @@ export const SubTrigger = forwardRef<HTMLButtonElement, SubTriggerProps>(
 
     const ownerRootId = parentMenuContext.rootId // 부모 메뉴의 rootId
 
-    const registry = MenuSystem.useCompositeRegistry()
+    const registry = MenuSystem.useRegistry()
 
     // 1) 서브메뉴 입장에서의 trigger 등록
-    const triggerReg = MenuSystem.useCompositeItemRegistration(
-      'trigger',
-      rootId,
-      {
-        meta: { rootId }, // 트리거는 자기 서브메뉴(rootId)에 속함
-      },
-    )
+    const triggerReg = MenuSystem.useRegistration('trigger', rootId, {
+      meta: { rootId }, // 트리거는 자기 서브메뉴(rootId)에 속함
+    })
 
     // 2) 부모 메뉴 입장에서의 item 등록
     //    itemId도 child rootId를 쓰면, 부모 메뉴의 activeItemId랑 맞춰 쓰기 좋음
-    const itemReg = MenuSystem.useCompositeItemRegistration('item', rootId, {
+    const itemReg = MenuSystem.useRegistration('item', rootId, {
       id: triggerReg.domId, // DOM id는 trigger 쪽 id랑 동일하게 맞추기
       meta: { rootId: ownerRootId }, // 이 item의 "owner 메뉴"는 부모 메뉴
     })
@@ -685,12 +681,15 @@ export type SubContentProps = ComponentPropsWithoutRef<'div'>
 export const SubContent = forwardRef<HTMLDivElement, SubContentProps>(
   ({ children, ...rest }, ref) => {
     const { open, rootId } = useMenuContext()
-    const registry = MenuSystem.useCompositeRegistry()
+    const registry = MenuSystem.useRegistry()
 
-    const { domId, ref: subContentRef } =
-      MenuSystem.useCompositeItemRegistration('content', rootId, {
+    const { domId, ref: subContentRef } = MenuSystem.useRegistration(
+      'content',
+      rootId,
+      {
         meta: { rootId },
-      })
+      },
+    )
 
     const { isPresent, transitionState } = usePresence({
       isVisible: open,
@@ -742,12 +741,15 @@ export const Positioner = forwardRef<HTMLDivElement, PositionerProps>(
     ref,
   ) => {
     const { open, rootId } = useMenuContext()
-    const registry = MenuSystem.useCompositeRegistry()
+    const registry = MenuSystem.useRegistry()
 
-    const { domId, ref: positionerRef } =
-      MenuSystem.useCompositeItemRegistration('positioner', rootId, {
+    const { domId, ref: positionerRef } = MenuSystem.useRegistration(
+      'positioner',
+      rootId,
+      {
         meta: { rootId },
-      })
+      },
+    )
 
     const { isPresent } = usePresence({
       isVisible: open,
@@ -859,9 +861,9 @@ export const PositionerArrow = forwardRef<HTMLDivElement, PositionerArrowProps>(
   ({ children, ...rest }, ref) => {
     const { rootId, open } = useMenuContext()
 
-    const registry = MenuSystem.useCompositeRegistry()
+    const registry = MenuSystem.useRegistry()
 
-    const { domId, ref: arrowRef } = MenuSystem.useCompositeItemRegistration(
+    const { domId, ref: arrowRef } = MenuSystem.useRegistration(
       'arrow',
       rootId,
       { meta: { rootId } },
@@ -906,12 +908,15 @@ export const ActionItem = forwardRef<HTMLButtonElement, ActionItemProps>(
     const { rootId, activeItemId } = useMenuContext()
 
     const tree = useMenuTreeContext()
-    const registry = MenuSystem.useCompositeRegistry()
+    const registry = MenuSystem.useRegistry()
 
-    const { domId, ref: actionItemRef } =
-      MenuSystem.useCompositeItemRegistration('item', itemId, {
+    const { domId, ref: actionItemRef } = MenuSystem.useRegistration(
+      'item',
+      itemId,
+      {
         meta: { rootId }, // owner menu id
-      })
+      },
+    )
 
     return (
       <button
@@ -952,9 +957,9 @@ export const LinkItem = forwardRef<HTMLAnchorElement, LinkItemProps>(
   ({ children, value: itemId, ...rest }, ref) => {
     const { rootId, activeItemId } = useMenuContext()
     const tree = useMenuTreeContext()
-    const registry = MenuSystem.useCompositeRegistry()
+    const registry = MenuSystem.useRegistry()
 
-    const { domId, ref: linkItemRef } = MenuSystem.useCompositeItemRegistration(
+    const { domId, ref: linkItemRef } = MenuSystem.useRegistration(
       'item',
       itemId,
       {
