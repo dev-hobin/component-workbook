@@ -28,8 +28,8 @@ import {
   RegistryContext,
   ParentIdContext,
   useRegistryProvider,
-  useRegistry,
   useParentId,
+  type RegistryContextValue,
 } from '../../shell/use-registry'
 import { createIdGenerator } from '../../core/id-core'
 import { IdProvider, useDomId } from '../../shell/use-dom-id'
@@ -44,6 +44,7 @@ type TreeContextValue = {
   state: TreeState
   shape: HierarchyShape
   visibleNodesById: Map<NodeId, VisibleNode>
+  registry: RegistryContextValue
 }
 
 // ============================================
@@ -100,7 +101,7 @@ function Root({
   onExpandChange,
 }: RootProps) {
   const registry = useRegistryProvider()
-  const { shape } = registry
+  const shape = registry.getShape()
 
   const reactId = useId()
   const getId = useMemo(() => createIdGenerator(`tree-${reactId}`), [reactId])
@@ -237,8 +238,9 @@ function Root({
       state,
       shape,
       visibleNodesById,
+      registry,
     }),
-    [state, shape, visibleNodesById],
+    [state, shape, visibleNodesById, registry],
   )
 
   return (
@@ -276,8 +278,7 @@ type ItemProps = {
 }
 
 function Item({ nodeId, children, className }: ItemProps) {
-  const { register, unregister } = useRegistry()
-  const { state, shape, visibleNodesById } = useTreeContext()
+  const { state, shape, visibleNodesById, registry } = useTreeContext()
 
   const parentId = useParentId()
   const id = useDomId('item', nodeId)
@@ -302,8 +303,8 @@ function Item({ nodeId, children, className }: ItemProps) {
         data-focused={isFocused}
         className={className}
         ref={(el) => {
-          if (el) register(nodeId, parentId, el)
-          else unregister(nodeId)
+          if (el) registry.register({ id: nodeId, parentId, element: el })
+          else registry.unregister(nodeId)
         }}
       >
         {children}

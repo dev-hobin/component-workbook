@@ -1,7 +1,7 @@
-import { Example } from './components/tree/example'
+import { NestedMenuExample } from './components/menu/examples'
 
 function App() {
-  return <Example />
+  return <NestedMenuExample />
 }
 
 export default App

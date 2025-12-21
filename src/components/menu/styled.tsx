@@ -6,7 +6,6 @@ import MenuPrimitives, {
   type PositionerProps,
   type PositionerArrowProps,
   type ContentProps,
-  type SubContentProps,
   type ActionItemProps,
   type LinkItemProps,
   type PortalProps,
@@ -114,7 +113,7 @@ export function Content({ className, ...rest }: ContentProps) {
   )
 }
 
-export function SubContent({ className, ...rest }: SubContentProps) {
+export function SubContent({ className, ...rest }: ContentProps) {
   return (
     <MenuPrimitives.SubContent
       className={cn(
