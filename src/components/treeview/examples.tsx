@@ -24,7 +24,6 @@ export function Example() {
 
         <div className="rounded-lg border border-slate-800 bg-slate-950/40">
           <TreeView.Root className="p-2 text-[13px] text-slate-50 outline-none focus-visible:ring-2 focus-visible:ring-sky-500/70 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900 rounded-lg">
-            {/* root */}
             <TreeView.Item
               nodeId="root"
               className="px-1 py-0.5 cursor-pointer hover:bg-slate-800/70 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-sky-500/60 data-[selected=true]:border-l-2 data-[selected=true]:border-l-sky-500"
@@ -35,7 +34,6 @@ export function Example() {
               </div>
 
               <TreeView.SubRoot className="mt-0.5 ml-3 border-l border-slate-800/60 pl-2 space-y-0.5 hidden data-[expanded=true]:block">
-                {/* src */}
                 <TreeView.Item
                   nodeId="root-src"
                   className="px-1 py-0.5 cursor-pointer hover:bg-slate-800/70 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-sky-500/60 data-[selected=true]:border-l-2 data-[selected=true]:border-l-sky-500"

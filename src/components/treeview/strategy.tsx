@@ -1,4 +1,5 @@
-import type { NodeId, VisibleNode } from '../../core/composite-store'
+import type { NodeId } from '../../core/structure-core'
+import type { VisibleNode } from '../../core/build-visible-nodes'
 
 // ─────────────────────────────────────────────
 // Types
