@@ -1,7 +1,7 @@
-import { NestedMenuExample } from './components/menu/examples'
+import { ComboboxExamples } from './components/combobox/examples'
 
 function App() {
-  return <NestedMenuExample />
+  return <ComboboxExamples />
 }
 
 export default App

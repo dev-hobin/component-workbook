@@ -24,7 +24,8 @@ import { useCallback, useRef } from 'react'
  * }, [])
  * ```
  */
-export function useStableCallback<T extends (...args: unknown[]) => unknown>(
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function useStableCallback<T extends (...args: any[]) => any>(
   callback: T,
 ): (...args: Parameters<T>) => ReturnType<T> {
   const callbackRef = useRef(callback)
