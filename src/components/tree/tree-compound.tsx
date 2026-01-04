@@ -7,79 +7,67 @@ import React, {
   useId,
 } from 'react'
 
-import {
-  type TreeState,
-  type TreeShape,
-  type NodeId,
-  moveFocusDown,
-  moveFocusUp,
-  moveFocusFirst,
-  moveFocusLast,
-  handleRight,
-  handleLeft,
-  selectFocused,
-  expand,
-  collapse,
-  getVisibleNodes,
-  type VisibleNode,
-} from './core'
+import { type TreeState, type NodeId, expand, collapse } from './core'
 
-import { createIdGenerator } from '../../core/id-core'
-import { IdProvider, useDomId } from '../../shell/use-dom-id'
 import { useControllableState } from '@radix-ui/react-use-controllable-state'
 import { findNodeFromMouseEvent } from '../../shell/dom'
 
 import {
   ComponentStoreProvider,
-  useSnapshot,
+  useComponentStore,
 } from '../../shell/use-component-store'
-import { ParentProvider, useParentId } from '../../shell/use-parent-context'
+import { ParentProvider, useParentId, useLevel } from '../../shell/use-parent-context'
 import { useNode } from '../../shell/use-node'
-import {
-  getChildrenByRole,
-  getElement,
-} from '../../core/component-store-helpers'
-import type { ComponentSnapshot } from '../../core/component-store'
+import { useComponentSubscribe } from '../../shell/use-component-subscribe'
+import type { ComponentStore } from '../../core/component-store'
 
 // ============================================
 // Types
 // ============================================
 
-type TreeRole = 'root' | 'item' | 'text'
+type TreeRole = 'item' | 'text'
 type TreeMeta = object
 
 type TreeContextValue = {
   state: TreeState
-  shape: TreeShape
-  visibleNodesById: Map<NodeId, VisibleNode>
+  store: ComponentStore<TreeRole, TreeMeta>
 }
 
 // ============================================
 // Helpers
 // ============================================
 
-function snapshotToTreeShape(
-  snapshot: ComponentSnapshot<TreeRole, TreeMeta>,
-): TreeShape {
-  const nodesById: Record<NodeId, { id: NodeId; children: NodeId[] }> = {}
-  const rootIds: NodeId[] = []
+/** visible items를 DOM 순서대로 반환 (expandedIds 기반 필터링) */
+function getVisibleItemIds(
+  store: ComponentStore<TreeRole, TreeMeta>,
+  expandedIds: Set<NodeId>,
+): NodeId[] {
+  const result: NodeId[] = []
+  const allItems = store.getNodesByRole('item')
 
-  for (const node of snapshot.nodes.values()) {
-    if (node.role !== 'item') continue
+  // root items 찾기 (parent가 없거나 parent가 item이 아닌 것)
+  const rootItems = allItems.filter((node) => {
+    if (!node.parentId) return true
+    return !store.getNode(node.parentId, 'item')
+  })
 
-    const children = getChildrenByRole(snapshot, node.id, 'item').map(
-      (n) => n.id,
-    )
-    nodesById[node.id] = { id: node.id, children }
+  function visit(nodeId: NodeId) {
+    result.push(nodeId)
 
-    // parent가 없거나 parent가 item이 아니면 root
-    const parent = node.parentId ? snapshot.nodes.get(node.parentId) : null
-    if (!parent || parent.role !== 'item') {
-      rootIds.push(node.id)
+    // 펼쳐진 상태면 자식들도 방문
+    if (expandedIds.has(nodeId)) {
+      const children = store.getChildrenByRole(nodeId, 'item')
+      for (const child of children) {
+        visit(child.id)
+      }
     }
   }
 
-  return { rootIds, nodesById }
+  for (const root of rootItems) {
+    visit(root.id)
+  }
+
+  return result
 }
 
 // ============================================
@@ -96,6 +84,7 @@ function useTreeContext() {
   return context
 }
 
+
 // ============================================
 // Root
 // ============================================
@@ -105,7 +94,7 @@ type RootProps = {
   className?: string
   'aria-label'?: string
 
-  // Controlled (undefined = uncontrolled, null = "선택 없음")
+  // Controlled
   focusedId?: NodeId | null
   selectedId?: NodeId | null
   expandedIds?: Set<NodeId>
@@ -143,11 +132,8 @@ function RootInner({
   onSelectChange,
   onExpandChange,
 }: RootProps) {
-  const snapshot = useSnapshot<TreeRole, TreeMeta>()
-  const shape = useMemo(() => snapshotToTreeShape(snapshot), [snapshot])
-
-  const reactId = useId()
-  const getId = useMemo(() => createIdGenerator(`tree-${reactId}`), [reactId])
+  const { store } = useComponentStore<TreeRole, TreeMeta>()
+  const treeId = useId()
 
   const [focusedId, setFocusedId] = useControllableState({
     prop: focusedIdProp,
@@ -168,82 +154,97 @@ function RootInner({
   })
 
   const state: TreeState = useMemo(
-    () => ({
-      focusedId,
-      selectedId,
-      expandedIds,
-    }),
+    () => ({ focusedId, selectedId, expandedIds }),
     [focusedId, selectedId, expandedIds],
-  )
-
-  const visibleNodes = useMemo(
-    () => getVisibleNodes(shape, state),
-    [shape, state],
-  )
-
-  const visibleNodesById = useMemo(
-    () => new Map(visibleNodes.map((n) => [n.id, n])),
-    [visibleNodes],
   )
 
   // 키보드 핸들러
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
+      const visibleIds = getVisibleItemIds(store, expandedIds)
+      if (visibleIds.length === 0) return
+
+      const currentIndex = focusedId ? visibleIds.indexOf(focusedId) : -1
+
       switch (e.key) {
         case 'ArrowDown': {
           e.preventDefault()
-          const next = moveFocusDown(shape, state)
-          setFocusedId(next.focusedId)
+          if (currentIndex === -1) {
+            setFocusedId(visibleIds[0])
+          } else if (currentIndex < visibleIds.length - 1) {
+            setFocusedId(visibleIds[currentIndex + 1])
+          }
           break
         }
         case 'ArrowUp': {
           e.preventDefault()
-          const next = moveFocusUp(shape, state)
-          setFocusedId(next.focusedId)
+          if (currentIndex === -1) {
+            setFocusedId(visibleIds[0])
+          } else if (currentIndex > 0) {
+            setFocusedId(visibleIds[currentIndex - 1])
+          }
           break
         }
         case 'ArrowRight': {
           e.preventDefault()
-          const next = handleRight(shape, state)
-          setFocusedId(next.focusedId)
-          setExpandedIds(next.expandedIds)
+          if (!focusedId) break
+
+          const children = store.getChildrenByRole(focusedId, 'item')
+          const isLeaf = children.length === 0
+          if (isLeaf) break
+
+          const isExpanded = expandedIds.has(focusedId)
+          if (!isExpanded) {
+            setExpandedIds(expand(state, focusedId).expandedIds)
+          } else {
+            setFocusedId(children[0].id)
+          }
           break
         }
         case 'ArrowLeft': {
           e.preventDefault()
-          const next = handleLeft(shape, state)
-          setFocusedId(next.focusedId)
-          setExpandedIds(next.expandedIds)
+          if (!focusedId) break
+
+          const children = store.getChildrenByRole(focusedId, 'item')
+          const isLeaf = children.length === 0
+          const isExpanded = !isLeaf && expandedIds.has(focusedId)
+
+          if (isExpanded) {
+            setExpandedIds(collapse(state, focusedId).expandedIds)
+          } else {
+            const node = store.getNode(focusedId, 'item')
+            if (node?.parentId) {
+              const parentNode = store.getNode(node.parentId, 'item')
+              if (parentNode) {
+                setFocusedId(parentNode.id)
+              }
+            }
+          }
           break
         }
         case 'Home': {
           e.preventDefault()
-          const next = moveFocusFirst(shape, state)
-          setFocusedId(next.focusedId)
+          setFocusedId(visibleIds[0])
           break
         }
         case 'End': {
           e.preventDefault()
-          const next = moveFocusLast(shape, state)
-          setFocusedId(next.focusedId)
+          setFocusedId(visibleIds[visibleIds.length - 1])
           break
         }
         case 'Enter': {
           e.preventDefault()
-          const next = selectFocused(state)
-          setSelectedId(next.selectedId)
+          setSelectedId(focusedId)
           break
         }
       }
     },
-    [shape, state, setFocusedId, setSelectedId, setExpandedIds],
+    [store, state, focusedId, expandedIds, setFocusedId, setSelectedId, setExpandedIds],
   )
 
   const handleClick = useCallback(
     (e: React.MouseEvent) => {
-      const itemNodes = Array.from(snapshot.nodes.values()).filter(
-        (n) => n.role === 'item',
-      )
+      const itemNodes = store.getNodesByRole('item')
       const elements = new Map(
         itemNodes
           .filter((n) => n.element)
@@ -255,14 +256,12 @@ function RootInner({
         setSelectedId(nodeId)
       }
     },
-    [snapshot, setFocusedId, setSelectedId],
+    [store, setFocusedId, setSelectedId],
   )
 
   const handleDoubleClick = useCallback(
     (e: React.MouseEvent) => {
-      const itemNodes = Array.from(snapshot.nodes.values()).filter(
-        (n) => n.role === 'item',
-      )
+      const itemNodes = store.getNodesByRole('item')
       const elements = new Map(
         itemNodes
           .filter((n) => n.element)
@@ -270,56 +269,48 @@ function RootInner({
       )
       const nodeId = findNodeFromMouseEvent(e, elements)
       if (nodeId) {
-        const node = shape.nodesById[nodeId]
-        const isLeaf = node ? node.children.length === 0 : true
+        const children = store.getChildrenByRole(nodeId, 'item')
+        const isLeaf = children.length === 0
         if (!isLeaf) {
           const isExpanded = expandedIds.has(nodeId)
-          const next = isExpanded
-            ? collapse(state, nodeId)
-            : expand(state, nodeId)
+          const next = isExpanded ? collapse(state, nodeId) : expand(state, nodeId)
           setExpandedIds(next.expandedIds)
         }
       }
     },
-    [snapshot, shape.nodesById, expandedIds, state, setExpandedIds],
+    [store, expandedIds, state, setExpandedIds],
   )
 
   // 포커스 동기화
   useEffect(() => {
-    if (state.focusedId) {
-      const element = getElement(snapshot, state.focusedId)
+    if (focusedId) {
+      const element = store.getElement(focusedId, 'item')
       element?.focus()
     }
-  }, [state.focusedId, snapshot])
+  }, [focusedId, store])
 
   const treeContextValue = useMemo<TreeContextValue>(
-    () => ({
-      state,
-      shape,
-      visibleNodesById,
-    }),
-    [state, shape, visibleNodesById],
+    () => ({ state, store }),
+    [state, store],
   )
 
   return (
-    <IdProvider value={getId}>
-      <TreeContext.Provider value={treeContextValue}>
-        <ParentProvider id="__tree_root__">
-          <ul
-            id={getId('root')}
-            role="tree"
-            aria-label={ariaLabel}
-            aria-multiselectable={false}
-            className={className}
-            onKeyDown={handleKeyDown}
-            onClick={handleClick}
-            onDoubleClick={handleDoubleClick}
-          >
-            {children}
-          </ul>
-        </ParentProvider>
-      </TreeContext.Provider>
-    </IdProvider>
+    <TreeContext.Provider value={treeContextValue}>
+      <ParentProvider id="__tree_root__">
+        <ul
+          id={`tree-${treeId}`}
+          role="tree"
+          aria-label={ariaLabel}
+          aria-multiselectable={false}
+          className={className}
+          onKeyDown={handleKeyDown}
+          onClick={handleClick}
+          onDoubleClick={handleDoubleClick}
+        >
+          {children}
+        </ul>
+      </ParentProvider>
+    </TreeContext.Provider>
   )
 }
 
@@ -334,30 +325,30 @@ type ItemProps = {
 }
 
 function Item({ nodeId, children, className }: ItemProps) {
-  const { state, shape, visibleNodesById } = useTreeContext()
-  const { ref } = useNode<TreeRole>({
+  const { state, store } = useTreeContext()
+  const { ref, domId } = useNode<TreeRole>({
     role: 'item',
     id: nodeId,
-    domId: nodeId,
   })
 
-  const domId = useDomId('item', nodeId)
+  const level = useLevel()
+  const hasChildren = useComponentSubscribe(
+    store,
+    (s) => s.getChildrenByRole(nodeId, 'item').length > 0,
+  )
 
-  const node = shape.nodesById[nodeId]
-  const isLeaf = node ? node.children.length === 0 : true
-  const isExpanded = !isLeaf && state.expandedIds.has(nodeId)
+  const isExpanded = hasChildren && state.expandedIds.has(nodeId)
   const isSelected = state.selectedId === nodeId
   const isFocused = state.focusedId === nodeId
-  const level = visibleNodesById.get(nodeId)?.level ?? 1
 
   return (
     <ParentProvider id={nodeId}>
       <li
-        ref={ref as React.RefObject<HTMLLIElement>}
+        ref={ref}
         id={domId}
         role="treeitem"
         aria-selected={isSelected}
-        aria-expanded={isLeaf ? undefined : isExpanded}
+        aria-expanded={hasChildren ? isExpanded : undefined}
         aria-level={level}
         tabIndex={isFocused ? 0 : -1}
         data-selected={isSelected}
@@ -382,7 +373,6 @@ type SubRootProps = {
 function SubRoot({ children, className }: SubRootProps) {
   const { state } = useTreeContext()
   const parentId = useParentId()
-  const id = useDomId('group', parentId!)
 
   if (parentId === null || parentId === '__tree_root__') {
     throw new Error('SubRoot는 Item 안에서 사용해야 합니다.')
@@ -393,7 +383,7 @@ function SubRoot({ children, className }: SubRootProps) {
   return (
     <ul
       role="group"
-      id={id}
+      id={`group-${parentId}`}
       hidden={!isExpanded}
       data-expanded={isExpanded}
       className={className}
@@ -413,18 +403,12 @@ type TextProps = {
 }
 
 function Text({ children, className }: TextProps) {
-  const parentId = useParentId()
   const { ref, domId } = useNode<TreeRole>({
     role: 'text',
-    domId: parentId ? `${parentId}-text` : undefined,
   })
 
   return (
-    <span
-      ref={ref as React.RefObject<HTMLSpanElement>}
-      id={domId}
-      className={className}
-    >
+    <span ref={ref} id={domId} className={className}>
       {children}
     </span>
   )

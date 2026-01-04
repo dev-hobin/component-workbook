@@ -1,38 +1,49 @@
-import { useId, useLayoutEffect, useRef } from 'react'
+import { useCallback, useId, useLayoutEffect, useRef } from 'react'
 import { useComponentStore } from './use-component-store'
 import { useParentId } from './use-parent-context'
 import { useLatestRef } from '../hooks/useLatestRef'
 import type { NodeId } from '../core/component-store'
 
-export function useNode<Role extends string, Meta extends object = object>(
-  options: {
-    role: Role
-    id?: NodeId
-    domId?: string
-    meta?: Meta
-  }
-) {
+export function useNode<
+  Role extends string,
+  Meta extends object = object,
+>(options: { role: Role; id?: NodeId; domId?: string; meta?: Meta }) {
   const generatedId = useId()
   const id = options.id ?? generatedId
   const parentId = useParentId()
   const { store } = useComponentStore<Role, Meta>()
-  const ref = useRef<HTMLElement>(null)
+  const elementRef = useRef<HTMLElement | null>(null)
   const metaRef = useLatestRef(options.meta)
 
-  const domId = options.domId ?? `${id}-${options.role}`
+  const domId = options.domId ?? `${options.role}::${id}`
 
-  useLayoutEffect(() => {
-    store.register({
-      id,
-      parentId,
-      role: options.role,
-      meta: metaRef.current ?? ({} as Meta),
-      element: ref.current,
-    })
-    return () => store.unregister(id)
-  }, [id, parentId, options.role, store, metaRef])
+  const ref = useCallback(
+    (element: HTMLElement | null) => {
+      // 이전 element와 같으면 skip
+      if (elementRef.current === element) return
 
-  return { id, domId, ref }
+      // 이전 element가 있었으면 해제
+      if (elementRef.current) {
+        store.unregister(id, options.role)
+      }
+
+      elementRef.current = element
+
+      // 새 element가 있으면 등록
+      if (element) {
+        store.register({
+          id,
+          parentId,
+          role: options.role,
+          meta: metaRef.current ?? ({} as Meta),
+          element,
+        })
+      }
+    },
+    [id, parentId, options.role, store, metaRef],
+  )
+
+  return { id, domId, ref, elementRef }
 }
 
 export function useLogicalNode<
@@ -53,7 +64,8 @@ export function useLogicalNode<
       meta: metaRef.current ?? ({} as Meta),
       element: null,
     })
-    return () => store.unregister(id)
+
+    return () => store.unregister(id, options.role)
   }, [id, parentId, options.role, store, metaRef])
 
   return { id }

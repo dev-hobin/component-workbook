@@ -7,6 +7,7 @@ import React, {
   useId,
   useLayoutEffect,
   useMemo,
+  useRef,
   type ComponentPropsWithoutRef,
   type CSSProperties,
 } from 'react'
@@ -42,40 +43,39 @@ import {
   closeMenuAndFocusTrigger,
 } from './core'
 
-import {
-  RegistryContext,
-  useRegistryProvider,
-  type RegistryContextValue,
-} from '../../shell/use-registry'
-import { createIdGenerator } from '../../core/id-core'
-import { IdProvider, useDomId } from '../../shell/use-dom-id'
 import { usePresence } from '../../hooks/usePresence'
 import { useLatestRef } from '../../hooks/useLatestRef'
 import { composeRefs } from '../../utils/composeRefs'
 import { mergeProps } from '../../utils/mergeProps'
 
+import {
+  ComponentStoreProvider,
+  useComponentStore,
+} from '../../shell/use-component-store'
+import { useNode } from '../../shell/use-node'
+import type { ComponentStore } from '../../core/component-store'
+
 // ============================================
 // Types
 // ============================================
 
-/**
- * Menu의 Part → Meta 매핑
- */
-export type MenuPartMetaMap = {
-  trigger: { menuId: MenuId }
-  item: { menuId: MenuId }
-  content: { menuId: MenuId }
-  positioner: { menuId: MenuId }
-  arrow: { menuId: MenuId }
-}
+type MenuRole =
+  | 'trigger'
+  | 'subtrigger'
+  | 'item'
+  | 'content'
+  | 'positioner'
+  | 'arrow'
 
-export type MenuPart = keyof MenuPartMetaMap
+type MenuMeta = {
+  menuId: MenuId
+}
 
 type MenuContextValue = {
   state: MenuState
   setState: React.Dispatch<React.SetStateAction<MenuState>>
   getMenuItems: (menuId: MenuId) => MenuItem[]
-  registry: RegistryContextValue<MenuPartMetaMap>
+  store: ComponentStore<MenuRole, MenuMeta>
 }
 
 type MenuIdContextValue = {
@@ -120,19 +120,25 @@ export type RootProps = {
   onOpenedPathChange?: (path: MenuId[]) => void
 }
 
-export function Root({
+export function Root(props: RootProps) {
+  return (
+    <ComponentStoreProvider>
+      <RootInner {...props} />
+    </ComponentStoreProvider>
+  )
+}
+
+function RootInner({
   children,
   menuId: menuIdProp,
   openedPath: openedPathProp,
   defaultOpenedPath,
   onOpenedPathChange,
 }: RootProps) {
-  // PartMetaMap 타입 전달로 타입 추론 활성화
-  const registry = useRegistryProvider<MenuPartMetaMap>()
+  const { store } = useComponentStore<MenuRole, MenuMeta>()
 
   const autoId = useId()
   const menuId = menuIdProp ?? autoId
-  const getId = useMemo(() => createIdGenerator(`menu-${menuId}`), [menuId])
 
   const [openedPath, setOpenedPath] = useControllableState({
     prop: openedPathProp,
@@ -160,18 +166,18 @@ export function Root({
     [state, setOpenedPath],
   )
 
-  // 이제 meta.menuId가 자동으로 타입 추론됨!
   const getMenuItems = useCallback(
     (targetMenuId: MenuId): MenuItem[] => {
-      const nodes = registry.filterNodesByMeta('item', (meta) => {
-        return meta.menuId === targetMenuId
-      })
+      const nodes = store.filterNodesByRolesAndMeta(
+        ['item', 'subtrigger'],
+        (meta) => meta.menuId === targetMenuId,
+      )
       return nodes.map((node) => ({
         id: node.id,
         menuId: node.meta.menuId,
       }))
     },
-    [registry],
+    [store],
   )
 
   // 바깥 클릭 감지
@@ -182,7 +188,7 @@ export function Root({
       const target = event.target as Node | null
       if (!target) return
 
-      const elements = registry.getElements()
+      const elements = store.getAllElements()
       for (const element of elements.values()) {
         if (element.contains(target)) {
           return
@@ -196,7 +202,7 @@ export function Root({
     return () => {
       document.removeEventListener('pointerdown', handlePointerDown, true)
     }
-  }, [state, setState, registry])
+  }, [state, setState, store])
 
   // 중앙 집중식 키보드 핸들러
   useEffect(() => {
@@ -209,7 +215,7 @@ export function Root({
       const target = event.target as HTMLElement
 
       // 메뉴 콘텐츠 안에서 발생한 이벤트만 처리
-      const contentElement = registry.getElement(activeMenuId, 'content')
+      const contentElement = store.getElement(activeMenuId, 'content')
       if (!contentElement?.contains(target)) {
         return
       }
@@ -280,7 +286,9 @@ export function Root({
         case ' ': {
           if (focusedId) {
             event.preventDefault()
-            const el = registry.getElement(focusedId, 'item')
+            const el =
+              store.getElement(focusedId, 'item') ??
+              store.getElement(focusedId, 'subtrigger')
             el?.click()
           }
           break
@@ -292,19 +300,21 @@ export function Root({
     return () => {
       document.removeEventListener('keydown', handleKeyDown)
     }
-  }, [state, setState, getMenuItems, registry])
+  }, [state, setState, getMenuItems, store])
 
-  // 포커스 동기화 (Tree 패턴)
+  // 포커스 동기화
   useEffect(() => {
     if (state.focusedItemId) {
-      const element = registry.getElement(state.focusedItemId, 'item')
+      const element =
+        store.getElement(state.focusedItemId, 'item') ??
+        store.getElement(state.focusedItemId, 'subtrigger')
       element?.focus()
     }
-  }, [state.focusedItemId, registry])
+  }, [state.focusedItemId, store])
 
   const menuContextValue = useMemo<MenuContextValue>(
-    () => ({ state, setState, getMenuItems, registry }),
-    [state, setState, getMenuItems, registry],
+    () => ({ state, setState, getMenuItems, store }),
+    [state, setState, getMenuItems, store],
   )
 
   const menuIdContextValue = useMemo<MenuIdContextValue>(
@@ -313,15 +323,11 @@ export function Root({
   )
 
   return (
-    <IdProvider value={getId}>
-      <RegistryContext.Provider value={registry}>
-        <MenuContext.Provider value={menuContextValue}>
-          <MenuIdContext.Provider value={menuIdContextValue}>
-            {children}
-          </MenuIdContext.Provider>
-        </MenuContext.Provider>
-      </RegistryContext.Provider>
-    </IdProvider>
+    <MenuContext.Provider value={menuContextValue}>
+      <MenuIdContext.Provider value={menuIdContextValue}>
+        {children}
+      </MenuIdContext.Provider>
+    </MenuContext.Provider>
   )
 }
 
@@ -358,17 +364,20 @@ export function SubRoot({ children, menuId: menuIdProp }: SubRootProps) {
 export type TriggerProps = ComponentPropsWithoutRef<'button'>
 
 export const Trigger = forwardRef<HTMLButtonElement, TriggerProps>(
-  ({ children, ...rest }, ref) => {
-    const { state, setState, registry } = useMenuContext()
+  ({ children, ...rest }, forwardedRef) => {
+    const { state, setState } = useMenuContext()
     const { menuId, parentMenuId } = useMenuIdContext()
-    const domId = useDomId('trigger', menuId)
+
+    const { ref, domId } = useNode<MenuRole, MenuMeta>({
+      role: 'trigger',
+      id: menuId,
+      meta: { menuId },
+    })
 
     const isOpen = isMenuOpen(state, menuId)
 
-    // 마우스/터치 클릭: 토글
     const handlePointerDown = useCallback(
       (e: React.PointerEvent) => {
-        // 키보드 포커스 후 마우스 클릭 시 기본 동작 방지
         e.preventDefault()
 
         if (isOpen) {
@@ -380,7 +389,6 @@ export const Trigger = forwardRef<HTMLButtonElement, TriggerProps>(
       [isOpen, state, setState, menuId, parentMenuId],
     )
 
-    // 키보드: 메뉴가 닫혀있을 때만 열기
     const handleKeyDown = useCallback(
       (e: React.KeyboardEvent) => {
         if (isOpen) return
@@ -396,23 +404,9 @@ export const Trigger = forwardRef<HTMLButtonElement, TriggerProps>(
       [isOpen, state, setState, menuId, parentMenuId],
     )
 
-    const refCallback = useCallback(
-      (el: HTMLButtonElement | null) => {
-        if (el)
-          registry.register({
-            id: menuId,
-            part: 'trigger',
-            element: el,
-            meta: { menuId },
-          })
-        else registry.unregister(menuId, 'trigger')
-      },
-      [menuId, registry],
-    )
-
     return (
       <button
-        ref={composeRefs(ref, refCallback)}
+        ref={composeRefs(forwardedRef, ref)}
         {...mergeProps(
           {
             type: 'button',
@@ -439,10 +433,16 @@ export const Trigger = forwardRef<HTMLButtonElement, TriggerProps>(
 export type SubTriggerProps = ComponentPropsWithoutRef<'button'>
 
 export const SubTrigger = forwardRef<HTMLButtonElement, SubTriggerProps>(
-  ({ children, ...rest }, ref) => {
-    const { state, setState, registry } = useMenuContext()
+  ({ children, ...rest }, forwardedRef) => {
+    const { state, setState } = useMenuContext()
     const { menuId, parentMenuId } = useMenuIdContext()
-    const domId = useDomId('trigger', menuId)
+
+    // subtrigger role로 등록 (부모 메뉴의 menuId를 meta에 저장)
+    const { ref, domId } = useNode<MenuRole, MenuMeta>({
+      role: 'subtrigger',
+      id: menuId,
+      meta: { menuId: parentMenuId! },
+    })
 
     const isOpen = isMenuOpen(state, menuId)
     const isActiveInParent = state.focusedItemId === menuId
@@ -455,7 +455,6 @@ export const SubTrigger = forwardRef<HTMLButtonElement, SubTriggerProps>(
       }
     }, [isOpen, state, setState, menuId, parentMenuId])
 
-    // 서브트리거: 서브메뉴가 닫혀있을 때만 처리
     const handleKeyDown = useCallback(
       (e: React.KeyboardEvent) => {
         if (isOpen) return
@@ -468,37 +467,9 @@ export const SubTrigger = forwardRef<HTMLButtonElement, SubTriggerProps>(
       [isOpen, state, setState, menuId, parentMenuId],
     )
 
-    // SubTrigger는 trigger + item 둘 다 등록
-    const refCallback = useCallback(
-      (el: HTMLButtonElement | null) => {
-        if (el) {
-          registry.register({
-            id: menuId,
-            part: 'trigger',
-            element: el,
-            meta: { menuId },
-          })
-          if (parentMenuId) {
-            registry.register({
-              id: menuId,
-              part: 'item',
-              element: el,
-              meta: { menuId: parentMenuId },
-            })
-          }
-        } else {
-          registry.unregister(menuId, 'trigger')
-          if (parentMenuId) {
-            registry.unregister(menuId, 'item')
-          }
-        }
-      },
-      [menuId, parentMenuId, registry],
-    )
-
     return (
       <button
-        ref={composeRefs(ref, refCallback)}
+        ref={composeRefs(forwardedRef, ref)}
         {...mergeProps(
           {
             role: 'menuitem',
@@ -509,6 +480,7 @@ export const SubTrigger = forwardRef<HTMLButtonElement, SubTriggerProps>(
             tabIndex: isActiveInParent ? 0 : -1,
             'aria-haspopup': 'menu',
             'aria-expanded': isOpen,
+            'data-active': isActiveInParent,
           },
           rest,
         )}
@@ -526,20 +498,25 @@ export const SubTrigger = forwardRef<HTMLButtonElement, SubTriggerProps>(
 export type ContentProps = ComponentPropsWithoutRef<'div'>
 
 export const Content = forwardRef<HTMLDivElement, ContentProps>(
-  ({ children, ...rest }, ref) => {
-    const { state, setState, getMenuItems, registry } = useMenuContext()
+  ({ children, ...rest }, forwardedRef) => {
+    const { state, setState, getMenuItems } = useMenuContext()
     const { menuId } = useMenuIdContext()
-    const domId = useDomId('content', menuId)
+
+    const { ref, domId, elementRef } = useNode<MenuRole, MenuMeta>({
+      role: 'content',
+      id: menuId,
+      meta: { menuId },
+    })
 
     const isOpen = isMenuOpen(state, menuId)
 
     const { isPresent, transitionState } = usePresence({
       isVisible: isOpen,
-      resolveElement: () => registry.getElement(menuId, 'content'),
+      resolveElement: () => elementRef.current,
     })
 
     // 메뉴가 열릴 때 첫 아이템으로 포커스
-    const hasInitialFocus = React.useRef(false)
+    const hasInitialFocus = useRef(false)
     useLayoutEffect(() => {
       if (!isPresent) {
         hasInitialFocus.current = false
@@ -549,26 +526,11 @@ export const Content = forwardRef<HTMLDivElement, ContentProps>(
       if (hasInitialFocus.current) return
       hasInitialFocus.current = true
 
-      // useLayoutEffect 시점에 아이템들이 이미 등록되어 있음 (React 렌더링 순서)
       const items = getMenuItems(menuId)
       if (items.length > 0) {
         setState((prev) => setFocus(prev, items[0].id))
       }
     }, [isPresent, menuId, setState, getMenuItems])
-
-    const refCallback = useCallback(
-      (el: HTMLDivElement | null) => {
-        if (el)
-          registry.register({
-            id: menuId,
-            part: 'content',
-            element: el,
-            meta: { menuId },
-          })
-        else registry.unregister(menuId, 'content')
-      },
-      [menuId, registry],
-    )
 
     if (!isPresent) {
       return null
@@ -576,7 +538,7 @@ export const Content = forwardRef<HTMLDivElement, ContentProps>(
 
     return (
       <div
-        ref={composeRefs(ref, refCallback)}
+        ref={composeRefs(forwardedRef, ref)}
         {...mergeProps(
           {
             role: 'menu',
@@ -607,10 +569,15 @@ export type ActionItemProps = Omit<
 }
 
 export const ActionItem = forwardRef<HTMLButtonElement, ActionItemProps>(
-  ({ children, value: itemId, ...rest }, ref) => {
-    const { state, setState, registry } = useMenuContext()
+  ({ children, value: itemId, ...rest }, forwardedRef) => {
+    const { state, setState, store } = useMenuContext()
     const { menuId } = useMenuIdContext()
-    const domId = useDomId('item', itemId)
+
+    const { ref, domId } = useNode<MenuRole, MenuMeta>({
+      role: 'item',
+      id: itemId,
+      meta: { menuId },
+    })
 
     const isActive = state.focusedItemId === itemId
 
@@ -619,10 +586,10 @@ export const ActionItem = forwardRef<HTMLButtonElement, ActionItemProps>(
       setState(closeAll(state))
 
       if (rootMenuId) {
-        const rootTrigger = registry.getElement(rootMenuId, 'trigger')
+        const rootTrigger = store.getElement(rootMenuId, 'trigger')
         rootTrigger?.focus()
       }
-    }, [state, setState, registry])
+    }, [state, setState, store])
 
     const handleFocus = useCallback(() => {
       if (state.focusedItemId !== itemId) {
@@ -630,23 +597,9 @@ export const ActionItem = forwardRef<HTMLButtonElement, ActionItemProps>(
       }
     }, [state, setState, itemId])
 
-    const refCallback = useCallback(
-      (el: HTMLButtonElement | null) => {
-        if (el)
-          registry.register({
-            id: itemId,
-            part: 'item',
-            element: el,
-            meta: { menuId },
-          })
-        else registry.unregister(itemId, 'item')
-      },
-      [itemId, menuId, registry],
-    )
-
     return (
       <button
-        ref={composeRefs(ref, refCallback)}
+        ref={composeRefs(forwardedRef, ref)}
         {...mergeProps(
           {
             role: 'menuitem',
@@ -655,6 +608,7 @@ export const ActionItem = forwardRef<HTMLButtonElement, ActionItemProps>(
             tabIndex: isActive ? 0 : -1,
             onClick: handleClick,
             onFocus: handleFocus,
+            'data-active': isActive,
           },
           rest,
         )}
@@ -674,10 +628,15 @@ export type LinkItemProps = Omit<ComponentPropsWithoutRef<'a'>, 'value'> & {
 }
 
 export const LinkItem = forwardRef<HTMLAnchorElement, LinkItemProps>(
-  ({ children, value: itemId, ...rest }, ref) => {
-    const { state, setState, registry } = useMenuContext()
+  ({ children, value: itemId, ...rest }, forwardedRef) => {
+    const { state, setState, store } = useMenuContext()
     const { menuId } = useMenuIdContext()
-    const domId = useDomId('item', itemId)
+
+    const { ref, domId } = useNode<MenuRole, MenuMeta>({
+      role: 'item',
+      id: itemId,
+      meta: { menuId },
+    })
 
     const isActive = state.focusedItemId === itemId
 
@@ -686,10 +645,10 @@ export const LinkItem = forwardRef<HTMLAnchorElement, LinkItemProps>(
       setState(closeAll(state))
 
       if (rootMenuId) {
-        const rootTrigger = registry.getElement(rootMenuId, 'trigger')
+        const rootTrigger = store.getElement(rootMenuId, 'trigger')
         rootTrigger?.focus()
       }
-    }, [state, setState, registry])
+    }, [state, setState, store])
 
     const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
       if (e.key === ' ') {
@@ -704,23 +663,9 @@ export const LinkItem = forwardRef<HTMLAnchorElement, LinkItemProps>(
       }
     }, [state, setState, itemId])
 
-    const refCallback = useCallback(
-      (el: HTMLAnchorElement | null) => {
-        if (el)
-          registry.register({
-            id: itemId,
-            part: 'item',
-            element: el,
-            meta: { menuId },
-          })
-        else registry.unregister(itemId, 'item')
-      },
-      [itemId, menuId, registry],
-    )
-
     return (
       <a
-        ref={composeRefs(ref, refCallback)}
+        ref={composeRefs(forwardedRef, ref)}
         {...mergeProps(
           {
             role: 'menuitem',
@@ -729,6 +674,7 @@ export const LinkItem = forwardRef<HTMLAnchorElement, LinkItemProps>(
             onClick: handleClick,
             onKeyDown: handleKeyDown,
             onFocus: handleFocus,
+            'data-active': isActive,
           },
           rest,
         )}
@@ -762,17 +708,22 @@ export const Positioner = forwardRef<HTMLDivElement, PositionerProps>(
       arrowOffset: arrowOffsetOption = 4,
       ...rest
     },
-    ref,
+    forwardedRef,
   ) => {
-    const { state, registry } = useMenuContext()
+    const { state, store } = useMenuContext()
     const { menuId } = useMenuIdContext()
-    const domId = useDomId('positioner', menuId)
+
+    const { ref, domId, elementRef } = useNode<MenuRole, MenuMeta>({
+      role: 'positioner',
+      id: menuId,
+      meta: { menuId },
+    })
 
     const isOpen = isMenuOpen(state, menuId)
 
     const { isPresent } = usePresence({
       isVisible: isOpen,
-      resolveElement: () => registry.getElement(menuId, 'positioner'),
+      resolveElement: () => elementRef.current,
     })
 
     const flipOptionsRef = useLatestRef(flipOptions)
@@ -782,16 +733,16 @@ export const Positioner = forwardRef<HTMLDivElement, PositionerProps>(
     useLayoutEffect(() => {
       if (!isPresent) return
 
-      const triggerEl = registry.getElement(menuId, 'trigger')
-      const positionerEl = registry.getElement(menuId, 'positioner')
+      const triggerEl =
+        store.getElement(menuId, 'trigger') ??
+        store.getElement(menuId, 'subtrigger')
+      const positionerEl = store.getElement(menuId, 'positioner')
       if (!triggerEl || !positionerEl) return
 
-      const arrowEl = registry.getElement(menuId, 'arrow')
+      const arrowEl = store.getElement(menuId, 'arrow')
 
       function positionUpdate() {
-        if (!triggerEl || !positionerEl) return
-
-        computePosition(triggerEl, positionerEl, {
+        computePosition(triggerEl!, positionerEl!, {
           placement,
           middleware: [
             offset(offsetOption),
@@ -800,7 +751,7 @@ export const Positioner = forwardRef<HTMLDivElement, PositionerProps>(
             ...(arrowEl ? [arrow({ element: arrowEl })] : []),
           ],
         }).then(({ x, y, middlewareData }) => {
-          Object.assign(positionerEl.style, {
+          Object.assign(positionerEl!.style, {
             left: `${x}px`,
             top: `${y}px`,
           })
@@ -830,7 +781,7 @@ export const Positioner = forwardRef<HTMLDivElement, PositionerProps>(
       return () => cleanup()
     }, [
       isPresent,
-      registry,
+      store,
       menuId,
       placement,
       flipOptionsRef,
@@ -839,27 +790,13 @@ export const Positioner = forwardRef<HTMLDivElement, PositionerProps>(
       arrowOffsetOption,
     ])
 
-    const refCallback = useCallback(
-      (el: HTMLDivElement | null) => {
-        if (el)
-          registry.register({
-            id: menuId,
-            part: 'positioner',
-            element: el,
-            meta: { menuId },
-          })
-        else registry.unregister(menuId, 'positioner')
-      },
-      [menuId, registry],
-    )
-
     if (!isPresent) {
       return null
     }
 
     return (
       <div
-        ref={composeRefs(ref, refCallback)}
+        ref={composeRefs(forwardedRef, ref)}
         {...mergeProps(
           {
             id: domId,
@@ -886,35 +823,26 @@ export const Positioner = forwardRef<HTMLDivElement, PositionerProps>(
 export type PositionerArrowProps = ComponentPropsWithoutRef<'div'>
 
 export const PositionerArrow = forwardRef<HTMLDivElement, PositionerArrowProps>(
-  ({ children, ...rest }, ref) => {
-    const { state, registry } = useMenuContext()
+  ({ children, ...rest }, forwardedRef) => {
+    const { state } = useMenuContext()
     const { menuId } = useMenuIdContext()
-    const domId = useDomId('arrow', menuId)
+
+    const { ref, domId, elementRef } = useNode<MenuRole, MenuMeta>({
+      role: 'arrow',
+      id: menuId,
+      meta: { menuId },
+    })
 
     const isOpen = isMenuOpen(state, menuId)
 
     const { transitionState } = usePresence({
       isVisible: isOpen,
-      resolveElement: () => registry.getElement(menuId, 'arrow'),
+      resolveElement: () => elementRef.current,
     })
-
-    const refCallback = useCallback(
-      (el: HTMLDivElement | null) => {
-        if (el)
-          registry.register({
-            id: menuId,
-            part: 'arrow',
-            element: el,
-            meta: { menuId },
-          })
-        else registry.unregister(menuId, 'arrow')
-      },
-      [menuId, registry],
-    )
 
     return (
       <div
-        ref={composeRefs(ref, refCallback)}
+        ref={composeRefs(forwardedRef, ref)}
         {...mergeProps(
           {
             id: domId,
