@@ -5,9 +5,8 @@
 // Functional Core / Imperative Shell 패턴의 Core 부분
 // ============================================
 
-import type { NodeId } from '../../core/registry-core'
-
 // === 기본 타입 ===
+export type NodeId = string
 export type TreeNode = {
   id: NodeId
   children: NodeId[]

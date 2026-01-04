@@ -9,6 +9,8 @@ import React, {
 
 import {
   type TreeState,
+  type TreeShape,
+  type NodeId,
   moveFocusDown,
   moveFocusUp,
   moveFocusFirst,
@@ -22,29 +24,62 @@ import {
   type VisibleNode,
 } from './core'
 
-import type { NodeId, HierarchyShape } from '../../core/registry-core'
-
-import {
-  RegistryContext,
-  ParentIdContext,
-  useRegistryProvider,
-  useParentId,
-  type RegistryContextValue,
-} from '../../shell/use-registry'
 import { createIdGenerator } from '../../core/id-core'
 import { IdProvider, useDomId } from '../../shell/use-dom-id'
 import { useControllableState } from '@radix-ui/react-use-controllable-state'
 import { findNodeFromMouseEvent } from '../../shell/dom'
 
+import {
+  ComponentStoreProvider,
+  useSnapshot,
+} from '../../shell/use-component-store'
+import { ParentProvider, useParentId } from '../../shell/use-parent-context'
+import { useNode } from '../../shell/use-node'
+import {
+  getChildrenByRole,
+  getElement,
+} from '../../core/component-store-helpers'
+import type { ComponentSnapshot } from '../../core/component-store'
+
 // ============================================
 // Types
 // ============================================
 
+type TreeRole = 'root' | 'item' | 'text'
+type TreeMeta = object
+
 type TreeContextValue = {
   state: TreeState
-  shape: HierarchyShape
+  shape: TreeShape
   visibleNodesById: Map<NodeId, VisibleNode>
-  registry: RegistryContextValue
+}
+
+// ============================================
+// Helpers
+// ============================================
+
+function snapshotToTreeShape(
+  snapshot: ComponentSnapshot<TreeRole, TreeMeta>,
+): TreeShape {
+  const nodesById: Record<NodeId, { id: NodeId; children: NodeId[] }> = {}
+  const rootIds: NodeId[] = []
+
+  for (const node of snapshot.nodes.values()) {
+    if (node.role !== 'item') continue
+
+    const children = getChildrenByRole(snapshot, node.id, 'item').map(
+      (n) => n.id,
+    )
+    nodesById[node.id] = { id: node.id, children }
+
+    // parent가 없거나 parent가 item이 아니면 root
+    const parent = node.parentId ? snapshot.nodes.get(node.parentId) : null
+    if (!parent || parent.role !== 'item') {
+      rootIds.push(node.id)
+    }
+  }
+
+  return { rootIds, nodesById }
 }
 
 // ============================================
@@ -86,7 +121,15 @@ type RootProps = {
   onExpandChange?: (ids: Set<NodeId>) => void
 }
 
-function Root({
+function Root(props: RootProps) {
+  return (
+    <ComponentStoreProvider<TreeRole, TreeMeta>>
+      <RootInner {...props} />
+    </ComponentStoreProvider>
+  )
+}
+
+function RootInner({
   children,
   className,
   'aria-label': ariaLabel,
@@ -100,8 +143,8 @@ function Root({
   onSelectChange,
   onExpandChange,
 }: RootProps) {
-  const registry = useRegistryProvider()
-  const shape = registry.getShape()
+  const snapshot = useSnapshot<TreeRole, TreeMeta>()
+  const shape = useMemo(() => snapshotToTreeShape(snapshot), [snapshot])
 
   const reactId = useId()
   const getId = useMemo(() => createIdGenerator(`tree-${reactId}`), [reactId])
@@ -198,18 +241,34 @@ function Root({
 
   const handleClick = useCallback(
     (e: React.MouseEvent) => {
-      const nodeId = findNodeFromMouseEvent(e, registry.getElements())
+      const itemNodes = Array.from(snapshot.nodes.values()).filter(
+        (n) => n.role === 'item',
+      )
+      const elements = new Map(
+        itemNodes
+          .filter((n) => n.element)
+          .map((n) => [n.id, n.element as HTMLElement]),
+      )
+      const nodeId = findNodeFromMouseEvent(e, elements)
       if (nodeId) {
         setFocusedId(nodeId)
         setSelectedId(nodeId)
       }
     },
-    [registry, setFocusedId, setSelectedId],
+    [snapshot, setFocusedId, setSelectedId],
   )
 
   const handleDoubleClick = useCallback(
     (e: React.MouseEvent) => {
-      const nodeId = findNodeFromMouseEvent(e, registry.getElements())
+      const itemNodes = Array.from(snapshot.nodes.values()).filter(
+        (n) => n.role === 'item',
+      )
+      const elements = new Map(
+        itemNodes
+          .filter((n) => n.element)
+          .map((n) => [n.id, n.element as HTMLElement]),
+      )
+      const nodeId = findNodeFromMouseEvent(e, elements)
       if (nodeId) {
         const node = shape.nodesById[nodeId]
         const isLeaf = node ? node.children.length === 0 : true
@@ -222,47 +281,44 @@ function Root({
         }
       }
     },
-    [registry, shape.nodesById, expandedIds, state, setExpandedIds],
+    [snapshot, shape.nodesById, expandedIds, state, setExpandedIds],
   )
 
   // 포커스 동기화
   useEffect(() => {
     if (state.focusedId) {
-      const element = registry.getElement(state.focusedId)
+      const element = getElement(snapshot, state.focusedId)
       element?.focus()
     }
-  }, [state.focusedId, registry])
+  }, [state.focusedId, snapshot])
 
   const treeContextValue = useMemo<TreeContextValue>(
     () => ({
       state,
       shape,
       visibleNodesById,
-      registry,
     }),
-    [state, shape, visibleNodesById, registry],
+    [state, shape, visibleNodesById],
   )
 
   return (
     <IdProvider value={getId}>
-      <RegistryContext.Provider value={registry}>
-        <TreeContext.Provider value={treeContextValue}>
-          <ParentIdContext.Provider value={null}>
-            <ul
-              id={getId('root')}
-              role="tree"
-              aria-label={ariaLabel}
-              aria-multiselectable={false}
-              className={className}
-              onKeyDown={handleKeyDown}
-              onClick={handleClick}
-              onDoubleClick={handleDoubleClick}
-            >
-              {children}
-            </ul>
-          </ParentIdContext.Provider>
-        </TreeContext.Provider>
-      </RegistryContext.Provider>
+      <TreeContext.Provider value={treeContextValue}>
+        <ParentProvider id="__tree_root__">
+          <ul
+            id={getId('root')}
+            role="tree"
+            aria-label={ariaLabel}
+            aria-multiselectable={false}
+            className={className}
+            onKeyDown={handleKeyDown}
+            onClick={handleClick}
+            onDoubleClick={handleDoubleClick}
+          >
+            {children}
+          </ul>
+        </ParentProvider>
+      </TreeContext.Provider>
     </IdProvider>
   )
 }
@@ -278,10 +334,14 @@ type ItemProps = {
 }
 
 function Item({ nodeId, children, className }: ItemProps) {
-  const { state, shape, visibleNodesById, registry } = useTreeContext()
+  const { state, shape, visibleNodesById } = useTreeContext()
+  const { ref } = useNode<TreeRole>({
+    role: 'item',
+    id: nodeId,
+    domId: nodeId,
+  })
 
-  const parentId = useParentId()
-  const id = useDomId('item', nodeId)
+  const domId = useDomId('item', nodeId)
 
   const node = shape.nodesById[nodeId]
   const isLeaf = node ? node.children.length === 0 : true
@@ -291,9 +351,10 @@ function Item({ nodeId, children, className }: ItemProps) {
   const level = visibleNodesById.get(nodeId)?.level ?? 1
 
   return (
-    <ParentIdContext.Provider value={nodeId}>
+    <ParentProvider id={nodeId}>
       <li
-        id={id}
+        ref={ref as React.RefObject<HTMLLIElement>}
+        id={domId}
         role="treeitem"
         aria-selected={isSelected}
         aria-expanded={isLeaf ? undefined : isExpanded}
@@ -302,14 +363,10 @@ function Item({ nodeId, children, className }: ItemProps) {
         data-selected={isSelected}
         data-focused={isFocused}
         className={className}
-        ref={(el) => {
-          if (el) registry.register({ id: nodeId, parentId, element: el })
-          else registry.unregister(nodeId)
-        }}
       >
         {children}
       </li>
-    </ParentIdContext.Provider>
+    </ParentProvider>
   )
 }
 
@@ -327,7 +384,7 @@ function SubRoot({ children, className }: SubRootProps) {
   const parentId = useParentId()
   const id = useDomId('group', parentId!)
 
-  if (parentId === null) {
+  if (parentId === null || parentId === '__tree_root__') {
     throw new Error('SubRoot는 Item 안에서 사용해야 합니다.')
   }
 
@@ -347,7 +404,7 @@ function SubRoot({ children, className }: SubRootProps) {
 }
 
 // ============================================
-// Text (optional helper)
+// Text
 // ============================================
 
 type TextProps = {
@@ -357,10 +414,17 @@ type TextProps = {
 
 function Text({ children, className }: TextProps) {
   const parentId = useParentId()
-  const id = useDomId('text', parentId!)
+  const { ref, domId } = useNode<TreeRole>({
+    role: 'text',
+    domId: parentId ? `${parentId}-text` : undefined,
+  })
 
   return (
-    <span id={id} className={className}>
+    <span
+      ref={ref as React.RefObject<HTMLSpanElement>}
+      id={domId}
+      className={className}
+    >
       {children}
     </span>
   )
