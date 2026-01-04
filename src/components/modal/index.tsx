@@ -1,336 +1,466 @@
-import { useControllableState } from '@radix-ui/react-use-controllable-state'
 import React, {
   createContext,
+  forwardRef,
+  useCallback,
   useContext,
   useEffect,
   useId,
   useLayoutEffect,
-  useState,
+  useMemo,
+  useRef,
+  type ComponentPropsWithoutRef,
 } from 'react'
-import { type ComponentPropsWithoutRef } from 'react'
 import { createPortal } from 'react-dom'
+import { useControllableState } from '@radix-ui/react-use-controllable-state'
 import * as focusTrap from 'focus-trap'
-import { useStableCallback } from '../../hooks/useStableCallback'
-import { usePresence } from '../../hooks/usePresence'
 
-const ModalContext = createContext<
-  | {
-      open: boolean
-      openModal: () => void
-      closeModal: () => void
-      idRules: {
-        rootId: string
-        backdropId: string
-        contentId: string
-        titleId: string
-        descriptionId: string
-        triggerId: string
-        closeTriggerId: string
-      }
-      closeOnOutsideClick: boolean
-    }
-  | undefined
->(undefined)
+import {
+  createModalState,
+  deriveStatus,
+  getEffectsOnStatusChange,
+  handleOutsideClick,
+  type ModalState,
+  type ModalStatus,
+  type ModalEffect,
+} from './core'
+import { usePresence } from '../../hooks/usePresence'
+import { useStableCallback } from '../../hooks/useStableCallback'
+import { useLatestRef } from '../../hooks/useLatestRef'
+import { composeRefs } from '../../utils/composeRefs'
+import { mergeProps } from '../../utils/mergeProps'
+
+import {
+  ComponentStoreProvider,
+  useComponentStore,
+} from '../../shell/use-component-store'
+import { useNode } from '../../shell/use-node'
+import { useComponentSubscribe } from '../../shell/use-component-subscribe'
+import type { ComponentStore } from '../../core/component-store'
+
+// ============================================
+// Types
+// ============================================
+
+type ModalRole =
+  | 'trigger'
+  | 'close-trigger'
+  | 'content'
+  | 'backdrop'
+  | 'title'
+  | 'description'
+
+type ModalMeta = object
+
+type ModalContextValue = {
+  modalId: string
+  state: ModalState
+  setOpen: (open: boolean) => void
+  store: ComponentStore<ModalRole, ModalMeta>
+  runEffect: (effect: ModalEffect) => void
+  initialFocus?: HTMLElement | (() => HTMLElement | null)
+}
+
+// ============================================
+// Contexts
+// ============================================
+
+const ModalContext = createContext<ModalContextValue | null>(null)
 
 function useModalContext() {
   const context = useContext(ModalContext)
   if (!context) {
-    throw new Error('useModalContext must be used within a Modal.Root')
+    throw new Error('Modal 컴포넌트는 Modal.Root 안에서 사용해야 합니다.')
   }
   return context
 }
 
+// ============================================
+// Root
+// ============================================
+
 export type RootProps = {
+  children: React.ReactNode
   open?: boolean
   onOpenChange?: (open: boolean) => void
   defaultOpen?: boolean
-  children: React.ReactNode
-  idRules?: {
-    rootId?: string
-    backdropId?: string
-    contentId?: string
-    titleId?: string
-    descriptionId?: string
-    triggerId?: string
-    closeTriggerId?: string
-  }
   initialFocus?: HTMLElement | (() => HTMLElement | null)
   closeOnOutsideClick?: boolean
   closeOnEscape?: boolean
 }
-export function Root({
+
+export function Root(props: RootProps) {
+  return (
+    <ComponentStoreProvider<ModalRole, ModalMeta>>
+      <RootInner {...props} />
+    </ComponentStoreProvider>
+  )
+}
+
+function RootInner({
   children,
   open: openProp,
-  onOpenChange: onOpenChangeProp,
-  defaultOpen: defaultOpenProp = false,
-  idRules,
+  onOpenChange,
+  defaultOpen = false,
   initialFocus,
   closeOnOutsideClick = false,
   closeOnEscape = true,
 }: RootProps) {
-  const defaultId = useId()
-  const rootId = idRules?.rootId ?? defaultId
-  const backdropId = idRules?.backdropId ?? `${rootId}-backdrop`
-  const contentId = idRules?.contentId ?? `${rootId}-content`
-  const titleId = idRules?.titleId ?? `${rootId}-title`
-  const descriptionId = idRules?.descriptionId ?? `${rootId}-description`
-  const triggerId = idRules?.triggerId ?? `${rootId}-trigger`
-  const closeTriggerId = idRules?.closeTriggerId ?? `${rootId}-close-trigger`
+  const { store } = useComponentStore<ModalRole, ModalMeta>()
+  const modalId = useId()
 
-  const [open, setOpen] = useControllableState({
+  const [open = false, setOpen] = useControllableState({
     prop: openProp,
-    onChange: onOpenChangeProp,
-    defaultProp: defaultOpenProp,
+    onChange: onOpenChange,
+    defaultProp: defaultOpen,
   })
 
-  const { isPresent: isContentPresent } = usePresence({
-    isVisible: open,
-    resolveElement: () => document.getElementById(contentId),
-  })
+  // Core state 생성
+  const state: ModalState = useMemo(
+    () => createModalState({ open, closeOnEscape, closeOnOutsideClick }),
+    [open, closeOnEscape, closeOnOutsideClick],
+  )
 
-  const openModal = () => {
-    setOpen(true)
-  }
+  // Status 파생 (원시값)
+  const status: ModalStatus = deriveStatus(state)
+  const prevStatusRef = useRef<ModalStatus>('idle')
 
-  const closeModal = () => {
-    setOpen(false)
-  }
-
-  const closeModalStableCallback = useStableCallback(closeModal)
-  useEffect(() => {
-    if (!isContentPresent || !closeOnEscape) {
-      return
-    }
-
-    const handler = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') {
-        return
-      }
-      if (
-        !isFocusInside([
-          document.getElementById(backdropId),
-          document.getElementById(contentId),
-        ])
-      ) {
-        return
-      }
-
-      closeModalStableCallback()
-    }
-
-    window.addEventListener('keydown', handler)
-
-    return () => {
-      window.removeEventListener('keydown', handler)
-    }
-  }, [
-    backdropId,
-    closeModalStableCallback,
-    closeOnEscape,
-    contentId,
-    isContentPresent,
-  ])
+  // Effect interpreter refs
+  const trapRef = useRef<ReturnType<typeof focusTrap.createFocusTrap> | null>(
+    null,
+  )
+  const prevOverflowRef = useRef<string>('')
 
   const initialFocusCallback = useStableCallback(() => {
     if (typeof initialFocus === 'function') {
       return initialFocus()
     }
-
     return initialFocus
   })
-  useEffect(() => {
-    if (!isContentPresent) {
-      return
-    }
 
-    const contentEl = document.getElementById(contentId)
-    if (!contentEl) {
-      return
-    }
+  const runEffect = useCallback(
+    (effect: ModalEffect) => {
+      switch (effect.type) {
+        case 'ACTIVATE_FOCUS_TRAP': {
+          requestAnimationFrame(() => {
+            const contentEl = store.getElement(modalId, 'content')
+            if (contentEl && !trapRef.current) {
+              trapRef.current = focusTrap
+                .createFocusTrap(contentEl, {
+                  initialFocus: initialFocusCallback() ?? undefined,
+                  fallbackFocus: contentEl,
+                  allowOutsideClick: effect.context.closeOnOutsideClick,
+                  escapeDeactivates: effect.context.closeOnEscape,
+                  onDeactivate: () => setOpen(false),
+                })
+                .activate()
+            }
+          })
+          break
+        }
+        case 'DEACTIVATE_FOCUS_TRAP':
+          if (trapRef.current) {
+            trapRef.current.deactivate()
+            trapRef.current = null
+          }
+          break
+        case 'LOCK_BODY_SCROLL':
+          prevOverflowRef.current = getComputedStyle(document.body).overflow
+          document.body.style.overflow = 'hidden'
+          break
+        case 'UNLOCK_BODY_SCROLL':
+          document.body.style.overflow = prevOverflowRef.current
+          break
+        case 'CLOSE_MODAL':
+          setOpen(false)
+          break
+      }
+    },
+    [initialFocusCallback, modalId, setOpen, store],
+  )
 
-    const trap = focusTrap
-      .createFocusTrap(contentEl, {
-        initialFocus: initialFocusCallback() ?? undefined,
-        allowOutsideClick: closeOnOutsideClick,
-        escapeDeactivates: closeOnEscape,
-      })
-      .activate()
+  const runEffectRef = useLatestRef(runEffect)
+  const contextRef = useLatestRef({ closeOnEscape, closeOnOutsideClick })
 
-    return () => {
-      trap.deactivate()
-    }
-  }, [
-    isContentPresent,
-    initialFocusCallback,
-    closeOnOutsideClick,
-    closeOnEscape,
-    contentId,
-  ])
-
+  // Status 전환 시 효과 실행
   useLayoutEffect(() => {
-    if (!open) {
-      return
-    }
+    const prevStatus = prevStatusRef.current
+    const effects = getEffectsOnStatusChange(
+      prevStatus,
+      status,
+      contextRef.current,
+    )
+    effects.forEach((e) => runEffectRef.current(e))
+    prevStatusRef.current = status
+  }, [status, contextRef, runEffectRef])
 
-    const overflowStyle = getComputedStyle(document.body).overflow
-    document.body.style.overflow = 'hidden'
-
+  // 언마운트 시 리소스 정리
+  useEffect(() => {
     return () => {
-      document.body.style.overflow = overflowStyle
+      if (trapRef.current) {
+        trapRef.current.deactivate({ onDeactivate: () => {} })
+        trapRef.current = null
+      }
+      document.body.style.overflow = prevOverflowRef.current
+      prevStatusRef.current = 'idle'
     }
-  }, [open])
+  }, [])
+
+  const contextValue = useMemo<ModalContextValue>(
+    () => ({
+      modalId,
+      state,
+      setOpen,
+      store,
+      runEffect,
+      initialFocus,
+    }),
+    [modalId, state, setOpen, store, runEffect, initialFocus],
+  )
 
   return (
-    <ModalContext.Provider
-      value={{
-        open,
-        openModal,
-        closeModal,
-        idRules: {
-          rootId,
-          backdropId,
-          contentId,
-          titleId,
-          descriptionId,
-          triggerId,
-          closeTriggerId,
-        },
-        closeOnOutsideClick,
-      }}
-    >
+    <ModalContext.Provider value={contextValue}>
       {children}
     </ModalContext.Provider>
   )
 }
 
-export type TriggerProps = ComponentPropsWithoutRef<'button'>
-export function Trigger({ onClick, ...rest }: TriggerProps) {
-  const { openModal, idRules } = useModalContext()
+// ============================================
+// Trigger
+// ============================================
 
-  return (
-    <button
-      id={idRules.triggerId}
-      type="button"
-      onClick={(event) => {
-        openModal()
-        onClick?.(event)
-      }}
-      {...rest}
-    />
-  )
-}
+export type TriggerProps = ComponentPropsWithoutRef<'button'>
+
+export const Trigger = forwardRef<HTMLButtonElement, TriggerProps>(
+  ({ children, ...rest }, forwardedRef) => {
+    const { modalId, setOpen } = useModalContext()
+
+    const { ref, domId } = useNode<ModalRole>({
+      role: 'trigger',
+      id: modalId,
+    })
+
+    const handleClick = useCallback(() => {
+      setOpen(true)
+    }, [setOpen])
+
+    return (
+      <button
+        ref={composeRefs(forwardedRef, ref)}
+        {...mergeProps(
+          {
+            type: 'button',
+            id: domId,
+            onClick: handleClick,
+          },
+          rest,
+        )}
+      >
+        {children}
+      </button>
+    )
+  },
+)
+
+// ============================================
+// CloseTrigger
+// ============================================
 
 export type CloseTriggerProps = ComponentPropsWithoutRef<'button'>
-export function CloseTrigger({ onClick, ...rest }: CloseTriggerProps) {
-  const { closeModal, idRules } = useModalContext()
 
-  return (
-    <button
-      id={idRules.closeTriggerId}
-      type="button"
-      onClick={(event) => {
-        closeModal()
-        onClick?.(event)
-      }}
-      {...rest}
-    />
-  )
-}
+export const CloseTrigger = forwardRef<HTMLButtonElement, CloseTriggerProps>(
+  ({ children, ...rest }, forwardedRef) => {
+    const { modalId, setOpen } = useModalContext()
+
+    const { ref, domId } = useNode<ModalRole>({
+      role: 'close-trigger',
+      id: modalId,
+    })
+
+    const handleClick = useCallback(() => {
+      setOpen(false)
+    }, [setOpen])
+
+    return (
+      <button
+        ref={composeRefs(forwardedRef, ref)}
+        {...mergeProps(
+          {
+            type: 'button',
+            id: domId,
+            onClick: handleClick,
+          },
+          rest,
+        )}
+      >
+        {children}
+      </button>
+    )
+  },
+)
+
+// ============================================
+// Content
+// ============================================
 
 export type ContentProps = ComponentPropsWithoutRef<'div'>
-export function Content(props: ContentProps) {
-  const { open, idRules } = useModalContext()
-  const [ariaIds, setAriaIds] = useState<{
-    titleId: string | undefined
-    descriptionId: string | undefined
-  }>({
-    titleId: undefined,
-    descriptionId: undefined,
-  })
 
-  const { isPresent, transitionState } = usePresence({
-    isVisible: open,
-    resolveElement: () => document.getElementById(idRules.contentId),
-  })
+export const Content = forwardRef<HTMLDivElement, ContentProps>(
+  ({ children, ...rest }, forwardedRef) => {
+    const { modalId, state, store } = useModalContext()
 
-  useLayoutEffect(() => {
+    const { ref, domId, elementRef } = useNode<ModalRole>({
+      role: 'content',
+      id: modalId,
+    })
+
+    const { isPresent, transitionState } = usePresence({
+      isVisible: state.open,
+      resolveElement: () => elementRef.current,
+    })
+
+    // store에서 title/description element의 id 구독
+    const titleId = useComponentSubscribe(
+      store,
+      (s) => s.getElement(modalId, 'title')?.id || null,
+    )
+    const descriptionId = useComponentSubscribe(
+      store,
+      (s) => s.getElement(modalId, 'description')?.id || null,
+    )
+
     if (!isPresent) {
-      return
+      return null
     }
 
-    const isTitleExist = !!document.getElementById(idRules.titleId)
-    const isDescriptionExist = !!document.getElementById(idRules.descriptionId)
+    return (
+      <div
+        ref={composeRefs(forwardedRef, ref)}
+        {...mergeProps(
+          {
+            role: 'dialog',
+            id: domId,
+            'aria-modal': true,
+            'aria-labelledby': titleId ?? undefined,
+            'aria-describedby': descriptionId ?? undefined,
+            'data-state': state.open ? 'open' : 'closed',
+            'data-transition': transitionState,
+          },
+          rest,
+        )}
+      >
+        {children}
+      </div>
+    )
+  },
+)
 
-    setAriaIds({
-      titleId: isTitleExist ? idRules.titleId : undefined,
-      descriptionId: isDescriptionExist ? idRules.descriptionId : undefined,
-    })
-  }, [idRules.titleId, idRules.descriptionId, isPresent])
-
-  if (!isPresent) {
-    return null
-  }
-
-  return (
-    <div
-      id={idRules.contentId}
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby={ariaIds.titleId}
-      aria-describedby={ariaIds.descriptionId}
-      data-state={open ? 'open' : 'closed'}
-      data-transition={transitionState}
-      {...props}
-    />
-  )
-}
+// ============================================
+// Backdrop
+// ============================================
 
 export type BackdropProps = ComponentPropsWithoutRef<'div'>
-export function Backdrop({ onClick, ...rest }: BackdropProps) {
-  const { closeModal, open, idRules, closeOnOutsideClick } = useModalContext()
 
-  const { isPresent, transitionState } = usePresence({
-    isVisible: open,
-    resolveElement: () => document.getElementById(idRules.backdropId),
-  })
+export const Backdrop = forwardRef<HTMLDivElement, BackdropProps>(
+  ({ ...rest }, forwardedRef) => {
+    const { modalId, state, runEffect } = useModalContext()
 
-  if (!isPresent) {
-    return null
-  }
+    const { ref, domId, elementRef } = useNode<ModalRole>({
+      role: 'backdrop',
+      id: modalId,
+    })
 
-  return (
-    <div
-      id={idRules.backdropId}
-      onClick={(event) => {
-        if (closeOnOutsideClick) {
-          closeModal()
-        }
-        onClick?.(event)
-      }}
-      data-state={open ? 'open' : 'closed'}
-      data-transition={transitionState}
-      {...rest}
-    />
-  )
-}
+    const { isPresent, transitionState } = usePresence({
+      isVisible: state.open,
+      resolveElement: () => elementRef.current,
+    })
+
+    const handleClick = useCallback(() => {
+      handleOutsideClick(state).forEach(runEffect)
+    }, [state, runEffect])
+
+    if (!isPresent) {
+      return null
+    }
+
+    return (
+      <div
+        ref={composeRefs(forwardedRef, ref)}
+        {...mergeProps(
+          {
+            id: domId,
+            onClick: handleClick,
+            'data-state': state.open ? 'open' : 'closed',
+            'data-transition': transitionState,
+          },
+          rest,
+        )}
+      />
+    )
+  },
+)
+
+// ============================================
+// Title
+// ============================================
 
 export type TitleProps = ComponentPropsWithoutRef<'h2'>
-export function Title(props: TitleProps) {
-  const { idRules } = useModalContext()
-  return <h2 id={idRules.titleId} {...props} />
-}
+
+export const Title = forwardRef<HTMLHeadingElement, TitleProps>(
+  ({ children, ...rest }, forwardedRef) => {
+    const { modalId } = useModalContext()
+
+    const { ref, domId } = useNode<ModalRole>({
+      role: 'title',
+      id: modalId,
+    })
+
+    return (
+      <h2
+        ref={composeRefs(forwardedRef, ref)}
+        {...mergeProps({ id: domId }, rest)}
+      >
+        {children}
+      </h2>
+    )
+  },
+)
+
+// ============================================
+// Description
+// ============================================
 
 export type DescriptionProps = ComponentPropsWithoutRef<'p'>
-export function Description(props: DescriptionProps) {
-  const { idRules } = useModalContext()
-  return <p id={idRules.descriptionId} {...props} />
-}
+
+export const Description = forwardRef<HTMLParagraphElement, DescriptionProps>(
+  ({ children, ...rest }, forwardedRef) => {
+    const { modalId } = useModalContext()
+
+    const { ref, domId } = useNode<ModalRole>({
+      role: 'description',
+      id: modalId,
+    })
+
+    return (
+      <p
+        ref={composeRefs(forwardedRef, ref)}
+        {...mergeProps({ id: domId }, rest)}
+      >
+        {children}
+      </p>
+    )
+  },
+)
+
+// ============================================
+// Portal
+// ============================================
 
 export type PortalProps = {
   children: React.ReactNode
   container?: Element | DocumentFragment
   key?: React.Key | null
 }
+
 export function Portal({
   children,
   container = document.body,
@@ -338,6 +468,10 @@ export function Portal({
 }: PortalProps) {
   return createPortal(children, container, key)
 }
+
+// ============================================
+// Export
+// ============================================
 
 const Modal = {
   Root,
@@ -351,12 +485,3 @@ const Modal = {
 }
 
 export default Modal
-
-function isFocusInside(containers: (HTMLElement | null)[]): boolean {
-  const activeElement = document.activeElement
-  if (!activeElement) return false
-
-  return containers
-    .filter((container): container is HTMLElement => Boolean(container))
-    .some((container) => container.contains(activeElement))
-}

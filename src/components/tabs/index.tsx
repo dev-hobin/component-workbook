@@ -1,341 +1,382 @@
-import { useControllableState } from '@radix-ui/react-use-controllable-state'
-import {
+import React, {
   createContext,
+  forwardRef,
+  useCallback,
   useContext,
   useEffect,
   useId,
   useMemo,
-  useState,
   type ComponentPropsWithoutRef,
-  type ReactNode,
 } from 'react'
+import { useControllableState } from '@radix-ui/react-use-controllable-state'
 
-export type TabValue = string | number
-export type TabsOrientation = 'horizontal' | 'vertical'
+import {
+  selectTab,
+  focusTab,
+  blurTab,
+  isActive,
+  type TabsState,
+  type TabValue,
+  type TabsOrientation,
+} from './core'
+import { composeRefs } from '../../utils/composeRefs'
+import { mergeProps } from '../../utils/mergeProps'
 
-const createDomUtils = (options: {
-  rootId: string
-  ids?: {
-    listId?: string
-    tabId?: (value: TabValue) => string
-    panelId?: (value: TabValue) => string
-  }
-}) => {
-  const { rootId, ids } = options
+import {
+  ComponentStoreProvider,
+  useComponentStore,
+} from '../../shell/use-component-store'
+import { useNode } from '../../shell/use-node'
+import { useComponentSubscribe } from '../../shell/use-component-subscribe'
+import type { ComponentStore } from '../../core/component-store'
 
-  const listId = ids?.listId ?? `tabs::${rootId}::list`
+// ============================================
+// Types
+// ============================================
 
-  return {
-    createListId: () => {
-      return listId
-    },
-    createTabId: ({ value }: { value: TabValue }) => {
-      return ids?.tabId?.(value) ?? `tabs::${rootId}::tab::${value}`
-    },
-    createPanelId: ({ value }: { value: TabValue }) => {
-      return ids?.panelId?.(value) ?? `tabs::${rootId}::panel::${value}`
-    },
+type TabsRole = 'list' | 'tab' | 'panel'
 
-    findNextTab: function ({ currentValue }: { currentValue: TabValue }) {
-      const tabs = Array.from(
-        document
-          .getElementById(this.createListId())
-          ?.querySelectorAll<HTMLElement>(
-            `[role="tab"]:not([data-disabled])`,
-          ) ?? [],
-      )
-
-      const currentIndex = tabs.findIndex(
-        (tab) => tab.getAttribute('data-value') === currentValue,
-      )
-
-      const targetIndex = tabs.length - 1 > currentIndex ? currentIndex + 1 : 0
-
-      return tabs[targetIndex]
-    },
-    findPreviousTab: function ({ currentValue }: { currentValue: TabValue }) {
-      const tabs = Array.from(
-        document
-          .getElementById(this.createListId())
-          ?.querySelectorAll<HTMLElement>(
-            `[role="tab"]:not([data-disabled])`,
-          ) ?? [],
-      )
-
-      const currentIndex = tabs.findIndex(
-        (tab) => tab.getAttribute('data-value') === currentValue,
-      )
-      const targetIndex =
-        currentIndex === 0 ? tabs.length - 1 : currentIndex - 1
-
-      return tabs[targetIndex]
-    },
-  }
-}
-
-const TabsContext = createContext<
-  | {
-      activeTabValue: TabValue | null
-      focusedTabValue: TabValue | null
-      orientation: TabsOrientation
-      selectTab: (tabValue: TabValue) => void
-      focusTab: (tabValue: TabValue) => void
-      blurTab: () => void
-      dom: ReturnType<typeof createDomUtils>
-    }
-  | undefined
->(undefined)
-
-export type RootProps = {
+type TabsMeta = {
   value?: TabValue
-  onValueChange?: (value: TabValue) => void
-  defaultValue?: TabValue
-  orientation?: TabsOrientation
-  ids?: {
-    listId?: string
-    tabId?: (value: TabValue) => string
-    panelId?: (value: TabValue) => string
-  }
-} & Omit<ComponentPropsWithoutRef<'div'>, 'defaultValue'>
-
-export function Root({
-  id,
-  children,
-  value,
-  onValueChange,
-  defaultValue,
-  orientation = 'horizontal',
-  ids,
-  ...rest
-}: RootProps) {
-  const defaultId = useId()
-  const rootId = id ?? defaultId
-
-  const [activeTabValue, setActiveTabValue] = useControllableState({
-    prop: value,
-    onChange: (value) => (value ? onValueChange?.(value) : undefined),
-    defaultProp: defaultValue,
-  })
-
-  const [focusedTabValue, setFocusedTabValue] = useState<TabValue | null>(null)
-
-  const dom = useMemo(() => createDomUtils({ rootId, ids }), [ids, rootId])
-
-  const focusTab = (tabValue: TabValue) => {
-    setFocusedTabValue(tabValue)
-  }
-  const blurTab = () => {
-    setFocusedTabValue(null)
-  }
-
-  const selectTab = (tabValue: TabValue) => {
-    if (!!activeTabValue && activeTabValue === tabValue) {
-      return
-    }
-
-    setActiveTabValue(tabValue)
-    setFocusedTabValue(tabValue)
-  }
-
-  useEffect(() => {
-    if (focusedTabValue === null) {
-      return
-    }
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      function focusNextTab({ currentValue }: { currentValue: TabValue }) {
-        const nextTab = dom.findNextTab({ currentValue })
-        if (!nextTab) {
-          return
-        }
-
-        nextTab.focus()
-      }
-
-      function focusPreviousTab({ currentValue }: { currentValue: TabValue }) {
-        const previousTab = dom.findPreviousTab({ currentValue })
-
-        if (!previousTab) {
-          return
-        }
-
-        previousTab.focus()
-      }
-
-      if (orientation === 'horizontal') {
-        if (event.key === 'ArrowRight') {
-          focusNextTab({ currentValue: focusedTabValue })
-        } else if (event.key === 'ArrowLeft') {
-          focusPreviousTab({ currentValue: focusedTabValue })
-        }
-      } else {
-        if (event.key === 'ArrowDown') {
-          focusNextTab({ currentValue: focusedTabValue })
-        } else if (event.key === 'ArrowUp') {
-          focusPreviousTab({ currentValue: focusedTabValue })
-        }
-      }
-    }
-
-    window.addEventListener('keydown', handleKeyDown)
-
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown)
-    }
-  }, [activeTabValue, dom, focusedTabValue, orientation, rootId])
-
-  const dataProps = {
-    'data-orientation': orientation,
-    'data-active-value': activeTabValue ?? undefined,
-    'data-focused-value': focusedTabValue ?? undefined,
-  }
-
-  return (
-    <TabsContext.Provider
-      value={{
-        activeTabValue: activeTabValue ?? null,
-        focusedTabValue,
-        orientation,
-        selectTab,
-        focusTab,
-        blurTab,
-        dom,
-      }}
-    >
-      <div id={rootId} {...dataProps} {...rest}>
-        {children}
-      </div>
-    </TabsContext.Provider>
-  )
+  disabled?: boolean
 }
+
+type TabsContextValue = {
+  tabsId: string
+  state: TabsState
+  setState: React.Dispatch<React.SetStateAction<TabsState>>
+  store: ComponentStore<TabsRole, TabsMeta>
+  orientation: TabsOrientation
+}
+
+// ============================================
+// Contexts
+// ============================================
+
+const TabsContext = createContext<TabsContextValue | null>(null)
 
 function useTabsContext() {
   const context = useContext(TabsContext)
   if (!context) {
-    throw new Error('useTabsContext must be used within a Tabs.Root')
+    throw new Error('Tabs 컴포넌트는 Tabs.Root 안에서 사용해야 합니다.')
   }
   return context
 }
 
-export type ListProps = ComponentPropsWithoutRef<'div'>
+// ============================================
+// Root
+// ============================================
 
-export function List({ children, ...rest }: ListProps) {
-  const { activeTabValue, focusedTabValue, dom, orientation } = useTabsContext()
+export type RootProps = {
+  children: React.ReactNode
+  value?: TabValue
+  onValueChange?: (value: TabValue) => void
+  defaultValue?: TabValue
+  orientation?: TabsOrientation
+} & Omit<ComponentPropsWithoutRef<'div'>, 'defaultValue'>
 
-  const ariaProps = {
-    'aria-orientation': orientation,
-  }
-
-  const dataProps = {
-    'data-orientation': orientation,
-    'data-active-value': activeTabValue ?? undefined,
-    'data-focused-value': focusedTabValue ?? undefined,
-  }
-
+export function Root(props: RootProps) {
   return (
-    <div
-      role="tablist"
-      id={dom.createListId()}
-      {...ariaProps}
-      {...dataProps}
-      {...rest}
-    >
-      {children}
-    </div>
+    <ComponentStoreProvider<TabsRole, TabsMeta>>
+      <RootInner {...props} />
+    </ComponentStoreProvider>
   )
 }
 
+const RootInner = forwardRef<HTMLDivElement, RootProps>(
+  (
+    {
+      children,
+      value: valueProp,
+      onValueChange,
+      defaultValue,
+      orientation = 'horizontal',
+      ...rest
+    },
+    forwardedRef,
+  ) => {
+    const { store } = useComponentStore<TabsRole, TabsMeta>()
+    const tabsId = useId()
+
+    const [activeValue, setActiveValue] = useControllableState({
+      prop: valueProp,
+      onChange: (value) => (value ? onValueChange?.(value) : undefined),
+      defaultProp: defaultValue,
+    })
+
+    const [focusedValue, setFocusedValue] = React.useState<TabValue | null>(null)
+
+    const state: TabsState = useMemo(
+      () => ({
+        activeValue: activeValue ?? null,
+        focusedValue,
+      }),
+      [activeValue, focusedValue],
+    )
+
+    const setState: React.Dispatch<React.SetStateAction<TabsState>> = useCallback(
+      (action) => {
+        const nextState = typeof action === 'function' ? action(state) : action
+        if (nextState.activeValue !== state.activeValue) {
+          setActiveValue(nextState.activeValue ?? undefined)
+        }
+        if (nextState.focusedValue !== state.focusedValue) {
+          setFocusedValue(nextState.focusedValue)
+        }
+      },
+      [state, setActiveValue],
+    )
+
+    // 키보드 네비게이션
+    useEffect(() => {
+      if (state.focusedValue === null) return
+
+      const handleKeyDown = (event: KeyboardEvent) => {
+        const tabs = store.getNodesByRole('tab')
+        const enabledTabs = tabs.filter((tab) => !tab.meta.disabled)
+        if (enabledTabs.length === 0) return
+
+        const currentIndex = enabledTabs.findIndex(
+          (tab) => tab.meta.value === state.focusedValue,
+        )
+
+        const isNext =
+          orientation === 'horizontal'
+            ? event.key === 'ArrowRight'
+            : event.key === 'ArrowDown'
+
+        const isPrev =
+          orientation === 'horizontal'
+            ? event.key === 'ArrowLeft'
+            : event.key === 'ArrowUp'
+
+        if (isNext) {
+          event.preventDefault()
+          const nextIndex = (currentIndex + 1) % enabledTabs.length
+          const nextTab = enabledTabs[nextIndex]
+          if (nextTab.meta.value !== undefined) {
+            setState(focusTab(state, nextTab.meta.value))
+            store.getElement(nextTab.id, 'tab')?.focus()
+          }
+        } else if (isPrev) {
+          event.preventDefault()
+          const prevIndex =
+            (currentIndex - 1 + enabledTabs.length) % enabledTabs.length
+          const prevTab = enabledTabs[prevIndex]
+          if (prevTab.meta.value !== undefined) {
+            setState(focusTab(state, prevTab.meta.value))
+            store.getElement(prevTab.id, 'tab')?.focus()
+          }
+        } else if (event.key === 'Home') {
+          event.preventDefault()
+          const firstTab = enabledTabs[0]
+          if (firstTab.meta.value !== undefined) {
+            setState(focusTab(state, firstTab.meta.value))
+            store.getElement(firstTab.id, 'tab')?.focus()
+          }
+        } else if (event.key === 'End') {
+          event.preventDefault()
+          const lastTab = enabledTabs[enabledTabs.length - 1]
+          if (lastTab.meta.value !== undefined) {
+            setState(focusTab(state, lastTab.meta.value))
+            store.getElement(lastTab.id, 'tab')?.focus()
+          }
+        }
+      }
+
+      window.addEventListener('keydown', handleKeyDown)
+      return () => window.removeEventListener('keydown', handleKeyDown)
+    }, [state, setState, store, orientation])
+
+    const contextValue = useMemo<TabsContextValue>(
+      () => ({
+        tabsId,
+        state,
+        setState,
+        store,
+        orientation,
+      }),
+      [tabsId, state, setState, store, orientation],
+    )
+
+    return (
+      <TabsContext.Provider value={contextValue}>
+        <div
+          ref={forwardedRef}
+          {...mergeProps(
+            {
+              'data-orientation': orientation,
+            },
+            rest,
+          )}
+        >
+          {children}
+        </div>
+      </TabsContext.Provider>
+    )
+  },
+)
+
+// ============================================
+// List
+// ============================================
+
+export type ListProps = ComponentPropsWithoutRef<'div'>
+
+export const List = forwardRef<HTMLDivElement, ListProps>(
+  ({ children, ...rest }, forwardedRef) => {
+    const { tabsId, orientation } = useTabsContext()
+
+    const { ref, domId } = useNode<TabsRole>({
+      role: 'list',
+      id: tabsId,
+    })
+
+    return (
+      <div
+        ref={composeRefs(forwardedRef, ref)}
+        {...mergeProps(
+          {
+            role: 'tablist',
+            id: domId,
+            'aria-orientation': orientation,
+            'data-orientation': orientation,
+          },
+          rest,
+        )}
+      >
+        {children}
+      </div>
+    )
+  },
+)
+
+// ============================================
+// Tab
+// ============================================
+
 export type TabProps = {
-  children: ReactNode
   value: TabValue
 } & Omit<ComponentPropsWithoutRef<'button'>, 'value'>
 
-export function Tab({
-  children,
-  value,
-  onClick,
-  onFocus,
-  onBlur,
-  disabled,
-  ...rest
-}: TabProps) {
-  const {
-    orientation,
-    activeTabValue,
-    focusedTabValue,
-    selectTab,
-    focusTab,
-    blurTab,
-    dom,
-  } = useTabsContext()
+export const Tab = forwardRef<HTMLButtonElement, TabProps>(
+  ({ children, value, disabled, ...rest }, forwardedRef) => {
+    const { state, setState, store, orientation } = useTabsContext()
 
-  const dataProps = {
-    'data-orientation': orientation,
-    'data-focused-value': focusedTabValue ?? undefined,
-    'data-value': value ?? undefined,
-    'data-active': activeTabValue === value ? 'true' : undefined,
-    'data-disabled': disabled ?? undefined,
-  }
+    const { ref, domId } = useNode<TabsRole, TabsMeta>({
+      role: 'tab',
+      id: value,
+      meta: { value, disabled },
+    })
 
-  return (
-    <button
-      role="tab"
-      id={dom.createTabId({ value })}
-      disabled={disabled}
-      tabIndex={
-        activeTabValue ? (activeTabValue === value ? 0 : -1) : undefined
-      }
-      onClick={(event) => {
-        selectTab(value)
-        onClick?.(event)
-      }}
-      onFocus={(event) => {
-        focusTab(value)
-        onFocus?.(event)
-      }}
-      onBlur={(event) => {
-        blurTab()
-        onBlur?.(event)
-      }}
-      {...dataProps}
-      {...rest}
-    >
-      {children}
-    </button>
-  )
-}
+    // store에서 panel element의 id 구독
+    const panelId = useComponentSubscribe(
+      store,
+      (s) => s.getElement(value, 'panel')?.id || null,
+    )
+
+    const isTabActive = isActive(state, value)
+
+    const handleClick = useCallback(() => {
+      setState(selectTab(state, value))
+    }, [state, setState, value])
+
+    const handleFocus = useCallback(() => {
+      setState(focusTab(state, value))
+    }, [state, setState, value])
+
+    const handleBlur = useCallback(() => {
+      setState(blurTab(state))
+    }, [state, setState])
+
+    return (
+      <button
+        ref={composeRefs(forwardedRef, ref)}
+        {...mergeProps(
+          {
+            role: 'tab',
+            type: 'button',
+            id: domId,
+            disabled,
+            tabIndex: state.activeValue
+              ? isTabActive
+                ? 0
+                : -1
+              : undefined,
+            onClick: handleClick,
+            onFocus: handleFocus,
+            onBlur: handleBlur,
+            'aria-selected': isTabActive,
+            'aria-controls': panelId ?? undefined,
+            'data-orientation': orientation,
+            'data-active': isTabActive || undefined,
+            'data-disabled': disabled || undefined,
+            'data-value': value,
+          },
+          rest,
+        )}
+      >
+        {children}
+      </button>
+    )
+  },
+)
+
+// ============================================
+// Panel
+// ============================================
 
 export type PanelProps = {
-  children: ReactNode
   value: TabValue
 } & ComponentPropsWithoutRef<'div'>
 
-export function Panel({ children, value, ...rest }: PanelProps) {
-  const { orientation, activeTabValue, focusedTabValue, dom } = useTabsContext()
+export const Panel = forwardRef<HTMLDivElement, PanelProps>(
+  ({ children, value, ...rest }, forwardedRef) => {
+    const { state, store, orientation } = useTabsContext()
 
-  const dataProps = {
-    'data-orientation': orientation,
-    'data-focused-value': focusedTabValue ?? undefined,
-    'data-value': value,
-    'data-active': activeTabValue === value ? 'true' : undefined,
-  }
+    const { ref, domId } = useNode<TabsRole, TabsMeta>({
+      role: 'panel',
+      id: value,
+      meta: { value },
+    })
 
-  if (activeTabValue !== value) {
-    return null
-  }
+    // store에서 tab element의 id 구독
+    const tabId = useComponentSubscribe(
+      store,
+      (s) => s.getElement(value, 'tab')?.id || null,
+    )
 
-  return (
-    <div
-      role="tabpanel"
-      id={dom.createPanelId({ value })}
-      tabIndex={activeTabValue === value ? 0 : -1}
-      {...dataProps}
-      {...rest}
-    >
-      {children}
-    </div>
-  )
-}
+    const isTabActive = isActive(state, value)
+
+    if (!isTabActive) {
+      return null
+    }
+
+    return (
+      <div
+        ref={composeRefs(forwardedRef, ref)}
+        {...mergeProps(
+          {
+            role: 'tabpanel',
+            id: domId,
+            tabIndex: 0,
+            'aria-labelledby': tabId ?? undefined,
+            'data-orientation': orientation,
+            'data-active': isTabActive || undefined,
+            'data-value': value,
+          },
+          rest,
+        )}
+      >
+        {children}
+      </div>
+    )
+  },
+)
+
+// ============================================
+// Export
+// ============================================
 
 const Tabs = {
   Root,

@@ -1,221 +1,329 @@
-import { useControllableState } from '@radix-ui/react-use-controllable-state'
-import {
+import React, {
   createContext,
+  forwardRef,
+  useCallback,
   useContext,
+  useId,
   useMemo,
   type ComponentPropsWithoutRef,
   type ReactNode,
 } from 'react'
+import { useControllableState } from '@radix-ui/react-use-controllable-state'
 
-const PaginationContext = createContext<
-  | {
-      page: number
-      pageSize: number
-      totalPage: number
-      selectPage: (page: number) => void
-    }
-  | undefined
->(undefined)
+import {
+  goToPage,
+  goToPreviousPage,
+  goToNextPage,
+  hasPreviousPage,
+  hasNextPage,
+  getPageItems,
+  type PaginationState,
+} from './core'
+import { composeRefs } from '../../utils/composeRefs'
+import { mergeProps } from '../../utils/mergeProps'
+
+import {
+  ComponentStoreProvider,
+  useComponentStore,
+} from '../../shell/use-component-store'
+import { useNode } from '../../shell/use-node'
+import type { ComponentStore } from '../../core/component-store'
+
+// ============================================
+// Types
+// ============================================
+
+type PaginationRole = 'root' | 'previous' | 'next' | 'page' | 'ellipsis'
+
+type PaginationMeta = {
+  page?: number
+}
+
+type PaginationContextValue = {
+  paginationId: string
+  state: PaginationState
+  setState: React.Dispatch<React.SetStateAction<PaginationState>>
+  store: ComponentStore<PaginationRole, PaginationMeta>
+}
+
+// ============================================
+// Contexts
+// ============================================
+
+const PaginationContext = createContext<PaginationContextValue | null>(null)
 
 function usePaginationContext() {
   const context = useContext(PaginationContext)
   if (!context) {
-    throw new Error(
-      'usePaginationContext must be used within a PaginationContext',
-    )
+    throw new Error('Pagination 컴포넌트는 Pagination.Root 안에서 사용해야 합니다.')
   }
   return context
 }
 
+// ============================================
+// Root
+// ============================================
+
 export type RootProps = {
+  children: React.ReactNode
   page?: number
   pageSize?: number
   totalCount: number
   defaultPage?: number
   onPageChange?: (page: number) => void
-  onPageSizeChange?: (pageSize: number) => void
-} & ComponentPropsWithoutRef<'div'>
-const Root = ({
-  page,
-  pageSize,
-  totalCount,
-  onPageChange,
-  onPageSizeChange,
-  defaultPage = 1,
-  children,
-  ...rest
-}: RootProps) => {
-  const [currentPage, setCurrentPage] = useControllableState({
-    prop: page,
-    onChange: onPageChange,
-    defaultProp: defaultPage,
-  })
+} & ComponentPropsWithoutRef<'nav'>
 
-  const [currentPageSize] = useControllableState({
-    prop: pageSize,
-    onChange: onPageSizeChange,
-    defaultProp: 10,
-  })
-
-  const totalPage = useMemo(() => {
-    return Math.ceil(totalCount / currentPageSize)
-  }, [totalCount, currentPageSize])
-
-  const selectPage = (page: number) => {
-    setCurrentPage(page)
-  }
-
+export function Root(props: RootProps) {
   return (
-    <PaginationContext.Provider
-      value={{
-        page: currentPage,
-        pageSize: currentPageSize,
-        totalPage,
-        selectPage,
-      }}
-    >
-      <div {...rest}>{children}</div>
-    </PaginationContext.Provider>
+    <ComponentStoreProvider<PaginationRole, PaginationMeta>>
+      <RootInner {...props} />
+    </ComponentStoreProvider>
   )
 }
+
+const RootInner = forwardRef<HTMLElement, RootProps>(
+  (
+    {
+      children,
+      page: pageProp,
+      pageSize = 10,
+      totalCount,
+      defaultPage = 1,
+      onPageChange,
+      ...rest
+    },
+    forwardedRef,
+  ) => {
+    const { store } = useComponentStore<PaginationRole, PaginationMeta>()
+    const paginationId = useId()
+
+    const [currentPage, setCurrentPage] = useControllableState({
+      prop: pageProp,
+      onChange: onPageChange,
+      defaultProp: defaultPage,
+    })
+
+    const state: PaginationState = useMemo(
+      () => ({
+        page: currentPage,
+        pageSize,
+        totalCount,
+      }),
+      [currentPage, pageSize, totalCount],
+    )
+
+    const setState: React.Dispatch<React.SetStateAction<PaginationState>> =
+      useCallback(
+        (action) => {
+          const nextState = typeof action === 'function' ? action(state) : action
+          if (nextState.page !== state.page) {
+            setCurrentPage(nextState.page)
+          }
+        },
+        [state, setCurrentPage],
+      )
+
+    const { ref, domId } = useNode<PaginationRole>({
+      role: 'root',
+      id: paginationId,
+    })
+
+    const contextValue = useMemo<PaginationContextValue>(
+      () => ({
+        paginationId,
+        state,
+        setState,
+        store,
+      }),
+      [paginationId, state, setState, store],
+    )
+
+    return (
+      <PaginationContext.Provider value={contextValue}>
+        <nav
+          ref={composeRefs(forwardedRef, ref)}
+          {...mergeProps(
+            {
+              id: domId,
+              'aria-label': 'Pagination',
+            },
+            rest,
+          )}
+        >
+          {children}
+        </nav>
+      </PaginationContext.Provider>
+    )
+  },
+)
+
+// ============================================
+// PreviousTrigger
+// ============================================
 
 export type PreviousTriggerProps = ComponentPropsWithoutRef<'button'>
-const PreviousTrigger = ({ children, ...rest }: PreviousTriggerProps) => {
-  const { page, selectPage } = usePaginationContext()
 
-  return (
-    <button
-      type="button"
-      onClick={() => selectPage(Math.max(page - 1, 1))}
-      disabled={page === 1}
-      {...rest}
-    >
-      {children}
-    </button>
-  )
-}
+export const PreviousTrigger = forwardRef<HTMLButtonElement, PreviousTriggerProps>(
+  ({ children, ...rest }, forwardedRef) => {
+    const { paginationId, state, setState } = usePaginationContext()
+
+    const { ref, domId } = useNode<PaginationRole>({
+      role: 'previous',
+      id: paginationId,
+    })
+
+    const isDisabled = !hasPreviousPage(state)
+
+    const handleClick = useCallback(() => {
+      setState(goToPreviousPage(state))
+    }, [state, setState])
+
+    return (
+      <button
+        ref={composeRefs(forwardedRef, ref)}
+        {...mergeProps(
+          {
+            type: 'button',
+            id: domId,
+            disabled: isDisabled,
+            onClick: handleClick,
+            'aria-label': 'Go to previous page',
+          },
+          rest,
+        )}
+      >
+        {children}
+      </button>
+    )
+  },
+)
+
+// ============================================
+// NextTrigger
+// ============================================
 
 export type NextTriggerProps = ComponentPropsWithoutRef<'button'>
-const NextTrigger = ({ children, ...rest }: NextTriggerProps) => {
-  const { page, totalPage, selectPage } = usePaginationContext()
 
-  return (
-    <button
-      {...rest}
-      onClick={() => selectPage(Math.min(page + 1, totalPage))}
-      disabled={page === totalPage}
-    >
-      {children}
-    </button>
-  )
-}
+export const NextTrigger = forwardRef<HTMLButtonElement, NextTriggerProps>(
+  ({ children, ...rest }, forwardedRef) => {
+    const { paginationId, state, setState } = usePaginationContext()
+
+    const { ref, domId } = useNode<PaginationRole>({
+      role: 'next',
+      id: paginationId,
+    })
+
+    const isDisabled = !hasNextPage(state)
+
+    const handleClick = useCallback(() => {
+      setState(goToNextPage(state))
+    }, [state, setState])
+
+    return (
+      <button
+        ref={composeRefs(forwardedRef, ref)}
+        {...mergeProps(
+          {
+            type: 'button',
+            id: domId,
+            disabled: isDisabled,
+            onClick: handleClick,
+            'aria-label': 'Go to next page',
+          },
+          rest,
+        )}
+      >
+        {children}
+      </button>
+    )
+  },
+)
+
+// ============================================
+// Pages
+// ============================================
 
 export type PagesProps = {
-  TruncationComponent?: ReactNode
   siblingsCount?: number
   action:
-    | {
-        type: 'button'
-        onPageClick: (page: number) => void
-      }
-    | {
-        type: 'link'
-        getPageLink: (page: number) => string
-      }
+    | { type: 'button'; onPageClick?: (page: number) => void }
+    | { type: 'link'; getPageLink: (page: number) => string }
+  ellipsis?: ReactNode
 } & ComponentPropsWithoutRef<'ul'>
 
-const Pages = ({
-  TruncationComponent,
-  siblingsCount = 1,
-  action,
-  ...rest
-}: PagesProps) => {
-  const { page, totalPage, selectPage } = usePaginationContext()
+export const Pages = forwardRef<HTMLUListElement, PagesProps>(
+  (
+    { siblingsCount = 1, action, ellipsis = '...', ...rest },
+    forwardedRef,
+  ) => {
+    const { state, setState } = usePaginationContext()
 
-  const pages = useMemo(() => {
-    const result: Array<{ page: number } | null> = []
-    let prevWasTruncated = false
+    const pageItems = getPageItems(state, siblingsCount)
 
-    for (let pageNumber = 1; pageNumber <= totalPage; pageNumber++) {
-      const shouldShow =
-        pageNumber === 1 ||
-        pageNumber === totalPage ||
-        Math.abs(pageNumber - page) <= siblingsCount
-
-      if (shouldShow) {
-        result.push({ page: pageNumber })
-        prevWasTruncated = false
-      } else {
-        if (!prevWasTruncated) {
-          result.push(null)
+    const handlePageClick = useCallback(
+      (page: number) => {
+        setState(goToPage(state, page))
+        if (action.type === 'button') {
+          action.onPageClick?.(page)
         }
-        prevWasTruncated = true
-      }
-    }
+      },
+      [state, setState, action],
+    )
 
-    return result
-  }, [totalPage, page, siblingsCount])
+    return (
+      <ul ref={forwardedRef} {...rest}>
+        {pageItems.map((item) => {
+          if (item.type === 'ellipsis') {
+            return (
+              <li
+                key={item.key}
+                aria-hidden
+                data-type="ellipsis"
+              >
+                {ellipsis}
+              </li>
+            )
+          }
 
-  return (
-    <ul {...rest}>
-      {pages.map((item, index) => {
-        if (item === null) {
+          const isCurrent = state.page === item.page
+
+          if (action.type === 'link') {
+            return (
+              <li key={item.page} data-type="page">
+                <a
+                  href={action.getPageLink(item.page)}
+                  aria-current={isCurrent ? 'page' : undefined}
+                  data-current={isCurrent || undefined}
+                  data-page={item.page}
+                >
+                  {item.page}
+                </a>
+              </li>
+            )
+          }
+
           return (
-            <li
-              key={`truncated-${index}`}
-              aria-hidden={true}
-              data-page-list-item="truncated"
-              data-previous-truncated="true"
-            >
-              {TruncationComponent}
-            </li>
-          )
-        }
-
-        if (action.type === 'link') {
-          return (
-            <li
-              key={item.page}
-              data-page-list-item="link"
-              data-current-page={page === item.page}
-            >
-              <a
-                href={action.getPageLink(item.page)}
-                data-page-item="link"
+            <li key={item.page} data-type="page">
+              <button
+                type="button"
+                onClick={() => handlePageClick(item.page)}
+                aria-current={isCurrent ? 'page' : undefined}
+                data-current={isCurrent || undefined}
                 data-page={item.page}
-                data-current-page={page === item.page}
               >
                 {item.page}
-              </a>
+              </button>
             </li>
           )
-        }
+        })}
+      </ul>
+    )
+  },
+)
 
-        return (
-          <li
-            key={item.page}
-            data-page-list-item="button"
-            data-page={item.page}
-            data-current-page={page === item.page}
-          >
-            <button
-              type="button"
-              onClick={() => {
-                selectPage(item.page)
-                action?.onPageClick(item.page)
-              }}
-              data-page-item="button"
-              data-page={item.page}
-              data-current-page={page === item.page}
-            >
-              {item.page}
-            </button>
-          </li>
-        )
-      })}
-    </ul>
-  )
-}
+// ============================================
+// Export
+// ============================================
 
 const Pagination = {
   Root,

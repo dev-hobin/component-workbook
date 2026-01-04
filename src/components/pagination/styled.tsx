@@ -45,45 +45,48 @@ export function NextTrigger({ className, ...rest }: NextTriggerProps) {
   )
 }
 
-export function Pages({
-  className,
-  TruncationComponent,
-  action,
-  ...rest
-}: PagesProps) {
+export function Pages({ className, action, ...rest }: PagesProps) {
   return (
     <PaginationPrimitives.Pages
       className={cn(
         'flex items-center gap-1 list-none p-0 m-0',
-        // 페이지 아이템 공통 스타일
-        '**:data-page-item:min-w-10 **:data-page-item:h-10',
-        '**:data-page-item:flex **:data-page-item:items-center **:data-page-item:justify-center',
-        '**:data-page-item:px-2 **:data-page-item:text-sm **:data-page-item:font-medium',
-        '**:data-page-item:border **:data-page-item:border-transparent',
-        '**:data-page-item:rounded-md **:data-page-item:transition-colors',
-        '**:data-page-item:bg-white',
-        "[&_[data-page-item]:hover:not([data-current-page='true'])]:bg-gray-50",
-        "[&_[data-page-item]:hover:not([data-current-page='true'])]:border-gray-300",
-        '[&_[data-page-item]:focus]:outline-none [&_[data-page-item]:focus]:ring-2',
-        '[&_[data-page-item]:focus]:ring-blue-500 [&_[data-page-item]:focus]:ring-offset-2',
-        "[&_[data-page-item][data-current-page='true']]:bg-blue-600",
-        "[&_[data-page-item][data-current-page='true']]:text-white",
-        "[&_[data-page-item][data-current-page='true']]:border-blue-600",
-        "[&_[data-page-item][data-current-page='true']:hover]:bg-blue-700",
-        "[&_[data-page-item][data-current-page='true']:hover]:border-blue-700",
-        // 버튼 전용
-        "**:data-[page-item='button']:cursor-pointer",
-        // 링크 전용
-        "**:data-[page-item='link']:no-underline",
-        // Truncation
-        "**:data-[previous-truncated='true']:flex **:data-[previous-truncated='true']:items-center",
-        "**:data-[previous-truncated='true']:justify-center **:data-[previous-truncated='true']:px-2",
-        "**:data-[previous-truncated='true']:text-gray-500",
+        // 페이지 버튼 스타일
+        '[&_button]:min-w-10 [&_button]:h-10',
+        '[&_button]:flex [&_button]:items-center [&_button]:justify-center',
+        '[&_button]:px-2 [&_button]:text-sm [&_button]:font-medium',
+        '[&_button]:border [&_button]:border-transparent',
+        '[&_button]:rounded-md [&_button]:transition-colors',
+        '[&_button]:bg-white [&_button]:cursor-pointer',
+        '[&_button:hover:not([data-current])]:bg-gray-50',
+        '[&_button:hover:not([data-current])]:border-gray-300',
+        '[&_button:focus]:outline-none [&_button:focus]:ring-2',
+        '[&_button:focus]:ring-blue-500 [&_button:focus]:ring-offset-2',
+        '[&_button[data-current]]:bg-blue-600',
+        '[&_button[data-current]]:text-white',
+        '[&_button[data-current]]:border-blue-600',
+        '[&_button[data-current]:hover]:bg-blue-700',
+        '[&_button[data-current]:hover]:border-blue-700',
+        // 링크 스타일
+        '[&_a]:min-w-10 [&_a]:h-10',
+        '[&_a]:flex [&_a]:items-center [&_a]:justify-center',
+        '[&_a]:px-2 [&_a]:text-sm [&_a]:font-medium',
+        '[&_a]:border [&_a]:border-transparent',
+        '[&_a]:rounded-md [&_a]:transition-colors',
+        '[&_a]:bg-white [&_a]:no-underline',
+        '[&_a:hover:not([data-current])]:bg-gray-50',
+        '[&_a:hover:not([data-current])]:border-gray-300',
+        '[&_a:focus]:outline-none [&_a:focus]:ring-2',
+        '[&_a:focus]:ring-blue-500 [&_a:focus]:ring-offset-2',
+        '[&_a[data-current]]:bg-blue-600',
+        '[&_a[data-current]]:text-white',
+        '[&_a[data-current]]:border-blue-600',
+        '[&_a[data-current]:hover]:bg-blue-700',
+        '[&_a[data-current]:hover]:border-blue-700',
+        // ellipsis 스타일
+        '[&_[data-type=ellipsis]]:px-2 [&_[data-type=ellipsis]]:text-gray-500',
         className,
       )}
-      TruncationComponent={
-        TruncationComponent ?? <span className="px-2 text-gray-500">...</span>
-      }
+      ellipsis={<span className="px-2 text-gray-500">...</span>}
       action={action}
       {...rest}
     />

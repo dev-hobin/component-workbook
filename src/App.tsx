@@ -1,7 +1,7 @@
-import { Example } from './components/tree/example'
+import { UncontrolledExample } from './components/modal/examples'
 
 function App() {
-  return <Example />
+  return <UncontrolledExample />
 }
 
 export default App

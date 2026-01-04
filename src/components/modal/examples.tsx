@@ -5,7 +5,7 @@ export function UncontrolledExample() {
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-8">
       <div className="max-w-2xl w-full">
-        <Modal.Root>
+        <Modal.Root closeOnOutsideClick closeOnEscape defaultOpen={true}>
           <Modal.Trigger>Open Modal</Modal.Trigger>
           <Modal.Portal>
             <Modal.Backdrop />
