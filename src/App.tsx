@@ -1,7 +1,7 @@
-import { UncontrolledExample } from './components/modal/examples'
+import { NestedMenuExample } from './components/menu/examples'
 
 function App() {
-  return <UncontrolledExample />
+  return <NestedMenuExample />
 }
 
 export default App

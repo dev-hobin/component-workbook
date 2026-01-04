@@ -25,9 +25,14 @@ import {
 
 import {
   type MenuState,
+  type MenuStatus,
+  type MenuEffect,
   type MenuItem,
   type MenuId,
   type ItemId,
+  deriveStatus,
+  getEffectsOnStatusChange,
+  getEffectsOnFocusChange,
   openMenu,
   closeMenu,
   closeAll,
@@ -180,106 +185,98 @@ function RootInner({
     [store],
   )
 
-  // 바깥 클릭 감지
-  useEffect(() => {
-    if (state.openedPath.length === 0) return
+  // Status 파생
+  const status: MenuStatus = deriveStatus(state)
+  const prevStatusRef = useRef<MenuStatus>('idle')
+  const prevFocusedItemIdRef = useRef<ItemId | null>(null)
 
-    const handlePointerDown = (event: PointerEvent) => {
+  // 최신 값 refs
+  const stateRef = useLatestRef(state)
+  const setStateRef = useLatestRef(setState)
+  const getMenuItemsRef = useLatestRef(getMenuItems)
+
+  // 안정적인 이벤트 핸들러 refs (한 번만 생성, 내부에서 최신 ref 참조)
+  const handlersRef = useRef({
+    outsideClick: (event: PointerEvent) => {
       const target = event.target as Node | null
       if (!target) return
 
       const elements = store.getAllElements()
       for (const element of elements.values()) {
-        if (element.contains(target)) {
-          return
-        }
+        if (element.contains(target)) return
       }
 
-      setState(closeAll(state))
-    }
-
-    document.addEventListener('pointerdown', handlePointerDown, true)
-    return () => {
-      document.removeEventListener('pointerdown', handlePointerDown, true)
-    }
-  }, [state, setState, store])
-
-  // 중앙 집중식 키보드 핸들러
-  useEffect(() => {
-    if (state.openedPath.length === 0) return
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      const activeMenuId = getActiveMenuId(state)
+      setStateRef.current(closeAll(stateRef.current))
+    },
+    keyDown: (event: KeyboardEvent) => {
+      const currentState = stateRef.current
+      const activeMenuId = getActiveMenuId(currentState)
       if (!activeMenuId) return
 
       const target = event.target as HTMLElement
-
-      // 메뉴 콘텐츠 안에서 발생한 이벤트만 처리
       const contentElement = store.getElement(activeMenuId, 'content')
-      if (!contentElement?.contains(target)) {
-        return
-      }
+      if (!contentElement?.contains(target)) return
 
-      const items = getMenuItems(activeMenuId)
-      const isSubMenuActive = isSubMenu(state, activeMenuId)
-      const focusedId = state.focusedItemId
-
-      // 현재 포커스된 아이템이 서브트리거인지 확인
+      const items = getMenuItemsRef.current(activeMenuId)
+      const isSubMenuActive = isSubMenu(currentState, activeMenuId)
+      const focusedId = currentState.focusedItemId
       const isCurrentItemSubTrigger = focusedId
-        ? state.openedPath.includes(focusedId)
+        ? currentState.openedPath.includes(focusedId)
         : false
 
       switch (event.key) {
         case 'ArrowDown': {
           event.preventDefault()
-          const next = moveFocusDown(state, items)
-          setState(next)
+          setStateRef.current(moveFocusDown(currentState, items))
           break
         }
         case 'ArrowUp': {
           event.preventDefault()
-          const next = moveFocusUp(state, items)
-          setState(next)
+          setStateRef.current(moveFocusUp(currentState, items))
           break
         }
         case 'ArrowRight': {
           if (isCurrentItemSubTrigger && focusedId) {
             event.preventDefault()
-            setState(openMenu(state, focusedId, activeMenuId))
+            setStateRef.current(openMenu(currentState, focusedId, activeMenuId))
           }
           break
         }
         case 'ArrowLeft': {
           if (isSubMenuActive) {
             event.preventDefault()
-            setState(closeMenuAndFocusTrigger(state, activeMenuId))
+            setStateRef.current(
+              closeMenuAndFocusTrigger(currentState, activeMenuId),
+            )
           }
           break
         }
         case 'Escape': {
           event.preventDefault()
-          setState(closeMenuAndFocusTrigger(state, activeMenuId))
+          setStateRef.current(
+            closeMenuAndFocusTrigger(currentState, activeMenuId),
+          )
           break
         }
         case 'Tab': {
           if (event.shiftKey) {
             event.preventDefault()
-            setState(closeMenuAndFocusTrigger(state, activeMenuId))
+            setStateRef.current(
+              closeMenuAndFocusTrigger(currentState, activeMenuId),
+            )
           } else {
-            setState(closeAll(state))
+            setStateRef.current(closeAll(currentState))
           }
           break
         }
         case 'Home': {
           event.preventDefault()
-          const next = moveFocusFirst(state, items)
-          setState(next)
+          setStateRef.current(moveFocusFirst(currentState, items))
           break
         }
         case 'End': {
           event.preventDefault()
-          const next = moveFocusLast(state, items)
-          setState(next)
+          setStateRef.current(moveFocusLast(currentState, items))
           break
         }
         case 'Enter':
@@ -294,23 +291,69 @@ function RootInner({
           break
         }
       }
-    }
+    },
+  })
 
-    document.addEventListener('keydown', handleKeyDown)
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown)
-    }
-  }, [state, setState, getMenuItems, store])
+  // Effect 실행 함수
+  const runEffect = useCallback(
+    (effect: MenuEffect) => {
+      const handlers = handlersRef.current
+      switch (effect.type) {
+        case 'ADD_OUTSIDE_CLICK_LISTENER':
+          document.addEventListener('pointerdown', handlers.outsideClick, true)
+          break
+        case 'REMOVE_OUTSIDE_CLICK_LISTENER':
+          document.removeEventListener(
+            'pointerdown',
+            handlers.outsideClick,
+            true,
+          )
+          break
+        case 'ADD_KEYBOARD_LISTENER':
+          document.addEventListener('keydown', handlers.keyDown)
+          break
+        case 'REMOVE_KEYBOARD_LISTENER':
+          document.removeEventListener('keydown', handlers.keyDown)
+          break
+        case 'FOCUS_ITEM': {
+          const element =
+            store.getElement(effect.itemId, 'item') ??
+            store.getElement(effect.itemId, 'subtrigger')
+          element?.focus()
+          break
+        }
+      }
+    },
+    [store],
+  )
 
-  // 포커스 동기화
+  // Status 전환 시 효과 실행
+  useLayoutEffect(() => {
+    const effects = getEffectsOnStatusChange(prevStatusRef.current, status)
+    effects.forEach(runEffect)
+    prevStatusRef.current = status
+  }, [status, runEffect])
+
+  // Focus 변경 시 효과 실행
+  useLayoutEffect(() => {
+    const effects = getEffectsOnFocusChange(
+      prevFocusedItemIdRef.current,
+      state.focusedItemId,
+    )
+    effects.forEach(runEffect)
+    prevFocusedItemIdRef.current = state.focusedItemId
+  }, [state.focusedItemId, runEffect])
+
+  // 언마운트 시 리소스 정리
   useEffect(() => {
-    if (state.focusedItemId) {
-      const element =
-        store.getElement(state.focusedItemId, 'item') ??
-        store.getElement(state.focusedItemId, 'subtrigger')
-      element?.focus()
+    const handlers = handlersRef.current
+    return () => {
+      document.removeEventListener('pointerdown', handlers.outsideClick, true)
+      document.removeEventListener('keydown', handlers.keyDown)
+      prevStatusRef.current = 'idle'
+      prevFocusedItemIdRef.current = null
     }
-  }, [state.focusedItemId, store])
+  }, [])
 
   const menuContextValue = useMemo<MenuContextValue>(
     () => ({ state, setState, getMenuItems, store }),

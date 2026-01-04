@@ -21,11 +21,91 @@ export type MenuState = {
 }
 
 /**
+ * 메뉴 Status (상태 전환 감지용)
+ * - idle: 초기 상태
+ * - closed: 모든 메뉴가 닫힌 상태
+ * - open: 하나 이상의 메뉴가 열린 상태
+ */
+export type MenuStatus = 'idle' | 'closed' | 'open'
+
+/**
  * 메뉴 아이템 정보 (registry에서 가져온 데이터)
  */
 export type MenuItem = {
   id: ItemId
   menuId: MenuId // 이 아이템이 속한 메뉴
+}
+
+// ============================================
+// Effects - 부수효과 명세
+// ============================================
+
+export type MenuEffect =
+  | { type: 'ADD_OUTSIDE_CLICK_LISTENER' }
+  | { type: 'REMOVE_OUTSIDE_CLICK_LISTENER' }
+  | { type: 'ADD_KEYBOARD_LISTENER' }
+  | { type: 'REMOVE_KEYBOARD_LISTENER' }
+  | { type: 'FOCUS_ITEM'; itemId: ItemId }
+
+// ============================================
+// 상태 → Status 파생
+// ============================================
+
+export function deriveStatus(state: MenuState): MenuStatus {
+  return state.openedPath.length > 0 ? 'open' : 'closed'
+}
+
+// ============================================
+// Status 전환에 따른 부수효과
+// ============================================
+
+export function getEffectsOnStatusChange(
+  prevStatus: MenuStatus,
+  nextStatus: MenuStatus,
+): MenuEffect[] {
+  // idle → open (초기 마운트 시 open 상태)
+  if (prevStatus === 'idle' && nextStatus === 'open') {
+    return [
+      { type: 'ADD_OUTSIDE_CLICK_LISTENER' },
+      { type: 'ADD_KEYBOARD_LISTENER' },
+    ]
+  }
+
+  // idle → closed (초기 마운트 시 closed 상태 - effect 없음)
+  if (prevStatus === 'idle' && nextStatus === 'closed') {
+    return []
+  }
+
+  // closed → open
+  if (prevStatus === 'closed' && nextStatus === 'open') {
+    return [
+      { type: 'ADD_OUTSIDE_CLICK_LISTENER' },
+      { type: 'ADD_KEYBOARD_LISTENER' },
+    ]
+  }
+
+  // open → closed
+  if (prevStatus === 'open' && nextStatus === 'closed') {
+    return [
+      { type: 'REMOVE_OUTSIDE_CLICK_LISTENER' },
+      { type: 'REMOVE_KEYBOARD_LISTENER' },
+    ]
+  }
+
+  return []
+}
+
+/**
+ * focusedItemId 변경에 따른 부수효과
+ */
+export function getEffectsOnFocusChange(
+  prevFocusedItemId: ItemId | null,
+  nextFocusedItemId: ItemId | null,
+): MenuEffect[] {
+  if (nextFocusedItemId && nextFocusedItemId !== prevFocusedItemId) {
+    return [{ type: 'FOCUS_ITEM', itemId: nextFocusedItemId }]
+  }
+  return []
 }
 
 // ============================================
@@ -193,10 +273,7 @@ export function setFocus(state: MenuState, itemId: ItemId | null): MenuState {
 /**
  * 다음 아이템으로 포커스 이동 (순환)
  */
-export function moveFocusDown(
-  state: MenuState,
-  items: MenuItem[],
-): MenuState {
+export function moveFocusDown(state: MenuState, items: MenuItem[]): MenuState {
   if (items.length === 0) {
     return state
   }
@@ -205,7 +282,9 @@ export function moveFocusDown(
     return setFocus(state, items[0].id)
   }
 
-  const currentIndex = items.findIndex((item) => item.id === state.focusedItemId)
+  const currentIndex = items.findIndex(
+    (item) => item.id === state.focusedItemId,
+  )
   if (currentIndex === -1) {
     return setFocus(state, items[0].id)
   }
@@ -217,10 +296,7 @@ export function moveFocusDown(
 /**
  * 이전 아이템으로 포커스 이동 (순환)
  */
-export function moveFocusUp(
-  state: MenuState,
-  items: MenuItem[],
-): MenuState {
+export function moveFocusUp(state: MenuState, items: MenuItem[]): MenuState {
   if (items.length === 0) {
     return state
   }
@@ -229,7 +305,9 @@ export function moveFocusUp(
     return setFocus(state, items[items.length - 1].id)
   }
 
-  const currentIndex = items.findIndex((item) => item.id === state.focusedItemId)
+  const currentIndex = items.findIndex(
+    (item) => item.id === state.focusedItemId,
+  )
   if (currentIndex === -1) {
     return setFocus(state, items[0].id)
   }
@@ -241,10 +319,7 @@ export function moveFocusUp(
 /**
  * 첫 번째 아이템으로 포커스
  */
-export function moveFocusFirst(
-  state: MenuState,
-  items: MenuItem[],
-): MenuState {
+export function moveFocusFirst(state: MenuState, items: MenuItem[]): MenuState {
   if (items.length === 0) {
     return setFocus(state, null)
   }
@@ -254,10 +329,7 @@ export function moveFocusFirst(
 /**
  * 마지막 아이템으로 포커스
  */
-export function moveFocusLast(
-  state: MenuState,
-  items: MenuItem[],
-): MenuState {
+export function moveFocusLast(state: MenuState, items: MenuItem[]): MenuState {
   if (items.length === 0) {
     return setFocus(state, null)
   }
