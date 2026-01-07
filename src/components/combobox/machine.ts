@@ -100,7 +100,10 @@ export const comboboxMachine: EventMachine<ComboboxContext, ComboboxEvents> = {
 
     INPUT_CHANGE: 'handleInputChange',
     INPUT_FOCUS: [
-      { when: (ctx) => ctx.openOnFocus && !ctx.isOpen, do: 'openAndHighlightSelected' },
+      {
+        when: (ctx) => ctx.openOnFocus && !ctx.isOpen,
+        do: 'openAndHighlightSelected',
+      },
       { do: 'noop' },
     ],
     INPUT_BLUR: 'handleInputBlur',
@@ -124,7 +127,11 @@ export const comboboxMachine: EventMachine<ComboboxContext, ComboboxEvents> = {
     ],
     KEY_ESCAPE: [
       { when: (ctx) => ctx.isOpen, do: 'close' },
-      { when: (ctx) => ctx.selectedValue !== null && ctx.inputValue !== ctx.selectedValue, do: 'restoreSelectedValue' },
+      {
+        when: (ctx) =>
+          ctx.selectedValue !== null && ctx.inputValue !== ctx.selectedValue,
+        do: 'restoreSelectedValue',
+      },
       { do: 'noop' },
     ],
     KEY_HOME: [
@@ -136,7 +143,10 @@ export const comboboxMachine: EventMachine<ComboboxContext, ComboboxEvents> = {
       { do: 'noop' },
     ],
     KEY_TAB: [
-      { when: (ctx) => ctx.autocompleteText !== null, do: 'acceptAutocomplete' },
+      {
+        when: (ctx) => ctx.autocompleteText !== null,
+        do: 'acceptAutocomplete',
+      },
       { when: (ctx) => ctx.isOpen, do: 'close' },
       { do: 'noop' },
     ],
@@ -144,10 +154,7 @@ export const comboboxMachine: EventMachine<ComboboxContext, ComboboxEvents> = {
     OPTION_CLICK: 'selectOption',
     OPTION_HOVER: 'highlightOption',
 
-    OUTSIDE_CLICK: [
-      { when: (ctx) => ctx.isOpen, do: 'close' },
-      { do: 'noop' },
-    ],
+    OUTSIDE_CLICK: [{ when: (ctx) => ctx.isOpen, do: 'close' }, { do: 'noop' }],
   },
 
   effects: [
@@ -170,7 +177,8 @@ export const comboboxMachine: EventMachine<ComboboxContext, ComboboxEvents> = {
         }
 
         document.addEventListener('pointerdown', handleClick, true)
-        return () => document.removeEventListener('pointerdown', handleClick, true)
+        return () =>
+          document.removeEventListener('pointerdown', handleClick, true)
       },
     },
     {
@@ -178,7 +186,9 @@ export const comboboxMachine: EventMachine<ComboboxContext, ComboboxEvents> = {
       watch: (ctx) => ctx.highlightedOptionId,
       change: (ctx) => {
         if (ctx.highlightedOptionId) {
-          ctx.getOptionElement(ctx.highlightedOptionId)?.scrollIntoView({ block: 'nearest' })
+          ctx
+            .getOptionElement(ctx.highlightedOptionId)
+            ?.scrollIntoView({ block: 'nearest' })
         }
       },
     },
@@ -262,7 +272,9 @@ export const comboboxMachine: EventMachine<ComboboxContext, ComboboxEvents> = {
         return
       }
 
-      const currentIndex = enabled.findIndex((o) => o.id === ctx.highlightedOptionId)
+      const currentIndex = enabled.findIndex(
+        (o) => o.id === ctx.highlightedOptionId,
+      )
       if (currentIndex === -1) {
         ctx.setHighlightedOptionId(enabled[0].id)
         return
@@ -288,7 +300,9 @@ export const comboboxMachine: EventMachine<ComboboxContext, ComboboxEvents> = {
         return
       }
 
-      const currentIndex = enabled.findIndex((o) => o.id === ctx.highlightedOptionId)
+      const currentIndex = enabled.findIndex(
+        (o) => o.id === ctx.highlightedOptionId,
+      )
       if (currentIndex === -1) {
         ctx.setHighlightedOptionId(enabled[enabled.length - 1].id)
         return
@@ -304,8 +318,8 @@ export const comboboxMachine: EventMachine<ComboboxContext, ComboboxEvents> = {
       }
     },
 
-    highlightOption: (ctx, payload) => {
-      const { optionId } = payload!
+    highlightOption: (ctx, payload: { optionId: string }) => {
+      const { optionId } = payload
       const option = ctx.getOptionById(optionId)
       if (option && !option.disabled) {
         ctx.setHighlightedOptionId(optionId)
@@ -450,15 +464,24 @@ export function filterOptions(
   return options.filter((opt) => opt.label.toLowerCase().startsWith(inputLower))
 }
 
-export function isHighlighted(highlightedOptionId: OptionId | null, optionId: OptionId): boolean {
+export function isHighlighted(
+  highlightedOptionId: OptionId | null,
+  optionId: OptionId,
+): boolean {
   return highlightedOptionId === optionId
 }
 
-export function isSelected(selectedValue: string | null, option: ComboboxOption): boolean {
+export function isSelected(
+  selectedValue: string | null,
+  option: ComboboxOption,
+): boolean {
   return selectedValue === option.value
 }
 
-export function getDisplayValue(inputValue: string, autocompleteText: string | null): string {
+export function getDisplayValue(
+  inputValue: string,
+  autocompleteText: string | null,
+): string {
   if (autocompleteText) {
     return inputValue + autocompleteText
   }

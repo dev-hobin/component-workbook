@@ -190,7 +190,8 @@ function RootInner({
 
   // 필터링된 옵션
   const filteredOptions = useMemo(
-    () => filterOptions(options, inputValue ?? '', autocomplete, showAllOnEmpty),
+    () =>
+      filterOptions(options, inputValue ?? '', autocomplete, showAllOnEmpty),
     [options, inputValue, autocomplete, showAllOnEmpty],
   )
   const filteredOptionsRef = useRef<ComboboxOption[]>([])
@@ -615,7 +616,14 @@ export const Option = forwardRef<HTMLLIElement, OptionProps>(
       }
       registerOption(option)
       return () => unregisterOption(optionId)
-    }, [optionId, value, displayLabel, disabled, registerOption, unregisterOption])
+    }, [
+      optionId,
+      value,
+      displayLabel,
+      disabled,
+      registerOption,
+      unregisterOption,
+    ])
 
     const option: ComboboxOption = {
       id: optionId,

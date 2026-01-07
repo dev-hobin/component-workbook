@@ -2,130 +2,113 @@
 
 **상태 없는 선언적 이벤트 핸들러**
 
-상태머신(State Machine)에서 "상태(State)"를 빼고, 이벤트 → 조건 → 액션만 남긴 패턴.
-
 ```
 State Machine  = 상태 + 이벤트 + 전이
-Event Machine  = 이벤트 + 조건 + 액션 (상태 없음!)
+Event Machine  = computed + 이벤트 + 조건 + 액션
 ```
 
 ## 특징
 
-- **~70줄** 핵심 런타임
-- **Framework-agnostic**: React, Vue, Svelte, Solid 모두 지원 가능
-- **타입 안전한 Payload**: `send('SELECT', { id })` 자동 완성
+- **~100줄** 핵심 로직 (타입 제외)
+- **Framework-agnostic**: React hook + Vanilla
+- **computed**: context에서 "상태" 파생
+- **타입 안전한 Payload**
 - **열린 계**: Props 변경에 자연스럽게 반응
-- **선언적**: 조건부 로직이 한눈에 보임
 
-## 설치
-
-```bash
-# 그냥 파일 복사
-cp event-machine/index.ts your-project/
-```
-
-## 기본 사용법
+## 사용법
 
 ```typescript
-import { useEventMachine, EventMachine } from './event-machine';
+import { useEventMachine, EventMachine } from './index';
 
-// 1. Context 타입 정의
+// 1. 타입 정의
 type Context = {
   isOpen: boolean;
+  isLoading: boolean;
   setIsOpen: (v: boolean) => void;
 };
 
-// 2. Events 타입 정의 (payload 포함)
 type Events = {
-  TOGGLE: void;           // payload 없음
-  OPEN: void;
-  CLOSE: void;
-  SET: { value: boolean }; // payload 있음
+  TOGGLE: void;
+  SET: { value: boolean };
 };
 
-// 3. Machine 정의
-const machine: EventMachine<Context, Events> = {
+type Computed = {
+  state: 'closed' | 'open' | 'loading';
+  canClose: boolean;
+};
+
+// 2. Machine 정의
+const machine: EventMachine<Context, Events, Computed> = {
+  computed: {
+    state: ctx => !ctx.isOpen ? 'closed' : ctx.isLoading ? 'loading' : 'open',
+    canClose: ctx => ctx.isOpen && !ctx.isLoading,
+  },
+
   on: {
     TOGGLE: [
-      { when: ctx => ctx.isOpen, do: 'close' },
+      { when: ctx => ctx.state === 'loading', do: 'noop' },
+      { when: ctx => ctx.state === 'open', do: 'close' },
       { do: 'open' },
     ],
-    OPEN: 'open',
-    CLOSE: 'close',
     SET: 'set',
   },
-  
+
+  effects: [{
+    watch: ctx => ctx.state,
+    enter: ctx => console.log('opened'),
+    exit: ctx => console.log('closed'),
+  }],
+
   actions: {
+    noop: () => {},
     open: ctx => ctx.setIsOpen(true),
     close: ctx => ctx.setIsOpen(false),
     set: (ctx, { value }) => ctx.setIsOpen(value),
   },
 };
 
-// 4. Hook에서 사용
-function useDisclosure() {
+// 3. React에서 사용
+function MyComponent() {
   const [isOpen, setIsOpen] = useState(false);
-  const ctx = useMemo(() => ({ isOpen, setIsOpen }), [isOpen]);
+  const [isLoading, setIsLoading] = useState(false);
   
+  const ctx = useMemo(() => ({ isOpen, isLoading, setIsOpen }), [isOpen, isLoading]);
   const send = useEventMachine(machine, ctx);
-  
-  return {
-    isOpen,
-    toggle: () => send('TOGGLE'),
-    open: () => send('OPEN'),
-    set: (value: boolean) => send('SET', { value }),
-  };
+
+  return (
+    <button onClick={() => send('TOGGLE')}>Toggle</button>
+  );
 }
 ```
 
 ## API
 
-### EventMachine<TContext, TEvents>
+### EventMachine
 
 ```typescript
-type EventMachine<TContext, TEvents> = {
-  on: { [K in keyof TEvents]?: Handler };  // 이벤트 핸들러
-  always?: Rule[];                         // 자동 평가 규칙
-  effects?: Effect[];                      // 사이드 이펙트
-  actions: Record<string, Action>;         // 액션 구현
+type EventMachine<TContext, TEvents, TComputed> = {
+  computed?: { ... };  // context → 파생값
+  on: { ... };         // 이벤트 → 핸들러
+  effects?: [ ... ];   // watch 기반 사이드이펙트
+  always?: [ ... ];    // 자동 평가 규칙
+  actions: { ... };    // 액션 구현
 };
 ```
 
-### Events 타입 정의
-
-```typescript
-type MyEvents = {
-  // payload 없음
-  TOGGLE: void;
-  CLEAR: void;
-  
-  // payload 있음
-  SELECT: { id: string };
-  FOCUS: { id: string; scroll?: boolean };
-  INPUT: { value: string };
-};
-
-// 사용
-send('TOGGLE');                          // OK
-send('SELECT', { id: 'item-1' });        // OK
-send('SELECT');                          // TS Error!
-send('TOGGLE', { id: 'x' });             // TS Error!
-```
-
-### Handler (조건부 규칙)
+### Handler
 
 ```typescript
 on: {
-  // 단순: 바로 액션 실행
+  // 단순
   OPEN: 'open',
 
-  // 조건부: 첫 번째 매칭 규칙 실행
+  // 조건부 (첫 매칭)
   TOGGLE: [
-    { when: ctx => ctx.disabled, do: 'noop' },
+    { when: ctx => ctx.isLoading, do: 'noop' },
     { when: ctx => ctx.isOpen, do: 'close' },
-    { do: 'open' },  // default
+    { do: 'open' },
   ],
-  
+
   // payload 조건
   SELECT: [
     { when: (ctx, { multi }) => multi, do: 'addToSelection' },
@@ -134,134 +117,48 @@ on: {
 }
 ```
 
-### Effects (entry/exit/invoke 대체)
+### Effects
 
 ```typescript
-effects: [
-  {
-    watch: ctx => ctx.isOpen,           // 감시할 값
-    enter: ctx => console.log('열림'),   // false → true
-    exit: ctx => console.log('닫힘'),    // true → false
-    change: (ctx, prev, curr) => {},    // 값 변경 시
-  },
-]
-```
+effects: [{
+  watch: ctx => ctx.state,           // 감시할 값
+  enter: ctx => { ... },             // falsy → truthy
+  exit: ctx => { ... },              // truthy → falsy
+  change: (ctx, prev, curr) => {},   // 매 변경
+}]
 
-cleanup 반환:
-
-```typescript
+// cleanup
 effects: [{
   watch: ctx => ctx.isRunning,
   enter: ctx => {
     const id = setInterval(() => ctx.tick(), 1000);
-    return () => clearInterval(id);  // cleanup!
+    return () => clearInterval(id);  // cleanup
   },
 }]
 ```
 
-### Always (자동 평가)
+### Vanilla
 
 ```typescript
-always: [
-  { when: ctx => ctx.value.length > 10, do: 'setError' },
-  { when: ctx => ctx.value.length === 0, do: 'setRequired' },
-  { do: 'clearError' },
-]
-```
+import { createEventMachine } from './index';
 
-## Framework Bindings
+const machine = createEventMachine(definition);
 
-핵심 로직은 framework-agnostic. 각 프레임워크용 바인딩만 만들면 됨.
-
-### React (포함됨)
-
-```typescript
-const send = useEventMachine(machine, ctx);
-```
-
-### Vue (직접 구현)
-
-```typescript
-function useEventMachine(machine, ctx: Ref) {
-  watch(ctx, (newCtx) => {
-    // always, effects 평가
-  });
-  
-  return (event, payload?) => {
-    executeHandler(machine.on[event], machine.actions, ctx.value, payload);
-  };
-}
-```
-
-### Svelte / Solid
-
-비슷한 패턴으로 구현 가능.
-
-## 실제 예시: TreeView
-
-```typescript
-type TreeEvents = {
-  FOCUS: { id: string };
-  SELECT: { id: string; multi?: boolean };
-  EXPAND: { id: string };
-  COLLAPSE: { id: string };
-  ARROW_DOWN: void;
-  ARROW_UP: void;
-};
-
-const treeMachine: EventMachine<TreeContext, TreeEvents> = {
-  on: {
-    FOCUS: 'focus',
-    
-    SELECT: [
-      { when: (ctx, { multi }) => multi && ctx.multiSelect, do: 'addToSelection' },
-      { do: 'select' },
-    ],
-    
-    EXPAND: [
-      { when: (ctx, { id }) => !ctx.hasChildren(id), do: 'noop' },
-      { do: 'expand' },
-    ],
-    
-    ARROW_DOWN: 'focusNext',
-    ARROW_UP: 'focusPrev',
-  },
-  
-  actions: {
-    focus: (ctx, { id }) => ctx.setFocusedId(id),
-    select: (ctx, { id }) => ctx.setSelectedIds(new Set([id])),
-    addToSelection: (ctx, { id }) => ctx.setSelectedIds(new Set([...ctx.selectedIds, id])),
-    expand: (ctx, { id }) => ctx.setExpandedIds(new Set([...ctx.expandedIds, id])),
-    focusNext: ctx => { /* ... */ },
-    focusPrev: ctx => { /* ... */ },
-  },
-};
-
-// 사용
-tree.send('SELECT', { id: 'node-1', multi: true });
-tree.send('EXPAND', { id: 'folder-1' });
-tree.send('ARROW_DOWN');  // payload 없음
+machine.send('TOGGLE', ctx);
+machine.send('SELECT', ctx, { id: 'item-1' });
+machine.evaluate(ctx);  // always + effects 평가
+machine.getFullContext(ctx);  // computed 포함
+machine.cleanup();  // cleanup 실행
 ```
 
 ## XState와 비교
 
 | | XState | Event Machine |
 |---|--------|---------------|
-| 상태 정의 | 필수 | 없음 |
-| 코드량 | ~500줄+ | ~70줄 |
-| Payload | `{ type, ...payload }` | 타입 안전 분리 |
+| 상태 | `states: { ... }` | `computed: { state }` |
+| 상태 변경 | 전이로만 | Props 바꾸면 자동 |
 | entry/exit | 상태에 연결 | watch 값에 연결 |
-| Props 반응 | 어려움 | 자연스러움 |
-
-## 파일 구조
-
-```
-event-machine/
-├── index.ts              # 핵심 런타임 (~70줄)
-├── README.md
-└── examples/
-    └── useTree.ts        # TreeView 전체 예시
-```
+| 코드량 | ~500줄+ | ~100줄 |
 
 ## 라이선스
 
