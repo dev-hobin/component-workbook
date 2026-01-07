@@ -1,13 +1,13 @@
-import React, {
+import {
   createContext,
   forwardRef,
   useCallback,
   useContext,
-  useEffect,
   useId,
   useLayoutEffect,
   useMemo,
   useRef,
+  useState,
   type ComponentPropsWithoutRef,
   type CSSProperties,
 } from 'react'
@@ -22,31 +22,18 @@ import {
   autoUpdate,
   type Placement,
 } from '@floating-ui/dom'
+import { useEventMachine, type Send } from '../../../lib/event-machine'
 
 import {
-  type MenuState,
-  type MenuStatus,
-  type MenuEffect,
-  type MenuItem,
-  type MenuId,
-  type ItemId,
-  deriveStatus,
-  getEffectsOnStatusChange,
-  getEffectsOnFocusChange,
-  openMenu,
-  closeMenu,
-  closeAll,
+  menuMachine,
   isMenuOpen,
   getRootMenuId,
   getActiveMenuId,
-  isSubMenu,
-  setFocus,
-  moveFocusDown,
-  moveFocusUp,
-  moveFocusFirst,
-  moveFocusLast,
-  closeMenuAndFocusTrigger,
-} from './core'
+  type MenuContext,
+  type MenuEvents,
+  type MenuId,
+  type ItemId,
+} from './machine'
 
 import { usePresence } from '../../hooks/usePresence'
 import { useLatestRef } from '../../hooks/useLatestRef'
@@ -77,9 +64,9 @@ type MenuMeta = {
 }
 
 type MenuContextValue = {
-  state: MenuState
-  setState: React.Dispatch<React.SetStateAction<MenuState>>
-  getMenuItems: (menuId: MenuId) => MenuItem[]
+  openedPath: MenuId[]
+  focusedItemId: ItemId | null
+  send: Send<MenuEvents>
   store: ComponentStore<MenuRole, MenuMeta>
 }
 
@@ -145,219 +132,58 @@ function RootInner({
   const autoId = useId()
   const menuId = menuIdProp ?? autoId
 
-  const [openedPath, setOpenedPath] = useControllableState({
+  const [openedPath = [], setOpenedPath] = useControllableState({
     prop: openedPathProp,
     defaultProp: defaultOpenedPath ?? [],
     onChange: onOpenedPathChange,
   })
 
-  const [focusedItemId, setFocusedItemId] = React.useState<ItemId | null>(null)
+  const [focusedItemId, setFocusedItemId] = useState<ItemId | null>(null)
 
-  const state: MenuState = useMemo(
-    () => ({ openedPath, focusedItemId }),
-    [openedPath, focusedItemId],
+  // Build context for machine
+  const machineCtx: MenuContext = useMemo(
+    () => ({
+      openedPath,
+      focusedItemId,
+      setOpenedPath,
+      setFocusedItemId,
+
+      getActiveMenuId: () => getActiveMenuId(openedPath),
+      getActiveMenuItems: () => {
+        const activeId = getActiveMenuId(openedPath)
+        if (!activeId) return []
+        const nodes = store.filterNodesByRolesAndMeta(
+          ['item', 'subtrigger'],
+          (meta) => meta.menuId === activeId,
+        )
+        return nodes.map((node) => ({
+          id: node.id,
+          menuId: node.meta.menuId,
+        }))
+      },
+      isActiveMenuSub: () => {
+        const activeId = getActiveMenuId(openedPath)
+        if (!activeId) return false
+        return openedPath.indexOf(activeId) > 0
+      },
+      isItemSubTrigger: (itemId: ItemId) => openedPath.includes(itemId),
+
+      getItemElement: (itemId: ItemId) =>
+        store.getElement(itemId, 'item') ??
+        store.getElement(itemId, 'subtrigger'),
+      getTriggerElement: (targetMenuId: MenuId) =>
+        store.getElement(targetMenuId, 'trigger'),
+      getAllElements: () => store.getAllElements(),
+    }),
+    [openedPath, focusedItemId, setOpenedPath, store],
   )
 
-  const setState: React.Dispatch<React.SetStateAction<MenuState>> = useCallback(
-    (action) => {
-      const nextState = typeof action === 'function' ? action(state) : action
-      if (nextState.openedPath !== state.openedPath) {
-        setOpenedPath(nextState.openedPath)
-      }
-      if (nextState.focusedItemId !== state.focusedItemId) {
-        setFocusedItemId(nextState.focusedItemId)
-      }
-    },
-    [state, setOpenedPath],
-  )
-
-  const getMenuItems = useCallback(
-    (targetMenuId: MenuId): MenuItem[] => {
-      const nodes = store.filterNodesByRolesAndMeta(
-        ['item', 'subtrigger'],
-        (meta) => meta.menuId === targetMenuId,
-      )
-      return nodes.map((node) => ({
-        id: node.id,
-        menuId: node.meta.menuId,
-      }))
-    },
-    [store],
-  )
-
-  // Status 파생
-  const status: MenuStatus = deriveStatus(state)
-  const prevStatusRef = useRef<MenuStatus>('idle')
-  const prevFocusedItemIdRef = useRef<ItemId | null>(null)
-
-  // 최신 값 refs
-  const stateRef = useLatestRef(state)
-  const setStateRef = useLatestRef(setState)
-  const getMenuItemsRef = useLatestRef(getMenuItems)
-
-  // 안정적인 이벤트 핸들러 refs (한 번만 생성, 내부에서 최신 ref 참조)
-  const handlersRef = useRef({
-    outsideClick: (event: PointerEvent) => {
-      const target = event.target as Node | null
-      if (!target) return
-
-      const elements = store.getAllElements()
-      for (const element of elements.values()) {
-        if (element.contains(target)) return
-      }
-
-      setStateRef.current(closeAll(stateRef.current))
-    },
-    keyDown: (event: KeyboardEvent) => {
-      const currentState = stateRef.current
-      const activeMenuId = getActiveMenuId(currentState)
-      if (!activeMenuId) return
-
-      const target = event.target as HTMLElement
-      const contentElement = store.getElement(activeMenuId, 'content')
-      if (!contentElement?.contains(target)) return
-
-      const items = getMenuItemsRef.current(activeMenuId)
-      const isSubMenuActive = isSubMenu(currentState, activeMenuId)
-      const focusedId = currentState.focusedItemId
-      const isCurrentItemSubTrigger = focusedId
-        ? currentState.openedPath.includes(focusedId)
-        : false
-
-      switch (event.key) {
-        case 'ArrowDown': {
-          event.preventDefault()
-          setStateRef.current(moveFocusDown(currentState, items))
-          break
-        }
-        case 'ArrowUp': {
-          event.preventDefault()
-          setStateRef.current(moveFocusUp(currentState, items))
-          break
-        }
-        case 'ArrowRight': {
-          if (isCurrentItemSubTrigger && focusedId) {
-            event.preventDefault()
-            setStateRef.current(openMenu(currentState, focusedId, activeMenuId))
-          }
-          break
-        }
-        case 'ArrowLeft': {
-          if (isSubMenuActive) {
-            event.preventDefault()
-            setStateRef.current(
-              closeMenuAndFocusTrigger(currentState, activeMenuId),
-            )
-          }
-          break
-        }
-        case 'Escape': {
-          event.preventDefault()
-          setStateRef.current(
-            closeMenuAndFocusTrigger(currentState, activeMenuId),
-          )
-          break
-        }
-        case 'Tab': {
-          if (event.shiftKey) {
-            event.preventDefault()
-            setStateRef.current(
-              closeMenuAndFocusTrigger(currentState, activeMenuId),
-            )
-          } else {
-            setStateRef.current(closeAll(currentState))
-          }
-          break
-        }
-        case 'Home': {
-          event.preventDefault()
-          setStateRef.current(moveFocusFirst(currentState, items))
-          break
-        }
-        case 'End': {
-          event.preventDefault()
-          setStateRef.current(moveFocusLast(currentState, items))
-          break
-        }
-        case 'Enter':
-        case ' ': {
-          if (focusedId) {
-            event.preventDefault()
-            const el =
-              store.getElement(focusedId, 'item') ??
-              store.getElement(focusedId, 'subtrigger')
-            el?.click()
-          }
-          break
-        }
-      }
-    },
-  })
-
-  // Effect 실행 함수
-  const runEffect = useCallback(
-    (effect: MenuEffect) => {
-      const handlers = handlersRef.current
-      switch (effect.type) {
-        case 'ADD_OUTSIDE_CLICK_LISTENER':
-          document.addEventListener('pointerdown', handlers.outsideClick, true)
-          break
-        case 'REMOVE_OUTSIDE_CLICK_LISTENER':
-          document.removeEventListener(
-            'pointerdown',
-            handlers.outsideClick,
-            true,
-          )
-          break
-        case 'ADD_KEYBOARD_LISTENER':
-          document.addEventListener('keydown', handlers.keyDown)
-          break
-        case 'REMOVE_KEYBOARD_LISTENER':
-          document.removeEventListener('keydown', handlers.keyDown)
-          break
-        case 'FOCUS_ITEM': {
-          const element =
-            store.getElement(effect.itemId, 'item') ??
-            store.getElement(effect.itemId, 'subtrigger')
-          element?.focus()
-          break
-        }
-      }
-    },
-    [store],
-  )
-
-  // Status 전환 시 효과 실행
-  useLayoutEffect(() => {
-    const effects = getEffectsOnStatusChange(prevStatusRef.current, status)
-    effects.forEach(runEffect)
-    prevStatusRef.current = status
-  }, [status, runEffect])
-
-  // Focus 변경 시 효과 실행
-  useLayoutEffect(() => {
-    const effects = getEffectsOnFocusChange(
-      prevFocusedItemIdRef.current,
-      state.focusedItemId,
-    )
-    effects.forEach(runEffect)
-    prevFocusedItemIdRef.current = state.focusedItemId
-  }, [state.focusedItemId, runEffect])
-
-  // 언마운트 시 리소스 정리
-  useEffect(() => {
-    const handlers = handlersRef.current
-    return () => {
-      document.removeEventListener('pointerdown', handlers.outsideClick, true)
-      document.removeEventListener('keydown', handlers.keyDown)
-      prevStatusRef.current = 'idle'
-      prevFocusedItemIdRef.current = null
-    }
-  }, [])
+  // Event machine
+  const send = useEventMachine(menuMachine, machineCtx)
 
   const menuContextValue = useMemo<MenuContextValue>(
-    () => ({ state, setState, getMenuItems, store }),
-    [state, setState, getMenuItems, store],
+    () => ({ openedPath, focusedItemId, send, store }),
+    [openedPath, focusedItemId, send, store],
   )
 
   const menuIdContextValue = useMemo<MenuIdContextValue>(
@@ -408,7 +234,7 @@ export type TriggerProps = ComponentPropsWithoutRef<'button'>
 
 export const Trigger = forwardRef<HTMLButtonElement, TriggerProps>(
   ({ children, ...rest }, forwardedRef) => {
-    const { state, setState } = useMenuContext()
+    const { openedPath, send } = useMenuContext()
     const { menuId, parentMenuId } = useMenuIdContext()
 
     const { ref, domId } = useNode<MenuRole, MenuMeta>({
@@ -417,19 +243,19 @@ export const Trigger = forwardRef<HTMLButtonElement, TriggerProps>(
       meta: { menuId },
     })
 
-    const isOpen = isMenuOpen(state, menuId)
+    const isOpen = isMenuOpen(openedPath, menuId)
 
     const handlePointerDown = useCallback(
       (e: React.PointerEvent) => {
         e.preventDefault()
 
         if (isOpen) {
-          setState(closeMenu(state, menuId))
+          send('CLOSE_MENU', { menuId })
         } else {
-          setState(openMenu(state, menuId, parentMenuId))
+          send('OPEN_MENU', { menuId, parentMenuId })
         }
       },
-      [isOpen, state, setState, menuId, parentMenuId],
+      [isOpen, send, menuId, parentMenuId],
     )
 
     const handleKeyDown = useCallback(
@@ -438,13 +264,13 @@ export const Trigger = forwardRef<HTMLButtonElement, TriggerProps>(
 
         if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') {
           e.preventDefault()
-          setState(openMenu(state, menuId, parentMenuId))
+          send('OPEN_MENU', { menuId, parentMenuId })
         } else if (e.key === 'ArrowUp') {
           e.preventDefault()
-          setState(openMenu(state, menuId, parentMenuId))
+          send('OPEN_MENU', { menuId, parentMenuId })
         }
       },
-      [isOpen, state, setState, menuId, parentMenuId],
+      [isOpen, send, menuId, parentMenuId],
     )
 
     return (
@@ -477,7 +303,7 @@ export type SubTriggerProps = ComponentPropsWithoutRef<'button'>
 
 export const SubTrigger = forwardRef<HTMLButtonElement, SubTriggerProps>(
   ({ children, ...rest }, forwardedRef) => {
-    const { state, setState } = useMenuContext()
+    const { openedPath, focusedItemId, send } = useMenuContext()
     const { menuId, parentMenuId } = useMenuIdContext()
 
     // subtrigger role로 등록 (부모 메뉴의 menuId를 meta에 저장)
@@ -487,16 +313,16 @@ export const SubTrigger = forwardRef<HTMLButtonElement, SubTriggerProps>(
       meta: { menuId: parentMenuId! },
     })
 
-    const isOpen = isMenuOpen(state, menuId)
-    const isActiveInParent = state.focusedItemId === menuId
+    const isOpen = isMenuOpen(openedPath, menuId)
+    const isActiveInParent = focusedItemId === menuId
 
     const handleClick = useCallback(() => {
       if (isOpen) {
-        setState(closeMenu(state, menuId))
+        send('CLOSE_MENU', { menuId })
       } else {
-        setState(openMenu(state, menuId, parentMenuId))
+        send('OPEN_MENU', { menuId, parentMenuId })
       }
-    }, [isOpen, state, setState, menuId, parentMenuId])
+    }, [isOpen, send, menuId, parentMenuId])
 
     const handleKeyDown = useCallback(
       (e: React.KeyboardEvent) => {
@@ -504,10 +330,10 @@ export const SubTrigger = forwardRef<HTMLButtonElement, SubTriggerProps>(
 
         if (e.key === 'ArrowRight' || e.key === 'Enter' || e.key === ' ') {
           e.preventDefault()
-          setState(openMenu(state, menuId, parentMenuId))
+          send('OPEN_MENU', { menuId, parentMenuId })
         }
       },
-      [isOpen, state, setState, menuId, parentMenuId],
+      [isOpen, send, menuId, parentMenuId],
     )
 
     return (
@@ -542,7 +368,7 @@ export type ContentProps = ComponentPropsWithoutRef<'div'>
 
 export const Content = forwardRef<HTMLDivElement, ContentProps>(
   ({ children, ...rest }, forwardedRef) => {
-    const { state, setState, getMenuItems } = useMenuContext()
+    const { openedPath, focusedItemId, send, store } = useMenuContext()
     const { menuId } = useMenuIdContext()
 
     const { ref, domId, elementRef } = useNode<MenuRole, MenuMeta>({
@@ -551,7 +377,7 @@ export const Content = forwardRef<HTMLDivElement, ContentProps>(
       meta: { menuId },
     })
 
-    const isOpen = isMenuOpen(state, menuId)
+    const isOpen = isMenuOpen(openedPath, menuId)
 
     const { isPresent, transitionState } = usePresence({
       isVisible: isOpen,
@@ -569,11 +395,67 @@ export const Content = forwardRef<HTMLDivElement, ContentProps>(
       if (hasInitialFocus.current) return
       hasInitialFocus.current = true
 
-      const items = getMenuItems(menuId)
-      if (items.length > 0) {
-        setState((prev) => setFocus(prev, items[0].id))
-      }
-    }, [isPresent, menuId, setState, getMenuItems])
+      // 약간의 딜레이 후 첫 아이템으로 포커스
+      requestAnimationFrame(() => {
+        send('FOCUS_FIRST')
+      })
+    }, [isPresent, send])
+
+    // 키보드 핸들러
+    const handleKeyDown = useCallback(
+      (e: React.KeyboardEvent) => {
+        switch (e.key) {
+          case 'ArrowDown':
+            e.preventDefault()
+            send('FOCUS_NEXT')
+            break
+          case 'ArrowUp':
+            e.preventDefault()
+            send('FOCUS_PREV')
+            break
+          case 'ArrowRight':
+            e.preventDefault()
+            send('OPEN_SUBMENU')
+            break
+          case 'ArrowLeft':
+            e.preventDefault()
+            send('CLOSE_SUBMENU')
+            break
+          case 'Escape':
+            e.preventDefault()
+            send('CLOSE_AND_FOCUS_TRIGGER', { menuId })
+            break
+          case 'Tab':
+            if (e.shiftKey) {
+              e.preventDefault()
+              send('CLOSE_AND_FOCUS_TRIGGER', { menuId })
+            } else {
+              send('CLOSE_ALL')
+            }
+            break
+          case 'Home':
+            e.preventDefault()
+            send('FOCUS_FIRST')
+            break
+          case 'End':
+            e.preventDefault()
+            send('FOCUS_LAST')
+            break
+          case 'Enter':
+          case ' ': {
+            if (focusedItemId) {
+              e.preventDefault()
+              const el =
+                store.getElement(focusedItemId, 'item') ??
+                store.getElement(focusedItemId, 'subtrigger')
+              el?.click()
+            }
+            break
+          }
+        }
+      },
+      [send, menuId, focusedItemId, store],
+    )
 
     if (!isPresent) {
       return null
@@ -586,6 +468,7 @@ export const Content = forwardRef<HTMLDivElement, ContentProps>(
           {
             role: 'menu',
             id: domId,
+            onKeyDown: handleKeyDown,
             'data-transition': transitionState,
           },
           rest,
@@ -613,7 +496,7 @@ export type ActionItemProps = Omit<
 
 export const ActionItem = forwardRef<HTMLButtonElement, ActionItemProps>(
   ({ children, value: itemId, ...rest }, forwardedRef) => {
-    const { state, setState, store } = useMenuContext()
+    const { openedPath, focusedItemId, send, store } = useMenuContext()
     const { menuId } = useMenuIdContext()
 
     const { ref, domId } = useNode<MenuRole, MenuMeta>({
@@ -622,23 +505,23 @@ export const ActionItem = forwardRef<HTMLButtonElement, ActionItemProps>(
       meta: { menuId },
     })
 
-    const isActive = state.focusedItemId === itemId
+    const isActive = focusedItemId === itemId
 
     const handleClick = useCallback(() => {
-      const rootMenuId = getRootMenuId(state)
-      setState(closeAll(state))
+      const rootMenuId = getRootMenuId(openedPath)
+      send('CLOSE_ALL')
 
       if (rootMenuId) {
         const rootTrigger = store.getElement(rootMenuId, 'trigger')
         rootTrigger?.focus()
       }
-    }, [state, setState, store])
+    }, [openedPath, send, store])
 
     const handleFocus = useCallback(() => {
-      if (state.focusedItemId !== itemId) {
-        setState(setFocus(state, itemId))
+      if (focusedItemId !== itemId) {
+        send('SET_FOCUS', { itemId })
       }
-    }, [state, setState, itemId])
+    }, [focusedItemId, send, itemId])
 
     return (
       <button
@@ -672,7 +555,7 @@ export type LinkItemProps = Omit<ComponentPropsWithoutRef<'a'>, 'value'> & {
 
 export const LinkItem = forwardRef<HTMLAnchorElement, LinkItemProps>(
   ({ children, value: itemId, ...rest }, forwardedRef) => {
-    const { state, setState, store } = useMenuContext()
+    const { openedPath, focusedItemId, send, store } = useMenuContext()
     const { menuId } = useMenuIdContext()
 
     const { ref, domId } = useNode<MenuRole, MenuMeta>({
@@ -681,17 +564,17 @@ export const LinkItem = forwardRef<HTMLAnchorElement, LinkItemProps>(
       meta: { menuId },
     })
 
-    const isActive = state.focusedItemId === itemId
+    const isActive = focusedItemId === itemId
 
     const handleClick = useCallback(() => {
-      const rootMenuId = getRootMenuId(state)
-      setState(closeAll(state))
+      const rootMenuId = getRootMenuId(openedPath)
+      send('CLOSE_ALL')
 
       if (rootMenuId) {
         const rootTrigger = store.getElement(rootMenuId, 'trigger')
         rootTrigger?.focus()
       }
-    }, [state, setState, store])
+    }, [openedPath, send, store])
 
     const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
       if (e.key === ' ') {
@@ -701,10 +584,10 @@ export const LinkItem = forwardRef<HTMLAnchorElement, LinkItemProps>(
     }, [])
 
     const handleFocus = useCallback(() => {
-      if (state.focusedItemId !== itemId) {
-        setState(setFocus(state, itemId))
+      if (focusedItemId !== itemId) {
+        send('SET_FOCUS', { itemId })
       }
-    }, [state, setState, itemId])
+    }, [focusedItemId, send, itemId])
 
     return (
       <a
@@ -753,7 +636,7 @@ export const Positioner = forwardRef<HTMLDivElement, PositionerProps>(
     },
     forwardedRef,
   ) => {
-    const { state, store } = useMenuContext()
+    const { openedPath, store } = useMenuContext()
     const { menuId } = useMenuIdContext()
 
     const { ref, domId, elementRef } = useNode<MenuRole, MenuMeta>({
@@ -762,7 +645,7 @@ export const Positioner = forwardRef<HTMLDivElement, PositionerProps>(
       meta: { menuId },
     })
 
-    const isOpen = isMenuOpen(state, menuId)
+    const isOpen = isMenuOpen(openedPath, menuId)
 
     const { isPresent } = usePresence({
       isVisible: isOpen,
@@ -867,7 +750,7 @@ export type PositionerArrowProps = ComponentPropsWithoutRef<'div'>
 
 export const PositionerArrow = forwardRef<HTMLDivElement, PositionerArrowProps>(
   ({ children, ...rest }, forwardedRef) => {
-    const { state } = useMenuContext()
+    const { openedPath } = useMenuContext()
     const { menuId } = useMenuIdContext()
 
     const { ref, domId, elementRef } = useNode<MenuRole, MenuMeta>({
@@ -876,7 +759,7 @@ export const PositionerArrow = forwardRef<HTMLDivElement, PositionerArrowProps>(
       meta: { menuId },
     })
 
-    const isOpen = isMenuOpen(state, menuId)
+    const isOpen = isMenuOpen(openedPath, menuId)
 
     const { transitionState } = usePresence({
       isVisible: isOpen,

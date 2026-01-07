@@ -13,8 +13,5 @@ export function useComponentSubscribe<
   store: ComponentStore<Role, Meta>,
   selector: (store: ComponentStore<Role, Meta>) => T,
 ): T {
-  return useSyncExternalStore(
-    store.subscribe,
-    () => selector(store),
-  )
+  return useSyncExternalStore(store.subscribe, () => selector(store))
 }

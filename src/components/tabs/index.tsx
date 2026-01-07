@@ -3,22 +3,22 @@ import React, {
   forwardRef,
   useCallback,
   useContext,
-  useEffect,
   useId,
   useMemo,
+  useRef,
   type ComponentPropsWithoutRef,
 } from 'react'
 import { useControllableState } from '@radix-ui/react-use-controllable-state'
+import { useEventMachine, type Send } from '../../../lib/event-machine'
 
 import {
-  selectTab,
-  focusTab,
-  blurTab,
+  tabsMachine,
   isActive,
-  type TabsState,
+  type TabsContext as MachineContext,
+  type TabsEvents,
   type TabValue,
   type TabsOrientation,
-} from './core'
+} from './machine'
 import { composeRefs } from '../../utils/composeRefs'
 import { mergeProps } from '../../utils/mergeProps'
 
@@ -43,9 +43,10 @@ type TabsMeta = {
 
 type TabsContextValue = {
   tabsId: string
-  state: TabsState
-  setState: React.Dispatch<React.SetStateAction<TabsState>>
+  activeValue: TabValue | null
+  focusedValue: TabValue | null
   store: ComponentStore<TabsRole, TabsMeta>
+  send: Send<TabsEvents>
   orientation: TabsOrientation
 }
 
@@ -106,39 +107,36 @@ const RootInner = forwardRef<HTMLDivElement, RootProps>(
 
     const [focusedValue, setFocusedValue] = React.useState<TabValue | null>(null)
 
-    const state: TabsState = useMemo(
+    // Ref for lazy getter
+    const storeRef = useRef(store)
+    storeRef.current = store
+
+    // Machine context
+    const machineCtx: MachineContext = useMemo(
       () => ({
         activeValue: activeValue ?? null,
         focusedValue,
+        setActiveValue: (value) => setActiveValue(value ?? undefined),
+        setFocusedValue,
+        getEnabledTabs: () => {
+          const tabs = storeRef.current.getNodesByRole('tab')
+          return tabs
+            .filter((tab) => !tab.meta.disabled)
+            .map((tab) => ({ value: tab.meta.value! }))
+        },
+        getTabElement: (value) =>
+          storeRef.current.getElement(String(value), 'tab'),
       }),
-      [activeValue, focusedValue],
+      [activeValue, focusedValue, setActiveValue],
     )
 
-    const setState: React.Dispatch<React.SetStateAction<TabsState>> = useCallback(
-      (action) => {
-        const nextState = typeof action === 'function' ? action(state) : action
-        if (nextState.activeValue !== state.activeValue) {
-          setActiveValue(nextState.activeValue ?? undefined)
-        }
-        if (nextState.focusedValue !== state.focusedValue) {
-          setFocusedValue(nextState.focusedValue)
-        }
-      },
-      [state, setActiveValue],
-    )
+    // Event machine
+    const send = useEventMachine(tabsMachine, machineCtx)
 
     // 키보드 네비게이션
-    useEffect(() => {
-      if (state.focusedValue === null) return
-
-      const handleKeyDown = (event: KeyboardEvent) => {
-        const tabs = store.getNodesByRole('tab')
-        const enabledTabs = tabs.filter((tab) => !tab.meta.disabled)
-        if (enabledTabs.length === 0) return
-
-        const currentIndex = enabledTabs.findIndex(
-          (tab) => tab.meta.value === state.focusedValue,
-        )
+    const handleKeyDown = useCallback(
+      (event: React.KeyboardEvent) => {
+        if (focusedValue === null) return
 
         const isNext =
           orientation === 'horizontal'
@@ -152,51 +150,31 @@ const RootInner = forwardRef<HTMLDivElement, RootProps>(
 
         if (isNext) {
           event.preventDefault()
-          const nextIndex = (currentIndex + 1) % enabledTabs.length
-          const nextTab = enabledTabs[nextIndex]
-          if (nextTab.meta.value !== undefined) {
-            setState(focusTab(state, nextTab.meta.value))
-            store.getElement(nextTab.id, 'tab')?.focus()
-          }
+          send('FOCUS_NEXT')
         } else if (isPrev) {
           event.preventDefault()
-          const prevIndex =
-            (currentIndex - 1 + enabledTabs.length) % enabledTabs.length
-          const prevTab = enabledTabs[prevIndex]
-          if (prevTab.meta.value !== undefined) {
-            setState(focusTab(state, prevTab.meta.value))
-            store.getElement(prevTab.id, 'tab')?.focus()
-          }
+          send('FOCUS_PREV')
         } else if (event.key === 'Home') {
           event.preventDefault()
-          const firstTab = enabledTabs[0]
-          if (firstTab.meta.value !== undefined) {
-            setState(focusTab(state, firstTab.meta.value))
-            store.getElement(firstTab.id, 'tab')?.focus()
-          }
+          send('FOCUS_FIRST')
         } else if (event.key === 'End') {
           event.preventDefault()
-          const lastTab = enabledTabs[enabledTabs.length - 1]
-          if (lastTab.meta.value !== undefined) {
-            setState(focusTab(state, lastTab.meta.value))
-            store.getElement(lastTab.id, 'tab')?.focus()
-          }
+          send('FOCUS_LAST')
         }
-      }
-
-      window.addEventListener('keydown', handleKeyDown)
-      return () => window.removeEventListener('keydown', handleKeyDown)
-    }, [state, setState, store, orientation])
+      },
+      [focusedValue, orientation, send],
+    )
 
     const contextValue = useMemo<TabsContextValue>(
       () => ({
         tabsId,
-        state,
-        setState,
+        activeValue: activeValue ?? null,
+        focusedValue,
         store,
+        send,
         orientation,
       }),
-      [tabsId, state, setState, store, orientation],
+      [tabsId, activeValue, focusedValue, store, send, orientation],
     )
 
     return (
@@ -206,6 +184,7 @@ const RootInner = forwardRef<HTMLDivElement, RootProps>(
           {...mergeProps(
             {
               'data-orientation': orientation,
+              onKeyDown: handleKeyDown,
             },
             rest,
           )}
@@ -261,33 +240,35 @@ export type TabProps = {
 
 export const Tab = forwardRef<HTMLButtonElement, TabProps>(
   ({ children, value, disabled, ...rest }, forwardedRef) => {
-    const { state, setState, store, orientation } = useTabsContext()
+    const { activeValue, store, send, orientation } = useTabsContext()
+
+    const valueStr = String(value)
 
     const { ref, domId } = useNode<TabsRole, TabsMeta>({
       role: 'tab',
-      id: value,
+      id: valueStr,
       meta: { value, disabled },
     })
 
     // store에서 panel element의 id 구독
     const panelId = useComponentSubscribe(
       store,
-      (s) => s.getElement(value, 'panel')?.id || null,
+      (s) => s.getElement(valueStr, 'panel')?.id || null,
     )
 
-    const isTabActive = isActive(state, value)
+    const isTabActive = isActive(activeValue, value)
 
     const handleClick = useCallback(() => {
-      setState(selectTab(state, value))
-    }, [state, setState, value])
+      send('SELECT', { value })
+    }, [send, value])
 
     const handleFocus = useCallback(() => {
-      setState(focusTab(state, value))
-    }, [state, setState, value])
+      send('FOCUS', { value })
+    }, [send, value])
 
     const handleBlur = useCallback(() => {
-      setState(blurTab(state))
-    }, [state, setState])
+      send('BLUR')
+    }, [send])
 
     return (
       <button
@@ -298,11 +279,7 @@ export const Tab = forwardRef<HTMLButtonElement, TabProps>(
             type: 'button',
             id: domId,
             disabled,
-            tabIndex: state.activeValue
-              ? isTabActive
-                ? 0
-                : -1
-              : undefined,
+            tabIndex: activeValue ? (isTabActive ? 0 : -1) : undefined,
             onClick: handleClick,
             onFocus: handleFocus,
             onBlur: handleBlur,
@@ -332,21 +309,23 @@ export type PanelProps = {
 
 export const Panel = forwardRef<HTMLDivElement, PanelProps>(
   ({ children, value, ...rest }, forwardedRef) => {
-    const { state, store, orientation } = useTabsContext()
+    const { activeValue, store, orientation } = useTabsContext()
+
+    const valueStr = String(value)
 
     const { ref, domId } = useNode<TabsRole, TabsMeta>({
       role: 'panel',
-      id: value,
+      id: valueStr,
       meta: { value },
     })
 
     // store에서 tab element의 id 구독
     const tabId = useComponentSubscribe(
       store,
-      (s) => s.getElement(value, 'tab')?.id || null,
+      (s) => s.getElement(valueStr, 'tab')?.id || null,
     )
 
-    const isTabActive = isActive(state, value)
+    const isTabActive = isActive(activeValue, value)
 
     if (!isTabActive) {
       return null

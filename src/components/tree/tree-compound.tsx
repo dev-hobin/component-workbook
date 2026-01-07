@@ -2,14 +2,19 @@ import React, {
   createContext,
   useContext,
   useCallback,
-  useEffect,
   useMemo,
   useId,
+  useRef,
 } from 'react'
-
-import { type TreeState, type NodeId, expand, collapse } from './core'
-
 import { useControllableState } from '@radix-ui/react-use-controllable-state'
+import { useEventMachine, type Send } from '../../../lib/event-machine'
+
+import {
+  treeMachine,
+  type TreeContext as MachineContext,
+  type TreeEvents,
+  type NodeId,
+} from './machine'
 import { findNodeFromMouseEvent } from '../../shell/dom'
 
 import {
@@ -29,8 +34,11 @@ type TreeRole = 'item' | 'text'
 type TreeMeta = object
 
 type TreeContextValue = {
-  state: TreeState
+  focusedId: NodeId | null
+  selectedId: NodeId | null
+  expandedIds: Set<NodeId>
   store: ComponentStore<TreeRole, TreeMeta>
+  send: Send<TreeEvents>
 }
 
 // ============================================
@@ -153,93 +161,75 @@ function RootInner({
     onChange: onExpandChange,
   })
 
-  const state: TreeState = useMemo(
-    () => ({ focusedId, selectedId, expandedIds }),
-    [focusedId, selectedId, expandedIds],
+  // Refs for lazy getters
+  const storeRef = useRef(store)
+  storeRef.current = store
+  const expandedIdsRef = useRef(expandedIds)
+  expandedIdsRef.current = expandedIds
+
+  // Machine context
+  const machineCtx: MachineContext = useMemo(
+    () => ({
+      focusedId: focusedId ?? null,
+      selectedId: selectedId ?? null,
+      expandedIds: expandedIds ?? new Set(),
+
+      setFocusedId: (id) => setFocusedId(id),
+      setSelectedId: (id) => setSelectedId(id),
+      setExpandedIds: (ids) => setExpandedIds(ids),
+
+      getVisibleItemIds: () => getVisibleItemIds(storeRef.current, expandedIdsRef.current ?? new Set()),
+      getChildrenIds: (nodeId) => storeRef.current.getChildrenByRole(nodeId, 'item').map((n) => n.id),
+      getParentId: (nodeId) => {
+        const node = storeRef.current.getNode(nodeId, 'item')
+        if (!node?.parentId) return null
+        const parentNode = storeRef.current.getNode(node.parentId, 'item')
+        return parentNode ? parentNode.id : null
+      },
+      isLeaf: (nodeId) => storeRef.current.getChildrenByRole(nodeId, 'item').length === 0,
+      getItemElement: (nodeId) => storeRef.current.getElement(nodeId, 'item'),
+    }),
+    [focusedId, selectedId, expandedIds, setFocusedId, setSelectedId, setExpandedIds],
   )
+
+  // Event machine
+  const send = useEventMachine(treeMachine, machineCtx)
 
   // 키보드 핸들러
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      const visibleIds = getVisibleItemIds(store, expandedIds)
-      if (visibleIds.length === 0) return
-
-      const currentIndex = focusedId ? visibleIds.indexOf(focusedId) : -1
-
       switch (e.key) {
-        case 'ArrowDown': {
+        case 'ArrowDown':
           e.preventDefault()
-          if (currentIndex === -1) {
-            setFocusedId(visibleIds[0])
-          } else if (currentIndex < visibleIds.length - 1) {
-            setFocusedId(visibleIds[currentIndex + 1])
-          }
+          send('FOCUS_NEXT')
           break
-        }
-        case 'ArrowUp': {
+        case 'ArrowUp':
           e.preventDefault()
-          if (currentIndex === -1) {
-            setFocusedId(visibleIds[0])
-          } else if (currentIndex > 0) {
-            setFocusedId(visibleIds[currentIndex - 1])
-          }
+          send('FOCUS_PREV')
           break
-        }
-        case 'ArrowRight': {
+        case 'ArrowRight':
           e.preventDefault()
-          if (!focusedId) break
-
-          const children = store.getChildrenByRole(focusedId, 'item')
-          const isLeaf = children.length === 0
-          if (isLeaf) break
-
-          const isExpanded = expandedIds.has(focusedId)
-          if (!isExpanded) {
-            setExpandedIds(expand(state, focusedId).expandedIds)
-          } else {
-            setFocusedId(children[0].id)
-          }
+          send('ARROW_RIGHT')
           break
-        }
-        case 'ArrowLeft': {
+        case 'ArrowLeft':
           e.preventDefault()
-          if (!focusedId) break
-
-          const children = store.getChildrenByRole(focusedId, 'item')
-          const isLeaf = children.length === 0
-          const isExpanded = !isLeaf && expandedIds.has(focusedId)
-
-          if (isExpanded) {
-            setExpandedIds(collapse(state, focusedId).expandedIds)
-          } else {
-            const node = store.getNode(focusedId, 'item')
-            if (node?.parentId) {
-              const parentNode = store.getNode(node.parentId, 'item')
-              if (parentNode) {
-                setFocusedId(parentNode.id)
-              }
-            }
-          }
+          send('ARROW_LEFT')
           break
-        }
-        case 'Home': {
+        case 'Home':
           e.preventDefault()
-          setFocusedId(visibleIds[0])
+          send('FOCUS_FIRST')
           break
-        }
-        case 'End': {
+        case 'End':
           e.preventDefault()
-          setFocusedId(visibleIds[visibleIds.length - 1])
+          send('FOCUS_LAST')
           break
-        }
-        case 'Enter': {
+        case 'Enter':
           e.preventDefault()
-          setSelectedId(focusedId)
+          send('SELECT_FOCUSED')
           break
-        }
       }
     },
-    [store, state, focusedId, expandedIds, setFocusedId, setSelectedId, setExpandedIds],
+    [send],
   )
 
   const handleClick = useCallback(
@@ -252,11 +242,11 @@ function RootInner({
       )
       const nodeId = findNodeFromMouseEvent(e, elements)
       if (nodeId) {
-        setFocusedId(nodeId)
-        setSelectedId(nodeId)
+        send('FOCUS', { nodeId })
+        send('SELECT', { nodeId })
       }
     },
-    [store, setFocusedId, setSelectedId],
+    [store, send],
   )
 
   const handleDoubleClick = useCallback(
@@ -272,26 +262,22 @@ function RootInner({
         const children = store.getChildrenByRole(nodeId, 'item')
         const isLeaf = children.length === 0
         if (!isLeaf) {
-          const isExpanded = expandedIds.has(nodeId)
-          const next = isExpanded ? collapse(state, nodeId) : expand(state, nodeId)
-          setExpandedIds(next.expandedIds)
+          send('TOGGLE_EXPAND', { nodeId })
         }
       }
     },
-    [store, expandedIds, state, setExpandedIds],
+    [store, send],
   )
 
-  // 포커스 동기화
-  useEffect(() => {
-    if (focusedId) {
-      const element = store.getElement(focusedId, 'item')
-      element?.focus()
-    }
-  }, [focusedId, store])
-
   const treeContextValue = useMemo<TreeContextValue>(
-    () => ({ state, store }),
-    [state, store],
+    () => ({
+      focusedId: focusedId ?? null,
+      selectedId: selectedId ?? null,
+      expandedIds: expandedIds ?? new Set(),
+      store,
+      send,
+    }),
+    [focusedId, selectedId, expandedIds, store, send],
   )
 
   return (
@@ -325,7 +311,7 @@ type ItemProps = {
 }
 
 function Item({ nodeId, children, className }: ItemProps) {
-  const { state, store } = useTreeContext()
+  const { focusedId, selectedId, expandedIds, store } = useTreeContext()
   const { ref, domId } = useNode<TreeRole>({
     role: 'item',
     id: nodeId,
@@ -337,9 +323,9 @@ function Item({ nodeId, children, className }: ItemProps) {
     (s) => s.getChildrenByRole(nodeId, 'item').length > 0,
   )
 
-  const isExpanded = hasChildren && state.expandedIds.has(nodeId)
-  const isSelected = state.selectedId === nodeId
-  const isFocused = state.focusedId === nodeId
+  const isExpanded = hasChildren && expandedIds.has(nodeId)
+  const isSelected = selectedId === nodeId
+  const isFocused = focusedId === nodeId
 
   return (
     <ParentProvider id={nodeId}>
@@ -371,14 +357,14 @@ type SubRootProps = {
 }
 
 function SubRoot({ children, className }: SubRootProps) {
-  const { state } = useTreeContext()
+  const { expandedIds } = useTreeContext()
   const parentId = useParentId()
 
   if (parentId === null || parentId === '__tree_root__') {
     throw new Error('SubRoot는 Item 안에서 사용해야 합니다.')
   }
 
-  const isExpanded = state.expandedIds.has(parentId)
+  const isExpanded = expandedIds.has(parentId)
 
   return (
     <ul

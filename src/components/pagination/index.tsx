@@ -9,16 +9,16 @@ import React, {
   type ReactNode,
 } from 'react'
 import { useControllableState } from '@radix-ui/react-use-controllable-state'
+import { useEventMachine, type Send } from '../../../lib/event-machine'
 
 import {
-  goToPage,
-  goToPreviousPage,
-  goToNextPage,
+  paginationMachine,
   hasPreviousPage,
   hasNextPage,
   getPageItems,
-  type PaginationState,
-} from './core'
+  type PaginationContext as MachineContext,
+  type PaginationEvents,
+} from './machine'
 import { composeRefs } from '../../utils/composeRefs'
 import { mergeProps } from '../../utils/mergeProps'
 
@@ -41,9 +41,11 @@ type PaginationMeta = {
 
 type PaginationContextValue = {
   paginationId: string
-  state: PaginationState
-  setState: React.Dispatch<React.SetStateAction<PaginationState>>
+  page: number
+  pageSize: number
+  totalCount: number
   store: ComponentStore<PaginationRole, PaginationMeta>
+  send: Send<PaginationEvents>
 }
 
 // ============================================
@@ -103,25 +105,21 @@ const RootInner = forwardRef<HTMLElement, RootProps>(
       defaultProp: defaultPage,
     })
 
-    const state: PaginationState = useMemo(
+    const page = currentPage ?? 1
+
+    // Machine context
+    const machineCtx: MachineContext = useMemo(
       () => ({
-        page: currentPage,
+        page,
         pageSize,
         totalCount,
+        setPage: setCurrentPage,
       }),
-      [currentPage, pageSize, totalCount],
+      [page, pageSize, totalCount, setCurrentPage],
     )
 
-    const setState: React.Dispatch<React.SetStateAction<PaginationState>> =
-      useCallback(
-        (action) => {
-          const nextState = typeof action === 'function' ? action(state) : action
-          if (nextState.page !== state.page) {
-            setCurrentPage(nextState.page)
-          }
-        },
-        [state, setCurrentPage],
-      )
+    // Event machine
+    const send = useEventMachine(paginationMachine, machineCtx)
 
     const { ref, domId } = useNode<PaginationRole>({
       role: 'root',
@@ -131,11 +129,13 @@ const RootInner = forwardRef<HTMLElement, RootProps>(
     const contextValue = useMemo<PaginationContextValue>(
       () => ({
         paginationId,
-        state,
-        setState,
+        page,
+        pageSize,
+        totalCount,
         store,
+        send,
       }),
-      [paginationId, state, setState, store],
+      [paginationId, page, pageSize, totalCount, store, send],
     )
 
     return (
@@ -165,18 +165,18 @@ export type PreviousTriggerProps = ComponentPropsWithoutRef<'button'>
 
 export const PreviousTrigger = forwardRef<HTMLButtonElement, PreviousTriggerProps>(
   ({ children, ...rest }, forwardedRef) => {
-    const { paginationId, state, setState } = usePaginationContext()
+    const { paginationId, page, send } = usePaginationContext()
 
     const { ref, domId } = useNode<PaginationRole>({
       role: 'previous',
       id: paginationId,
     })
 
-    const isDisabled = !hasPreviousPage(state)
+    const isDisabled = !hasPreviousPage(page)
 
     const handleClick = useCallback(() => {
-      setState(goToPreviousPage(state))
-    }, [state, setState])
+      send('GO_PREV')
+    }, [send])
 
     return (
       <button
@@ -206,18 +206,18 @@ export type NextTriggerProps = ComponentPropsWithoutRef<'button'>
 
 export const NextTrigger = forwardRef<HTMLButtonElement, NextTriggerProps>(
   ({ children, ...rest }, forwardedRef) => {
-    const { paginationId, state, setState } = usePaginationContext()
+    const { paginationId, page, pageSize, totalCount, send } = usePaginationContext()
 
     const { ref, domId } = useNode<PaginationRole>({
       role: 'next',
       id: paginationId,
     })
 
-    const isDisabled = !hasNextPage(state)
+    const isDisabled = !hasNextPage(page, totalCount, pageSize)
 
     const handleClick = useCallback(() => {
-      setState(goToNextPage(state))
-    }, [state, setState])
+      send('GO_NEXT')
+    }, [send])
 
     return (
       <button
@@ -256,18 +256,18 @@ export const Pages = forwardRef<HTMLUListElement, PagesProps>(
     { siblingsCount = 1, action, ellipsis = '...', ...rest },
     forwardedRef,
   ) => {
-    const { state, setState } = usePaginationContext()
+    const { page, pageSize, totalCount, send } = usePaginationContext()
 
-    const pageItems = getPageItems(state, siblingsCount)
+    const pageItems = getPageItems(page, totalCount, pageSize, siblingsCount)
 
     const handlePageClick = useCallback(
-      (page: number) => {
-        setState(goToPage(state, page))
+      (targetPage: number) => {
+        send('GO_TO_PAGE', { page: targetPage })
         if (action.type === 'button') {
-          action.onPageClick?.(page)
+          action.onPageClick?.(targetPage)
         }
       },
-      [state, setState, action],
+      [send, action],
     )
 
     return (
@@ -285,7 +285,7 @@ export const Pages = forwardRef<HTMLUListElement, PagesProps>(
             )
           }
 
-          const isCurrent = state.page === item.page
+          const isCurrent = page === item.page
 
           if (action.type === 'link') {
             return (

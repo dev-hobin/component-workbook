@@ -4,38 +4,25 @@ import React, {
   useContext,
   useEffect,
   useId,
-  useLayoutEffect,
+  useMemo,
   useRef,
   type ComponentPropsWithoutRef,
 } from 'react'
 import { useControllableState } from '@radix-ui/react-use-controllable-state'
+import { useEventMachine, type Send } from '../../../lib/event-machine'
 
 import {
-  deriveStatus,
-  getEffectsOnStatusChange,
-  handleKeyboardAction,
-  handleInputChange,
-  handleInputFocus,
-  handleInputBlur,
-  handleOutsideClick,
-  handleOptionClick,
-  handleOptionHover,
+  comboboxMachine,
   filterOptions,
   isHighlighted,
   isSelected,
   getDisplayValue,
-  togglePopup,
-  type ComboboxState,
-  type ComboboxStatus,
-  type ComboboxEffect,
-  type ComboboxContext as ComboboxContextType,
+  type ComboboxContext as MachineContext,
+  type ComboboxEvents,
   type ComboboxOption,
   type OptionId,
   type AutocompleteMode,
-  type KeyboardAction,
-} from './core'
-import { useLatestRef } from '../../hooks/useLatestRef'
-import { useStableCallback } from '../../hooks/useStableCallback'
+} from './machine'
 import { composeRefs } from '../../utils/composeRefs'
 import { mergeProps } from '../../utils/mergeProps'
 
@@ -62,18 +49,18 @@ type ComboboxMeta = {
 
 type ComboboxContextValue = {
   comboboxId: string
-  state: ComboboxState
-  setState: React.Dispatch<React.SetStateAction<ComboboxState>>
-  context: ComboboxContextType
+  isOpen: boolean
+  inputValue: string
+  selectedValue: string | null
+  highlightedOptionId: OptionId | null
+  autocompleteText: string | null
   store: ComponentStore<ComboboxRole, ComboboxMeta>
-  runEffect: (effect: ComboboxEffect) => void
-  // 필터링된 옵션 (Option들이 등록되면 업데이트)
+  send: Send<ComboboxEvents>
+  autocomplete: AutocompleteMode
   options: ComboboxOption[]
   filteredOptions: ComboboxOption[]
   registerOption: (option: ComboboxOption) => void
   unregisterOption: (optionId: OptionId) => void
-  // 선택 콜백
-  onSelect?: (value: string) => void
 }
 
 // ============================================
@@ -89,6 +76,11 @@ function useComboboxContext() {
   }
   return ctx
 }
+
+// Input ref를 Root에서 관리하기 위한 context
+const InputRefContext = createContext<
+  ((el: HTMLInputElement | null) => void) | null
+>(null)
 
 // ============================================
 // Root
@@ -150,8 +142,10 @@ function RootInner({
 
   // Options 관리
   const [options, setOptions] = React.useState<ComboboxOption[]>([])
+  const optionsRef = useRef<ComboboxOption[]>([])
+  optionsRef.current = options
 
-  const registerOption = (option: ComboboxOption) => {
+  const registerOption = React.useCallback((option: ComboboxOption) => {
     setOptions((prev) => {
       const exists = prev.some((o) => o.id === option.id)
       if (exists) {
@@ -159,11 +153,11 @@ function RootInner({
       }
       return [...prev, option]
     })
-  }
+  }, [])
 
-  const unregisterOption = (optionId: OptionId) => {
+  const unregisterOption = React.useCallback((optionId: OptionId) => {
     setOptions((prev) => prev.filter((o) => o.id !== optionId))
-  }
+  }, [])
 
   // Controllable state
   const [selectedValue, setSelectedValue] = useControllableState({
@@ -184,166 +178,131 @@ function RootInner({
     defaultProp: defaultOpen,
   })
 
-  // Core state 구성
-  const state: ComboboxState = {
-    isOpen: isOpen ?? false,
-    inputValue: inputValue ?? '',
-    selectedValue: selectedValue ?? null,
-    highlightedOptionId: null,
-    autocompleteText: null,
-  }
-
-  // 내부 상태 (highlightedOptionId, autocompleteText)
+  // 내부 상태
   const [highlightedOptionId, setHighlightedOptionId] =
     React.useState<OptionId | null>(null)
   const [autocompleteText, setAutocompleteText] = React.useState<string | null>(
     null,
   )
 
-  // 전체 state (controllable + internal)
-  const fullState: ComboboxState = {
-    ...state,
-    highlightedOptionId,
-    autocompleteText,
-  }
-
-  const fullStateRef = useLatestRef(fullState)
-
-  const setState = useStableCallback(
-    (action: React.SetStateAction<ComboboxState>) => {
-      const currentState = fullStateRef.current
-      const nextState =
-        typeof action === 'function' ? action(currentState) : action
-
-      setIsOpen(nextState.isOpen)
-      setInputValue(nextState.inputValue)
-      setSelectedValue(nextState.selectedValue)
-      setHighlightedOptionId(nextState.highlightedOptionId)
-      setAutocompleteText(nextState.autocompleteText)
-    },
-  )
-
-  // Context 설정
-  const context: ComboboxContextType = {
-    autocomplete,
-    openOnFocus,
-    closeOnSelect,
-    showAllOnEmpty,
-    clearOnSelect,
-    loop,
-  }
-
-  // 필터링된 옵션
-  const filteredOptions = filterOptions(options, fullState.inputValue, context)
-
-  // Status 파생
-  const status: ComboboxStatus = deriveStatus(fullState)
-  const prevStatusRef = useRef<ComboboxStatus>('idle')
-
-  // Effect refs
+  // Input ref
   const inputRef = useRef<HTMLInputElement | null>(null)
 
-  // Outside click handler (runEffect보다 먼저 정의)
-  const handleOutsideClickListener = useStableCallback(
-    (event: PointerEvent) => {
-      const inputEl = store.getElement(comboboxId, 'input')
-      const listboxEl = store.getElement(comboboxId, 'listbox')
-      const triggerEl = store.getElement(comboboxId, 'trigger')
-      const target = event.target as Node
+  // 필터링된 옵션
+  const filteredOptions = useMemo(
+    () => filterOptions(options, inputValue ?? '', autocomplete, showAllOnEmpty),
+    [options, inputValue, autocomplete, showAllOnEmpty],
+  )
+  const filteredOptionsRef = useRef<ComboboxOption[]>([])
+  filteredOptionsRef.current = filteredOptions
 
-      const isInsideInput = inputEl?.contains(target)
-      const isInsideListbox = listboxEl?.contains(target)
-      const isInsideTrigger = triggerEl?.contains(target)
+  // Machine context
+  const machineCtx: MachineContext = useMemo(
+    () => ({
+      // State
+      isOpen: isOpen ?? false,
+      inputValue: inputValue ?? '',
+      selectedValue: selectedValue ?? null,
+      highlightedOptionId,
+      autocompleteText,
 
-      if (!isInsideInput && !isInsideListbox && !isInsideTrigger) {
-        const nextState = handleOutsideClick(fullStateRef.current)
-        setState(nextState)
-      }
-    },
+      // Setters
+      setOpen: (open) => setIsOpen(open),
+      setInputValue: (value) => setInputValue(value),
+      setSelectedValue: (value) => setSelectedValue(value),
+      setHighlightedOptionId,
+      setAutocompleteText,
+
+      // Options
+      autocomplete,
+      openOnFocus,
+      closeOnSelect,
+      showAllOnEmpty,
+      clearOnSelect,
+      loop,
+
+      // Lazy getters
+      getFilteredOptions: () => filteredOptionsRef.current,
+      getOptionById: (id) => optionsRef.current.find((o) => o.id === id),
+
+      // DOM helpers
+      getOptionElement: (optionId) => store.getElement(optionId, 'option'),
+      getInputElement: () => inputRef.current,
+      getAllElements: () => {
+        const elements = new Map<string, HTMLElement>()
+        const input = store.getElement(comboboxId, 'input')
+        const listbox = store.getElement(comboboxId, 'listbox')
+        const trigger = store.getElement(comboboxId, 'trigger')
+        if (input) elements.set('input', input)
+        if (listbox) elements.set('listbox', listbox)
+        if (trigger) elements.set('trigger', trigger)
+        return elements
+      },
+
+      // Callbacks
+      notifySelect: (value) => onSelect?.(value),
+    }),
+    [
+      isOpen,
+      inputValue,
+      selectedValue,
+      highlightedOptionId,
+      autocompleteText,
+      setIsOpen,
+      setInputValue,
+      setSelectedValue,
+      autocomplete,
+      openOnFocus,
+      closeOnSelect,
+      showAllOnEmpty,
+      clearOnSelect,
+      loop,
+      store,
+      comboboxId,
+      onSelect,
+    ],
   )
 
-  // runEffect
-  const runEffect = useStableCallback((effect: ComboboxEffect) => {
-    switch (effect.type) {
-      case 'ADD_OUTSIDE_CLICK_LISTENER':
-        document.addEventListener(
-          'pointerdown',
-          handleOutsideClickListener,
-          true,
-        )
-        break
-      case 'REMOVE_OUTSIDE_CLICK_LISTENER':
-        document.removeEventListener(
-          'pointerdown',
-          handleOutsideClickListener,
-          true,
-        )
-        break
-      case 'ADD_KEYBOARD_LISTENER':
-        // Input에서 직접 처리하므로 document 리스너 불필요
-        break
-      case 'REMOVE_KEYBOARD_LISTENER':
-        break
-      case 'FOCUS_INPUT':
-        inputRef.current?.focus()
-        break
-      case 'SET_INPUT_SELECTION':
-        if (inputRef.current) {
-          inputRef.current.setSelectionRange(effect.start, effect.end)
-        }
-        break
-      case 'UPDATE_ACTIVE_DESCENDANT':
-        // Input의 aria-activedescendant 업데이트는 React에서 처리
-        break
-      case 'SCROLL_OPTION_INTO_VIEW': {
-        const optionEl = store.getElement(effect.optionId, 'option')
-        optionEl?.scrollIntoView({ block: 'nearest' })
-        break
-      }
-      case 'NOTIFY_SELECT':
-        onSelect?.(effect.value)
-        break
-    }
-  })
+  // Event machine
+  const send = useEventMachine(comboboxMachine, machineCtx)
 
-  // Status 전환 시 Effect 실행
-  useLayoutEffect(() => {
-    const prevStatus = prevStatusRef.current
-    const effects = getEffectsOnStatusChange(prevStatus, status)
-    effects.forEach(runEffect)
-    prevStatusRef.current = status
-  }, [status, runEffect])
-
-  // 언마운트 시 리소스 정리
-  useEffect(() => {
-    return () => {
-      document.removeEventListener(
-        'pointerdown',
-        handleOutsideClickListener,
-        true,
-      )
-      prevStatusRef.current = 'idle'
-    }
-  }, [handleOutsideClickListener])
-
-  // Input ref 등록
-  const setInputRef = (el: HTMLInputElement | null) => {
+  // Input ref setter
+  const setInputRef = React.useCallback((el: HTMLInputElement | null) => {
     inputRef.current = el
-  }
+  }, [])
 
-  const contextValue: ComboboxContextValue = {
-    comboboxId,
-    state: fullState,
-    setState,
-    context,
-    store,
-    runEffect,
-    options,
-    filteredOptions,
-    registerOption,
-    unregisterOption,
-    onSelect,
-  }
+  const contextValue: ComboboxContextValue = useMemo(
+    () => ({
+      comboboxId,
+      isOpen: isOpen ?? false,
+      inputValue: inputValue ?? '',
+      selectedValue: selectedValue ?? null,
+      highlightedOptionId,
+      autocompleteText,
+      store,
+      send,
+      autocomplete,
+      options,
+      filteredOptions,
+      registerOption,
+      unregisterOption,
+    }),
+    [
+      comboboxId,
+      isOpen,
+      inputValue,
+      selectedValue,
+      highlightedOptionId,
+      autocompleteText,
+      store,
+      send,
+      autocomplete,
+      options,
+      filteredOptions,
+      registerOption,
+      unregisterOption,
+    ],
+  )
 
   return (
     <ComboboxContext.Provider value={contextValue}>
@@ -353,11 +312,6 @@ function RootInner({
     </ComboboxContext.Provider>
   )
 }
-
-// Input ref를 Root에서 관리하기 위한 context
-const InputRefContext = createContext<
-  ((el: HTMLInputElement | null) => void) | null
->(null)
 
 // ============================================
 // Label
@@ -374,7 +328,6 @@ export const Label = forwardRef<HTMLLabelElement, LabelProps>(
       id: comboboxId,
     })
 
-    // Input의 domId 구독
     const inputDomId = `input::${comboboxId}`
 
     return (
@@ -407,12 +360,13 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
   ({ ...rest }, forwardedRef) => {
     const {
       comboboxId,
-      state,
-      setState,
-      context,
+      isOpen,
+      inputValue,
+      highlightedOptionId,
+      autocompleteText,
       store,
-      runEffect,
-      filteredOptions,
+      send,
+      autocomplete,
     } = useComboboxContext()
 
     const setInputRef = useContext(InputRefContext)
@@ -429,76 +383,63 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
     )
 
     // 하이라이트된 옵션의 DOM ID
-    const activeDescendantId = state.highlightedOptionId
-      ? `option::${state.highlightedOptionId}`
+    const activeDescendantId = highlightedOptionId
+      ? `option::${highlightedOptionId}`
       : undefined
 
     // 키보드 핸들러
     const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
-      let action: KeyboardAction | null = null
-
       switch (event.key) {
         case 'ArrowDown':
+          event.preventDefault()
           if (event.altKey) {
-            action = { type: 'ALT_ARROW_DOWN' }
+            send('KEY_ALT_ARROW_DOWN')
           } else {
-            action = { type: 'ARROW_DOWN' }
+            send('KEY_ARROW_DOWN')
           }
           break
         case 'ArrowUp':
-          action = { type: 'ARROW_UP' }
+          event.preventDefault()
+          send('KEY_ARROW_UP')
           break
         case 'Enter':
-          action = { type: 'ENTER' }
+          if (isOpen) {
+            event.preventDefault()
+          }
+          send('KEY_ENTER')
           break
         case 'Escape':
-          action = { type: 'ESCAPE' }
+          if (isOpen) {
+            event.preventDefault()
+          }
+          send('KEY_ESCAPE')
           break
         case 'Home':
-          if (state.isOpen) {
-            action = { type: 'HOME' }
+          if (isOpen) {
+            event.preventDefault()
+            send('KEY_HOME')
           }
           break
         case 'End':
-          if (state.isOpen) {
-            action = { type: 'END' }
+          if (isOpen) {
+            event.preventDefault()
+            send('KEY_END')
           }
           break
         case 'Tab':
-          action = { type: 'TAB' }
+          send('KEY_TAB')
           break
-      }
-
-      if (action) {
-        const result = handleKeyboardAction(
-          state,
-          action,
-          filteredOptions,
-          context,
-        )
-
-        if (result.preventDefault) {
-          event.preventDefault()
-        }
-
-        setState(result.state)
-        result.effects.forEach(runEffect)
       }
     }
 
     // 입력 핸들러
     const handleChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-      const value = event.target.value
-      const result = handleInputChange(state, value, filteredOptions, context)
-
-      setState(result.state)
-      result.effects.forEach(runEffect)
+      send('INPUT_CHANGE', { value: event.target.value })
     }
 
     // 포커스 핸들러
     const handleFocus = () => {
-      const nextState = handleInputFocus(state, filteredOptions, context)
-      setState(nextState)
+      send('INPUT_FOCUS')
     }
 
     // 블러 핸들러
@@ -516,12 +457,11 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
         return
       }
 
-      const nextState = handleInputBlur(state, context)
-      setState(nextState)
+      send('INPUT_BLUR')
     }
 
     // 표시할 값
-    const displayValue = getDisplayValue(state)
+    const displayValue = getDisplayValue(inputValue, autocompleteText)
 
     return (
       <input
@@ -531,9 +471,8 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
             type: 'text',
             id: domId,
             role: 'combobox',
-            'aria-autocomplete':
-              context.autocomplete === 'none' ? 'none' : 'list',
-            'aria-expanded': state.isOpen,
+            'aria-autocomplete': autocomplete === 'none' ? 'none' : 'list',
+            'aria-expanded': isOpen,
             'aria-controls': listboxDomId ?? undefined,
             'aria-activedescendant': activeDescendantId,
             'aria-haspopup': 'listbox',
@@ -558,7 +497,7 @@ export type TriggerProps = ComponentPropsWithoutRef<'button'>
 
 export const Trigger = forwardRef<HTMLButtonElement, TriggerProps>(
   ({ children, ...rest }, forwardedRef) => {
-    const { comboboxId, state, setState, store } = useComboboxContext()
+    const { comboboxId, isOpen, store, send } = useComboboxContext()
 
     const { ref, domId } = useNode<ComboboxRole>({
       role: 'trigger',
@@ -566,7 +505,7 @@ export const Trigger = forwardRef<HTMLButtonElement, TriggerProps>(
     })
 
     const handleClick = () => {
-      setState(togglePopup(state))
+      send('TOGGLE')
       // 토글 후 input으로 포커스
       const inputEl = store.getElement(comboboxId, 'input')
       inputEl?.focus()
@@ -580,10 +519,8 @@ export const Trigger = forwardRef<HTMLButtonElement, TriggerProps>(
             type: 'button',
             id: domId,
             tabIndex: -1,
-            'aria-label': state.isOpen
-              ? 'Close suggestions'
-              : 'Show suggestions',
-            'aria-expanded': state.isOpen,
+            'aria-label': isOpen ? 'Close suggestions' : 'Show suggestions',
+            'aria-expanded': isOpen,
             onClick: handleClick,
           },
           rest,
@@ -603,7 +540,7 @@ export type ListboxProps = ComponentPropsWithoutRef<'ul'>
 
 export const Listbox = forwardRef<HTMLUListElement, ListboxProps>(
   ({ children, ...rest }, forwardedRef) => {
-    const { comboboxId, state, store } = useComboboxContext()
+    const { comboboxId, isOpen, store } = useComboboxContext()
 
     const { ref, domId } = useNode<ComboboxRole>({
       role: 'listbox',
@@ -616,7 +553,7 @@ export const Listbox = forwardRef<HTMLUListElement, ListboxProps>(
       (s) => s.getElement(comboboxId, 'label')?.id || null,
     )
 
-    if (!state.isOpen) {
+    if (!isOpen) {
       return null
     }
 
@@ -651,10 +588,9 @@ export type OptionProps = {
 export const Option = forwardRef<HTMLLIElement, OptionProps>(
   ({ children, value, label, disabled = false, ...rest }, forwardedRef) => {
     const {
-      state,
-      setState,
-      context,
-      runEffect,
+      selectedValue,
+      highlightedOptionId,
+      send,
       registerOption,
       unregisterOption,
     } = useComboboxContext()
@@ -679,14 +615,7 @@ export const Option = forwardRef<HTMLLIElement, OptionProps>(
       }
       registerOption(option)
       return () => unregisterOption(optionId)
-    }, [
-      optionId,
-      value,
-      displayLabel,
-      disabled,
-      registerOption,
-      unregisterOption,
-    ])
+    }, [optionId, value, displayLabel, disabled, registerOption, unregisterOption])
 
     const option: ComboboxOption = {
       id: optionId,
@@ -695,21 +624,17 @@ export const Option = forwardRef<HTMLLIElement, OptionProps>(
       disabled,
     }
 
-    const highlighted = isHighlighted(state, optionId)
-    const selected = isSelected(state, option)
+    const highlighted = isHighlighted(highlightedOptionId, optionId)
+    const selected = isSelected(selectedValue, option)
 
     const handleClick = () => {
       if (disabled) return
-      const result = handleOptionClick(state, option, context)
-      setState(result.state)
-      result.effects.forEach(runEffect)
+      send('OPTION_CLICK', { optionId })
     }
 
     const handleMouseEnter = () => {
       if (disabled) return
-      const nextState = handleOptionHover(state, optionId)
-      setState(nextState)
-      runEffect({ type: 'UPDATE_ACTIVE_DESCENDANT', optionId })
+      send('OPTION_HOVER', { optionId })
     }
 
     // mousedown에서 preventDefault로 input blur 방지
@@ -750,9 +675,9 @@ export type NoResultsProps = {
 }
 
 export function NoResults({ children }: NoResultsProps) {
-  const { state, filteredOptions } = useComboboxContext()
+  const { isOpen, filteredOptions } = useComboboxContext()
 
-  if (!state.isOpen || filteredOptions.length > 0) {
+  if (!isOpen || filteredOptions.length > 0) {
     return null
   }
 

@@ -1,7 +1,7 @@
-import { ComboboxExamples } from './components/combobox/examples'
+import { ControlledExample } from './components/tabs/examples'
 
 function App() {
-  return <ComboboxExamples />
+  return <ControlledExample />
 }
 
 export default App

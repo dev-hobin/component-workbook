@@ -3,21 +3,18 @@ import React, {
   forwardRef,
   useCallback,
   useContext,
-  useEffect,
   useMemo,
   type ComponentPropsWithoutRef,
 } from 'react'
 import { useControllableState } from '@radix-ui/react-use-controllable-state'
+import { useEventMachine, type Send } from '../../../lib/event-machine'
 
 import {
-  expand,
-  collapse,
-  expandOnly,
-  setFocus,
+  accordionMachine,
   isExpanded,
-  type AccordionState,
-  type ItemId,
-} from './core'
+  type AccordionContext,
+  type AccordionEvents,
+} from './machine'
 import { composeRefs } from '../../utils/composeRefs'
 import { mergeProps } from '../../utils/mergeProps'
 
@@ -25,7 +22,7 @@ import {
   ComponentStoreProvider,
   useComponentStore,
 } from '../../shell/use-component-store'
-import { ParentProvider, useParentId } from '../../shell/use-parent-context'
+import { ParentProvider } from '../../shell/use-parent-context'
 import { useNode } from '../../shell/use-node'
 import { useComponentSubscribe } from '../../shell/use-component-subscribe'
 import type { ComponentStore } from '../../core/component-store'
@@ -41,17 +38,16 @@ type AccordionMeta = {
 }
 
 type AccordionContextValue = {
-  state: AccordionState
-  setState: React.Dispatch<React.SetStateAction<AccordionState>>
+  expandedIds: Set<string>
+  focusedId: string | null
   store: ComponentStore<AccordionRole, AccordionMeta>
-  multiple: boolean
-  collapsible: boolean
+  send: Send<AccordionEvents>
   disabled: boolean
   animationDuration: string
 }
 
 type ItemContextValue = {
-  itemId: ItemId
+  itemId: string
   isDisabled: boolean
 }
 
@@ -73,7 +69,9 @@ function useAccordionContext() {
 function useItemContext() {
   const context = useContext(ItemContext)
   if (!context) {
-    throw new Error('Accordion.Trigger/Panel은 Accordion.Item 안에서 사용해야 합니다.')
+    throw new Error(
+      'Accordion.Trigger/Panel은 Accordion.Item 안에서 사용해야 합니다.',
+    )
   }
   return context
 }
@@ -118,100 +116,96 @@ const RootInner = forwardRef<HTMLDivElement, RootProps>(
   ) => {
     const { store } = useComponentStore<AccordionRole, AccordionMeta>()
 
+    // Controllable expanded state
     const [expandedArray, setExpandedArray] = useControllableState({
       prop: valueProp,
       onChange: onValueChange,
       defaultProp: defaultValue ?? [],
     })
 
-    const [focusedId, setFocusedId] = React.useState<ItemId | null>(null)
-
-    const state: AccordionState = useMemo(
-      () => ({
-        expandedIds: new Set(expandedArray),
-        focusedId,
-      }),
-      [expandedArray, focusedId],
+    const expandedIds = useMemo(
+      () => new Set(expandedArray),
+      [expandedArray],
     )
 
-    const setState: React.Dispatch<React.SetStateAction<AccordionState>> =
-      useCallback(
-        (action) => {
-          const nextState = typeof action === 'function' ? action(state) : action
-          if (nextState.expandedIds !== state.expandedIds) {
-            setExpandedArray(Array.from(nextState.expandedIds))
-          }
-          if (nextState.focusedId !== state.focusedId) {
-            setFocusedId(nextState.focusedId)
-          }
-        },
-        [state, setExpandedArray],
-      )
-
-    // 키보드 네비게이션
-    const handleKeyDown = useCallback(
-      (e: React.KeyboardEvent) => {
-        const items = store.getNodesByRole('item')
-        const enabledItems = items.filter((item) => !item.meta.disabled)
-        if (enabledItems.length === 0) return
-
-        const currentIndex = enabledItems.findIndex(
-          (item) => item.id === state.focusedId,
-        )
-
-        switch (e.key) {
-          case 'ArrowDown': {
-            e.preventDefault()
-            const nextIndex =
-              currentIndex === -1 ? 0 : (currentIndex + 1) % enabledItems.length
-            const nextItem = enabledItems[nextIndex]
-            setState(setFocus(state, nextItem.id))
-            break
-          }
-          case 'ArrowUp': {
-            e.preventDefault()
-            const prevIndex =
-              currentIndex === -1
-                ? enabledItems.length - 1
-                : (currentIndex - 1 + enabledItems.length) % enabledItems.length
-            const prevItem = enabledItems[prevIndex]
-            setState(setFocus(state, prevItem.id))
-            break
-          }
-          case 'Home': {
-            e.preventDefault()
-            setState(setFocus(state, enabledItems[0].id))
-            break
-          }
-          case 'End': {
-            e.preventDefault()
-            setState(setFocus(state, enabledItems[enabledItems.length - 1].id))
-            break
-          }
-        }
+    const setExpandedIds = useCallback(
+      (ids: Set<string>) => {
+        setExpandedArray(Array.from(ids))
       },
-      [store, state, setState],
+      [setExpandedArray],
     )
 
-    // 포커스 동기화
-    useEffect(() => {
-      if (state.focusedId) {
-        const triggerEl = store.getElement(state.focusedId, 'trigger')
-        triggerEl?.focus()
-      }
-    }, [state.focusedId, store])
+    // Internal focused state
+    const [focusedId, setFocusedId] = React.useState<string | null>(null)
 
-    const contextValue = useMemo<AccordionContextValue>(
+    // Build context for machine
+    const machineCtx: AccordionContext = useMemo(
       () => ({
-        state,
-        setState,
-        store,
+        expandedIds,
+        focusedId,
+        setExpandedIds,
+        setFocusedId,
         multiple,
         collapsible,
         disabled,
+        // Lazy evaluation - 액션에서 호출 시점에 계산
+        getEnabledItemIds: () => {
+          const items = store.getNodesByRole('item')
+          return items
+            .filter((item) => !item.meta.disabled)
+            .map((item) => item.id)
+        },
+        getTriggerElement: (itemId) => store.getElement(itemId, 'trigger'),
+      }),
+      [
+        expandedIds,
+        focusedId,
+        setExpandedIds,
+        multiple,
+        collapsible,
+        disabled,
+        store,
+      ],
+    )
+
+    // Event machine
+    const send = useEventMachine(accordionMachine, machineCtx)
+
+    // Keyboard handler
+    const handleKeyDown = useCallback(
+      (e: React.KeyboardEvent) => {
+        switch (e.key) {
+          case 'ArrowDown':
+            e.preventDefault()
+            send('FOCUS_NEXT')
+            break
+          case 'ArrowUp':
+            e.preventDefault()
+            send('FOCUS_PREV')
+            break
+          case 'Home':
+            e.preventDefault()
+            send('FOCUS_FIRST')
+            break
+          case 'End':
+            e.preventDefault()
+            send('FOCUS_LAST')
+            break
+        }
+      },
+      [send],
+    )
+
+    const contextValue = useMemo<AccordionContextValue>(
+      () => ({
+        expandedIds,
+        focusedId,
+        store,
+        send,
+        disabled,
         animationDuration,
       }),
-      [state, setState, store, multiple, collapsible, disabled, animationDuration],
+      [expandedIds, focusedId, store, send, disabled, animationDuration],
     )
 
     return (
@@ -244,7 +238,7 @@ export type ItemProps = {
 
 export const Item = forwardRef<HTMLElement, ItemProps>(
   ({ children, value: itemId, disabled = false, ...rest }, forwardedRef) => {
-    const { state, disabled: rootDisabled } = useAccordionContext()
+    const { expandedIds, disabled: rootDisabled } = useAccordionContext()
 
     const { ref } = useNode<AccordionRole, AccordionMeta>({
       role: 'item',
@@ -253,7 +247,7 @@ export const Item = forwardRef<HTMLElement, ItemProps>(
     })
 
     const isItemDisabled = rootDisabled || disabled
-    const isItemExpanded = isExpanded(state, itemId)
+    const isItemExpanded = isExpanded(expandedIds, itemId)
 
     const itemContextValue = useMemo<ItemContextValue>(
       () => ({
@@ -292,7 +286,7 @@ export type TriggerProps = ComponentPropsWithoutRef<'button'>
 
 export const Trigger = forwardRef<HTMLButtonElement, TriggerProps>(
   ({ children, ...rest }, forwardedRef) => {
-    const { state, setState, store, multiple, collapsible, animationDuration } =
+    const { expandedIds, focusedId, store, send, animationDuration } =
       useAccordionContext()
     const { itemId, isDisabled } = useItemContext()
 
@@ -307,39 +301,17 @@ export const Trigger = forwardRef<HTMLButtonElement, TriggerProps>(
       (s) => s.getElement(itemId, 'panel')?.id || null,
     )
 
-    const isItemExpanded = isExpanded(state, itemId)
-    const isFocused = state.focusedId === itemId
+    const isItemExpanded = isExpanded(expandedIds, itemId)
+    const isFocused = focusedId === itemId
 
     const handleClick = useCallback(() => {
-      if (isDisabled) return
-
-      if (isItemExpanded) {
-        if (!collapsible && !multiple) {
-          return
-        }
-        setState(collapse(state, itemId))
-      } else {
-        if (multiple) {
-          setState(expand(state, itemId))
-        } else {
-          setState(expandOnly(state, itemId))
-        }
-      }
-    }, [
-      isDisabled,
-      isItemExpanded,
-      collapsible,
-      multiple,
-      state,
-      setState,
-      itemId,
-    ])
+      send('TOGGLE', { itemId })
+    }, [send, itemId])
 
     const handleFocus = useCallback(() => {
-      if (state.focusedId !== itemId) {
-        setState(setFocus(state, itemId))
-      }
-    }, [state, setState, itemId])
+      // Focus 상태는 machine의 effect가 아닌 React state로 관리
+      // (machine effect는 focusedId → DOM focus 동기화만 담당)
+    }, [])
 
     return (
       <h3
@@ -382,7 +354,7 @@ export type PanelProps = ComponentPropsWithoutRef<'div'>
 
 export const Panel = forwardRef<HTMLDivElement, PanelProps>(
   ({ children, ...rest }, forwardedRef) => {
-    const { state, store, animationDuration } = useAccordionContext()
+    const { expandedIds, store, animationDuration } = useAccordionContext()
     const { itemId, isDisabled } = useItemContext()
 
     const { ref, domId } = useNode<AccordionRole, AccordionMeta>({
@@ -396,7 +368,7 @@ export const Panel = forwardRef<HTMLDivElement, PanelProps>(
       (s) => s.getElement(itemId, 'trigger')?.id || null,
     )
 
-    const isItemExpanded = isExpanded(state, itemId)
+    const isItemExpanded = isExpanded(expandedIds, itemId)
 
     return (
       <div
