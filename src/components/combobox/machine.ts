@@ -1,4 +1,4 @@
-import type { EventMachine } from '../../../lib/event-machine'
+import { createEventMachine } from '../../event-machine'
 
 // ============================================
 // Types
@@ -21,31 +21,31 @@ export type ComboboxOption = {
 
 export type ComboboxEvents = {
   // Popup
-  OPEN: void
-  CLOSE: void
-  TOGGLE: void
+  OPEN: undefined
+  CLOSE: undefined
+  TOGGLE: undefined
 
   // Input
   INPUT_CHANGE: { value: string }
-  INPUT_FOCUS: void
-  INPUT_BLUR: void
+  INPUT_FOCUS: undefined
+  INPUT_BLUR: undefined
 
   // Keyboard
-  KEY_ARROW_DOWN: void
-  KEY_ARROW_UP: void
-  KEY_ALT_ARROW_DOWN: void
-  KEY_ENTER: void
-  KEY_ESCAPE: void
-  KEY_HOME: void
-  KEY_END: void
-  KEY_TAB: void
+  KEY_ARROW_DOWN: undefined
+  KEY_ARROW_UP: undefined
+  KEY_ALT_ARROW_DOWN: undefined
+  KEY_ENTER: undefined
+  KEY_ESCAPE: undefined
+  KEY_HOME: undefined
+  KEY_END: undefined
+  KEY_TAB: undefined
 
   // Option
   OPTION_CLICK: { optionId: OptionId }
   OPTION_HOVER: { optionId: OptionId }
 
   // Outside
-  OUTSIDE_CLICK: void
+  OUTSIDE_CLICK: undefined
 }
 
 // ============================================
@@ -92,7 +92,32 @@ export type ComboboxContext = {
 // Machine
 // ============================================
 
-export const comboboxMachine: EventMachine<ComboboxContext, ComboboxEvents> = {
+type ComboboxActions =
+  | 'noop'
+  | 'open'
+  | 'close'
+  | 'toggle'
+  | 'openAndHighlightFirst'
+  | 'openAndHighlightLast'
+  | 'openAndHighlightSelected'
+  | 'highlightFirst'
+  | 'highlightLast'
+  | 'highlightNext'
+  | 'highlightPrev'
+  | 'highlightOption'
+  | 'selectHighlighted'
+  | 'selectOption'
+  | 'restoreSelectedValue'
+  | 'acceptAutocomplete'
+  | 'handleInputChange'
+  | 'handleInputBlur'
+
+export const comboboxMachine = createEventMachine<
+  ComboboxContext,
+  ComboboxEvents,
+  Record<string, never>,
+  ComboboxActions
+>({
   on: {
     OPEN: 'open',
     CLOSE: 'close',
@@ -345,8 +370,8 @@ export const comboboxMachine: EventMachine<ComboboxContext, ComboboxEvents> = {
       ctx.notifySelect(option.value)
     },
 
-    selectOption: (ctx, payload) => {
-      const { optionId } = payload!
+    selectOption: (ctx, payload: { optionId: OptionId }) => {
+      const { optionId } = payload
       const option = ctx.getOptionById(optionId)
       if (!option || option.disabled) return
 
@@ -378,8 +403,8 @@ export const comboboxMachine: EventMachine<ComboboxContext, ComboboxEvents> = {
       ctx.setAutocompleteText(null)
     },
 
-    handleInputChange: (ctx, payload) => {
-      const { value } = payload!
+    handleInputChange: (ctx, payload: { value: string }) => {
+      const { value } = payload
 
       // 1. 입력값 업데이트 + popup 열기
       ctx.setInputValue(value)
@@ -440,7 +465,7 @@ export const comboboxMachine: EventMachine<ComboboxContext, ComboboxEvents> = {
       ctx.setHighlightedOptionId(null)
     },
   },
-}
+})
 
 // ============================================
 // Query Helpers

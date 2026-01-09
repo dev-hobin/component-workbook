@@ -46,9 +46,9 @@ Located in `src/core/` and `src/shell/`, this system tracks component nodes acro
 - `mergeProps`: Merges props with special handling for event handlers (compose), className (concat), and style (merge)
 - `composeEventHandlers`: Chains event handlers, internal runs first
 
-### Event Machine (lib/event-machine)
+### Event Machine (src/event-machine)
 
-An experimental stateless declarative event handler pattern. Defines `on` (event handlers), `effects` (value watchers), `always` (auto-evaluated rules), and `actions`. Used via `useEventMachine` hook.
+A stateless declarative event handler pattern. Defines `on` (event handlers), `effects` (value watchers), `computed` (derived values), and `actions`. Used via `useEventMachine` hook which returns `{ send, computed }`.
 
 ## Key Dependencies
 

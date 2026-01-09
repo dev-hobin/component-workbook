@@ -1,15 +1,14 @@
 import React, {
   createContext,
   forwardRef,
-  useCallback,
   useContext,
   useId,
-  useMemo,
+  useState,
   useRef,
   type ComponentPropsWithoutRef,
 } from 'react'
 import { useControllableState } from '@radix-ui/react-use-controllable-state'
-import { useEventMachine, type Send } from '../../../lib/event-machine'
+import { useEventMachine, type Send } from '../../event-machine'
 
 import {
   tabsMachine,
@@ -105,77 +104,68 @@ const RootInner = forwardRef<HTMLDivElement, RootProps>(
       defaultProp: defaultValue,
     })
 
-    const [focusedValue, setFocusedValue] = React.useState<TabValue | null>(null)
+    const [focusedValue, setFocusedValue] = useState<TabValue | null>(null)
 
     // Ref for lazy getter
     const storeRef = useRef(store)
     storeRef.current = store
 
     // Machine context
-    const machineCtx: MachineContext = useMemo(
-      () => ({
-        activeValue: activeValue ?? null,
-        focusedValue,
-        setActiveValue: (value) => setActiveValue(value ?? undefined),
-        setFocusedValue,
-        getEnabledTabs: () => {
-          const tabs = storeRef.current.getNodesByRole('tab')
-          return tabs
-            .filter((tab) => !tab.meta.disabled)
-            .map((tab) => ({ value: tab.meta.value! }))
-        },
-        getTabElement: (value) =>
-          storeRef.current.getElement(String(value), 'tab'),
-      }),
-      [activeValue, focusedValue, setActiveValue],
-    )
+    const machineCtx: MachineContext = {
+      activeValue: activeValue ?? null,
+      focusedValue,
+      setActiveValue: (value) => setActiveValue(value ?? undefined),
+      setFocusedValue,
+      getEnabledTabs: () => {
+        const tabs = storeRef.current.getNodesByRole('tab')
+        return tabs
+          .filter((tab) => !tab.meta.disabled)
+          .map((tab) => ({ value: tab.meta.value! }))
+      },
+      getTabElement: (value) =>
+        storeRef.current.getElement(String(value), 'tab'),
+    }
 
     // Event machine
-    const send = useEventMachine(tabsMachine, machineCtx)
+    const { send } = useEventMachine(tabsMachine, machineCtx)
 
     // 키보드 네비게이션
-    const handleKeyDown = useCallback(
-      (event: React.KeyboardEvent) => {
-        if (focusedValue === null) return
+    const handleKeyDown = (event: React.KeyboardEvent) => {
+      if (focusedValue === null) return
 
-        const isNext =
-          orientation === 'horizontal'
-            ? event.key === 'ArrowRight'
-            : event.key === 'ArrowDown'
+      const isNext =
+        orientation === 'horizontal'
+          ? event.key === 'ArrowRight'
+          : event.key === 'ArrowDown'
 
-        const isPrev =
-          orientation === 'horizontal'
-            ? event.key === 'ArrowLeft'
-            : event.key === 'ArrowUp'
+      const isPrev =
+        orientation === 'horizontal'
+          ? event.key === 'ArrowLeft'
+          : event.key === 'ArrowUp'
 
-        if (isNext) {
-          event.preventDefault()
-          send('FOCUS_NEXT')
-        } else if (isPrev) {
-          event.preventDefault()
-          send('FOCUS_PREV')
-        } else if (event.key === 'Home') {
-          event.preventDefault()
-          send('FOCUS_FIRST')
-        } else if (event.key === 'End') {
-          event.preventDefault()
-          send('FOCUS_LAST')
-        }
-      },
-      [focusedValue, orientation, send],
-    )
+      if (isNext) {
+        event.preventDefault()
+        send('FOCUS_NEXT')
+      } else if (isPrev) {
+        event.preventDefault()
+        send('FOCUS_PREV')
+      } else if (event.key === 'Home') {
+        event.preventDefault()
+        send('FOCUS_FIRST')
+      } else if (event.key === 'End') {
+        event.preventDefault()
+        send('FOCUS_LAST')
+      }
+    }
 
-    const contextValue = useMemo<TabsContextValue>(
-      () => ({
-        tabsId,
-        activeValue: activeValue ?? null,
-        focusedValue,
-        store,
-        send,
-        orientation,
-      }),
-      [tabsId, activeValue, focusedValue, store, send, orientation],
-    )
+    const contextValue: TabsContextValue = {
+      tabsId,
+      activeValue: activeValue ?? null,
+      focusedValue,
+      store,
+      send,
+      orientation,
+    }
 
     return (
       <TabsContext.Provider value={contextValue}>
@@ -258,17 +248,17 @@ export const Tab = forwardRef<HTMLButtonElement, TabProps>(
 
     const isTabActive = isActive(activeValue, value)
 
-    const handleClick = useCallback(() => {
+    const handleClick = () => {
       send('SELECT', { value })
-    }, [send, value])
+    }
 
-    const handleFocus = useCallback(() => {
+    const handleFocus = () => {
       send('FOCUS', { value })
-    }, [send, value])
+    }
 
-    const handleBlur = useCallback(() => {
+    const handleBlur = () => {
       send('BLUR')
-    }, [send])
+    }
 
     return (
       <button

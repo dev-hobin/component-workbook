@@ -1,13 +1,12 @@
 import React, {
   createContext,
   forwardRef,
-  useCallback,
   useContext,
-  useMemo,
+  useState,
   type ComponentPropsWithoutRef,
 } from 'react'
 import { useControllableState } from '@radix-ui/react-use-controllable-state'
-import { useEventMachine, type Send } from '../../../lib/event-machine'
+import { useEventMachine, type Send } from '../../event-machine'
 
 import {
   accordionMachine,
@@ -123,90 +122,65 @@ const RootInner = forwardRef<HTMLDivElement, RootProps>(
       defaultProp: defaultValue ?? [],
     })
 
-    const expandedIds = useMemo(
-      () => new Set(expandedArray),
-      [expandedArray],
-    )
-
-    const setExpandedIds = useCallback(
-      (ids: Set<string>) => {
-        setExpandedArray(Array.from(ids))
-      },
-      [setExpandedArray],
-    )
+    const expandedIds = new Set(expandedArray)
+    const setExpandedIds = (ids: Set<string>) => {
+      setExpandedArray(Array.from(ids))
+    }
 
     // Internal focused state
-    const [focusedId, setFocusedId] = React.useState<string | null>(null)
+    const [focusedId, setFocusedId] = useState<string | null>(null)
 
     // Build context for machine
-    const machineCtx: AccordionContext = useMemo(
-      () => ({
-        expandedIds,
-        focusedId,
-        setExpandedIds,
-        setFocusedId,
-        multiple,
-        collapsible,
-        disabled,
-        // Lazy evaluation - 액션에서 호출 시점에 계산
-        getEnabledItemIds: () => {
-          const items = store.getNodesByRole('item')
-          return items
-            .filter((item) => !item.meta.disabled)
-            .map((item) => item.id)
-        },
-        getTriggerElement: (itemId) => store.getElement(itemId, 'trigger'),
-      }),
-      [
-        expandedIds,
-        focusedId,
-        setExpandedIds,
-        multiple,
-        collapsible,
-        disabled,
-        store,
-      ],
-    )
+    const machineCtx: AccordionContext = {
+      expandedIds,
+      focusedId,
+      setExpandedIds,
+      setFocusedId,
+      multiple,
+      collapsible,
+      disabled,
+      getEnabledItemIds: () => {
+        const items = store.getNodesByRole('item')
+        return items
+          .filter((item) => !item.meta.disabled)
+          .map((item) => item.id)
+      },
+      getTriggerElement: (itemId) => store.getElement(itemId, 'trigger'),
+    }
 
     // Event machine
-    const send = useEventMachine(accordionMachine, machineCtx)
+    const { send } = useEventMachine(accordionMachine, machineCtx)
 
     // Keyboard handler
-    const handleKeyDown = useCallback(
-      (e: React.KeyboardEvent) => {
-        switch (e.key) {
-          case 'ArrowDown':
-            e.preventDefault()
-            send('FOCUS_NEXT')
-            break
-          case 'ArrowUp':
-            e.preventDefault()
-            send('FOCUS_PREV')
-            break
-          case 'Home':
-            e.preventDefault()
-            send('FOCUS_FIRST')
-            break
-          case 'End':
-            e.preventDefault()
-            send('FOCUS_LAST')
-            break
-        }
-      },
-      [send],
-    )
+    const handleKeyDown = (e: React.KeyboardEvent) => {
+      switch (e.key) {
+        case 'ArrowDown':
+          e.preventDefault()
+          send('FOCUS_NEXT')
+          break
+        case 'ArrowUp':
+          e.preventDefault()
+          send('FOCUS_PREV')
+          break
+        case 'Home':
+          e.preventDefault()
+          send('FOCUS_FIRST')
+          break
+        case 'End':
+          e.preventDefault()
+          send('FOCUS_LAST')
+          break
+      }
+    }
 
-    const contextValue = useMemo<AccordionContextValue>(
-      () => ({
-        expandedIds,
-        focusedId,
-        store,
-        send,
-        disabled,
-        animationDuration,
-      }),
-      [expandedIds, focusedId, store, send, disabled, animationDuration],
-    )
+    const contextValue: AccordionContextValue = {
+      expandedIds,
+      focusedId,
+      store,
+      send,
+      disabled,
+      animationDuration,
+    }
 
     return (
       <AccordionContext.Provider value={contextValue}>
@@ -249,13 +223,10 @@ export const Item = forwardRef<HTMLElement, ItemProps>(
     const isItemDisabled = rootDisabled || disabled
     const isItemExpanded = isExpanded(expandedIds, itemId)
 
-    const itemContextValue = useMemo<ItemContextValue>(
-      () => ({
-        itemId,
-        isDisabled: isItemDisabled,
-      }),
-      [itemId, isItemDisabled],
-    )
+    const itemContextValue: ItemContextValue = {
+      itemId,
+      isDisabled: isItemDisabled,
+    }
 
     return (
       <ItemContext.Provider value={itemContextValue}>
@@ -304,14 +275,9 @@ export const Trigger = forwardRef<HTMLButtonElement, TriggerProps>(
     const isItemExpanded = isExpanded(expandedIds, itemId)
     const isFocused = focusedId === itemId
 
-    const handleClick = useCallback(() => {
+    const handleClick = () => {
       send('TOGGLE', { itemId })
-    }, [send, itemId])
-
-    const handleFocus = useCallback(() => {
-      // Focus 상태는 machine의 effect가 아닌 React state로 관리
-      // (machine effect는 focusedId → DOM focus 동기화만 담당)
-    }, [])
+    }
 
     return (
       <h3
@@ -326,7 +292,6 @@ export const Trigger = forwardRef<HTMLButtonElement, TriggerProps>(
               id: domId,
               disabled: isDisabled,
               onClick: handleClick,
-              onFocus: handleFocus,
               tabIndex: isFocused ? 0 : -1,
               'aria-expanded': isItemExpanded,
               'aria-controls': panelId ?? undefined,

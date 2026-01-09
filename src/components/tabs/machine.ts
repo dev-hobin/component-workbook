@@ -1,4 +1,4 @@
-import type { EventMachine } from '../../../lib/event-machine'
+import { createEventMachine } from '../../event-machine'
 
 // ============================================
 // Types
@@ -15,11 +15,11 @@ export type TabsOrientation = 'horizontal' | 'vertical'
 export type TabsEvents = {
   SELECT: { value: TabValue }
   FOCUS: { value: TabValue }
-  BLUR: void
-  FOCUS_NEXT: void
-  FOCUS_PREV: void
-  FOCUS_FIRST: void
-  FOCUS_LAST: void
+  BLUR: undefined
+  FOCUS_NEXT: undefined
+  FOCUS_PREV: undefined
+  FOCUS_FIRST: undefined
+  FOCUS_LAST: undefined
 }
 
 // ============================================
@@ -46,7 +46,12 @@ export type TabsContext = {
 // Machine
 // ============================================
 
-export const tabsMachine: EventMachine<TabsContext, TabsEvents> = {
+export const tabsMachine = createEventMachine<
+  TabsContext,
+  TabsEvents,
+  Record<string, never>,
+  'select' | 'focus' | 'blur' | 'focusNext' | 'focusPrev' | 'focusFirst' | 'focusLast'
+>({
   on: {
     SELECT: 'select',
     FOCUS: 'focus',
@@ -70,14 +75,14 @@ export const tabsMachine: EventMachine<TabsContext, TabsEvents> = {
   ],
 
   actions: {
-    select: (ctx, payload) => {
-      const { value } = payload!
+    select: (ctx, payload: { value: TabValue }) => {
+      const { value } = payload
       ctx.setActiveValue(value)
       ctx.setFocusedValue(value)
     },
 
-    focus: (ctx, payload) => {
-      const { value } = payload!
+    focus: (ctx, payload: { value: TabValue }) => {
+      const { value } = payload
       ctx.setFocusedValue(value)
     },
 
@@ -137,7 +142,7 @@ export const tabsMachine: EventMachine<TabsContext, TabsEvents> = {
       }
     },
   },
-}
+})
 
 // ============================================
 // Query Helpers

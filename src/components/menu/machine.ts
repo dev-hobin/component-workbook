@@ -1,4 +1,4 @@
-import type { EventMachine } from '../../../lib/event-machine'
+import { createEventMachine } from '../../event-machine'
 
 // ============================================
 // Types
@@ -16,19 +16,19 @@ export type MenuEvents = {
   // Menu 열기/닫기
   OPEN_MENU: { menuId: MenuId; parentMenuId: MenuId | null }
   CLOSE_MENU: { menuId: MenuId }
-  CLOSE_ALL: void
+  CLOSE_ALL: undefined
   CLOSE_AND_FOCUS_TRIGGER: { menuId: MenuId }
 
   // 포커스 이동
-  FOCUS_NEXT: void
-  FOCUS_PREV: void
-  FOCUS_FIRST: void
-  FOCUS_LAST: void
+  FOCUS_NEXT: undefined
+  FOCUS_PREV: undefined
+  FOCUS_FIRST: undefined
+  FOCUS_LAST: undefined
   SET_FOCUS: { itemId: ItemId | null }
 
   // 서브메뉴 관련
-  OPEN_SUBMENU: void // focusedItemId가 서브트리거일 때
-  CLOSE_SUBMENU: void // 현재 서브메뉴 닫기
+  OPEN_SUBMENU: undefined // focusedItemId가 서브트리거일 때
+  CLOSE_SUBMENU: undefined // 현재 서브메뉴 닫기
 }
 
 export type MenuContext = {
@@ -54,7 +54,26 @@ export type MenuContext = {
 // Machine
 // ============================================
 
-export const menuMachine: EventMachine<MenuContext, MenuEvents> = {
+type MenuActions =
+  | 'noop'
+  | 'openMenu'
+  | 'closeMenu'
+  | 'closeAll'
+  | 'closeAndFocusTrigger'
+  | 'setFocus'
+  | 'focusNext'
+  | 'focusPrev'
+  | 'focusFirst'
+  | 'focusLast'
+  | 'openFocusedSubmenu'
+  | 'closeActiveSubmenu'
+
+export const menuMachine = createEventMachine<
+  MenuContext,
+  MenuEvents,
+  Record<string, never>,
+  MenuActions
+>({
   on: {
     OPEN_MENU: 'openMenu',
     CLOSE_MENU: 'closeMenu',
@@ -120,8 +139,8 @@ export const menuMachine: EventMachine<MenuContext, MenuEvents> = {
   actions: {
     noop: () => {},
 
-    openMenu: (ctx, payload) => {
-      const { menuId, parentMenuId } = payload!
+    openMenu: (ctx, payload: { menuId: MenuId; parentMenuId: MenuId | null }) => {
+      const { menuId, parentMenuId } = payload
 
       if (parentMenuId === null) {
         // 루트 메뉴
@@ -138,8 +157,8 @@ export const menuMachine: EventMachine<MenuContext, MenuEvents> = {
       }
     },
 
-    closeMenu: (ctx, payload) => {
-      const { menuId } = payload!
+    closeMenu: (ctx, payload: { menuId: MenuId }) => {
+      const { menuId } = payload
       const index = ctx.openedPath.indexOf(menuId)
       if (index !== -1) {
         ctx.setOpenedPath(ctx.openedPath.slice(0, index))
@@ -151,8 +170,8 @@ export const menuMachine: EventMachine<MenuContext, MenuEvents> = {
       ctx.setFocusedItemId(null)
     },
 
-    closeAndFocusTrigger: (ctx, payload) => {
-      const { menuId } = payload!
+    closeAndFocusTrigger: (ctx, payload: { menuId: MenuId }) => {
+      const { menuId } = payload
       const index = ctx.openedPath.indexOf(menuId)
       if (index !== -1) {
         ctx.setOpenedPath(ctx.openedPath.slice(0, index))
@@ -166,8 +185,8 @@ export const menuMachine: EventMachine<MenuContext, MenuEvents> = {
       }
     },
 
-    setFocus: (ctx, payload) => {
-      ctx.setFocusedItemId(payload!.itemId)
+    setFocus: (ctx, payload: { itemId: ItemId | null }) => {
+      ctx.setFocusedItemId(payload.itemId)
     },
 
     focusNext: (ctx) => {
@@ -248,7 +267,7 @@ export const menuMachine: EventMachine<MenuContext, MenuEvents> = {
       }
     },
   },
-}
+})
 
 // ============================================
 // Query Helpers
@@ -264,9 +283,4 @@ export function getRootMenuId(openedPath: MenuId[]): MenuId | null {
 
 export function getActiveMenuId(openedPath: MenuId[]): MenuId | null {
   return openedPath[openedPath.length - 1] ?? null
-}
-
-export function isSubMenu(openedPath: MenuId[], menuId: MenuId): boolean {
-  const index = openedPath.indexOf(menuId)
-  return index > 0
 }

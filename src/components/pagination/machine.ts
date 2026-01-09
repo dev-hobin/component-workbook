@@ -1,4 +1,4 @@
-import type { EventMachine } from '../../../lib/event-machine'
+import { createEventMachine } from '../../event-machine'
 
 // ============================================
 // Types
@@ -14,8 +14,8 @@ export type PageItem =
 
 export type PaginationEvents = {
   GO_TO_PAGE: { page: number }
-  GO_PREV: void
-  GO_NEXT: void
+  GO_PREV: undefined
+  GO_NEXT: undefined
 }
 
 // ============================================
@@ -36,7 +36,12 @@ export type PaginationContext = {
 // Machine
 // ============================================
 
-export const paginationMachine: EventMachine<PaginationContext, PaginationEvents> = {
+export const paginationMachine = createEventMachine<
+  PaginationContext,
+  PaginationEvents,
+  Record<string, never>,
+  'noop' | 'goToPage' | 'goPrev' | 'goNext'
+>({
   on: {
     GO_TO_PAGE: 'goToPage',
     GO_PREV: [
@@ -52,8 +57,8 @@ export const paginationMachine: EventMachine<PaginationContext, PaginationEvents
   actions: {
     noop: () => {},
 
-    goToPage: (ctx, payload) => {
-      const { page } = payload!
+    goToPage: (ctx, payload: { page: number }) => {
+      const { page } = payload
       const totalPages = getTotalPages(ctx.totalCount, ctx.pageSize)
       const clampedPage = Math.max(1, Math.min(page, totalPages))
       ctx.setPage(clampedPage)
@@ -67,7 +72,7 @@ export const paginationMachine: EventMachine<PaginationContext, PaginationEvents
       ctx.setPage(ctx.page + 1)
     },
   },
-}
+})
 
 // ============================================
 // Query Helpers

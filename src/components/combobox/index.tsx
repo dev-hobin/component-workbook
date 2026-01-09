@@ -4,12 +4,12 @@ import React, {
   useContext,
   useEffect,
   useId,
-  useMemo,
   useRef,
+  useState,
   type ComponentPropsWithoutRef,
 } from 'react'
 import { useControllableState } from '@radix-ui/react-use-controllable-state'
-import { useEventMachine, type Send } from '../../../lib/event-machine'
+import { useEventMachine, type Send } from '../../event-machine'
 
 import {
   comboboxMachine,
@@ -141,11 +141,11 @@ function RootInner({
   const comboboxId = useId()
 
   // Options 관리
-  const [options, setOptions] = React.useState<ComboboxOption[]>([])
+  const [options, setOptions] = useState<ComboboxOption[]>([])
   const optionsRef = useRef<ComboboxOption[]>([])
   optionsRef.current = options
 
-  const registerOption = React.useCallback((option: ComboboxOption) => {
+  const registerOption = (option: ComboboxOption) => {
     setOptions((prev) => {
       const exists = prev.some((o) => o.id === option.id)
       if (exists) {
@@ -153,11 +153,11 @@ function RootInner({
       }
       return [...prev, option]
     })
-  }, [])
+  }
 
-  const unregisterOption = React.useCallback((optionId: OptionId) => {
+  const unregisterOption = (optionId: OptionId) => {
     setOptions((prev) => prev.filter((o) => o.id !== optionId))
-  }, [])
+  }
 
   // Controllable state
   const [selectedValue, setSelectedValue] = useControllableState({
@@ -180,130 +180,91 @@ function RootInner({
 
   // 내부 상태
   const [highlightedOptionId, setHighlightedOptionId] =
-    React.useState<OptionId | null>(null)
-  const [autocompleteText, setAutocompleteText] = React.useState<string | null>(
-    null,
-  )
+    useState<OptionId | null>(null)
+  const [autocompleteText, setAutocompleteText] = useState<string | null>(null)
 
   // Input ref
   const inputRef = useRef<HTMLInputElement | null>(null)
 
   // 필터링된 옵션
-  const filteredOptions = useMemo(
-    () =>
-      filterOptions(options, inputValue ?? '', autocomplete, showAllOnEmpty),
-    [options, inputValue, autocomplete, showAllOnEmpty],
+  const filteredOptions = filterOptions(
+    options,
+    inputValue ?? '',
+    autocomplete,
+    showAllOnEmpty,
   )
   const filteredOptionsRef = useRef<ComboboxOption[]>([])
   filteredOptionsRef.current = filteredOptions
 
   // Machine context
-  const machineCtx: MachineContext = useMemo(
-    () => ({
-      // State
-      isOpen: isOpen ?? false,
-      inputValue: inputValue ?? '',
-      selectedValue: selectedValue ?? null,
-      highlightedOptionId,
-      autocompleteText,
+  const machineCtx: MachineContext = {
+    // State
+    isOpen: isOpen ?? false,
+    inputValue: inputValue ?? '',
+    selectedValue: selectedValue ?? null,
+    highlightedOptionId,
+    autocompleteText,
 
-      // Setters
-      setOpen: (open) => setIsOpen(open),
-      setInputValue: (value) => setInputValue(value),
-      setSelectedValue: (value) => setSelectedValue(value),
-      setHighlightedOptionId,
-      setAutocompleteText,
+    // Setters
+    setOpen: (open) => setIsOpen(open),
+    setInputValue: (value) => setInputValue(value),
+    setSelectedValue: (value) => setSelectedValue(value),
+    setHighlightedOptionId,
+    setAutocompleteText,
 
-      // Options
-      autocomplete,
-      openOnFocus,
-      closeOnSelect,
-      showAllOnEmpty,
-      clearOnSelect,
-      loop,
+    // Options
+    autocomplete,
+    openOnFocus,
+    closeOnSelect,
+    showAllOnEmpty,
+    clearOnSelect,
+    loop,
 
-      // Lazy getters
-      getFilteredOptions: () => filteredOptionsRef.current,
-      getOptionById: (id) => optionsRef.current.find((o) => o.id === id),
+    // Lazy getters
+    getFilteredOptions: () => filteredOptionsRef.current,
+    getOptionById: (id) => optionsRef.current.find((o) => o.id === id),
 
-      // DOM helpers
-      getOptionElement: (optionId) => store.getElement(optionId, 'option'),
-      getInputElement: () => inputRef.current,
-      getAllElements: () => {
-        const elements = new Map<string, HTMLElement>()
-        const input = store.getElement(comboboxId, 'input')
-        const listbox = store.getElement(comboboxId, 'listbox')
-        const trigger = store.getElement(comboboxId, 'trigger')
-        if (input) elements.set('input', input)
-        if (listbox) elements.set('listbox', listbox)
-        if (trigger) elements.set('trigger', trigger)
-        return elements
-      },
+    // DOM helpers
+    getOptionElement: (optionId) => store.getElement(optionId, 'option'),
+    getInputElement: () => inputRef.current,
+    getAllElements: () => {
+      const elements = new Map<string, HTMLElement>()
+      const input = store.getElement(comboboxId, 'input')
+      const listbox = store.getElement(comboboxId, 'listbox')
+      const trigger = store.getElement(comboboxId, 'trigger')
+      if (input) elements.set('input', input)
+      if (listbox) elements.set('listbox', listbox)
+      if (trigger) elements.set('trigger', trigger)
+      return elements
+    },
 
-      // Callbacks
-      notifySelect: (value) => onSelect?.(value),
-    }),
-    [
-      isOpen,
-      inputValue,
-      selectedValue,
-      highlightedOptionId,
-      autocompleteText,
-      setIsOpen,
-      setInputValue,
-      setSelectedValue,
-      autocomplete,
-      openOnFocus,
-      closeOnSelect,
-      showAllOnEmpty,
-      clearOnSelect,
-      loop,
-      store,
-      comboboxId,
-      onSelect,
-    ],
-  )
+    // Callbacks
+    notifySelect: (value) => onSelect?.(value),
+  }
 
   // Event machine
-  const send = useEventMachine(comboboxMachine, machineCtx)
+  const { send } = useEventMachine(comboboxMachine, machineCtx)
 
   // Input ref setter
-  const setInputRef = React.useCallback((el: HTMLInputElement | null) => {
+  const setInputRef = (el: HTMLInputElement | null) => {
     inputRef.current = el
-  }, [])
+  }
 
-  const contextValue: ComboboxContextValue = useMemo(
-    () => ({
-      comboboxId,
-      isOpen: isOpen ?? false,
-      inputValue: inputValue ?? '',
-      selectedValue: selectedValue ?? null,
-      highlightedOptionId,
-      autocompleteText,
-      store,
-      send,
-      autocomplete,
-      options,
-      filteredOptions,
-      registerOption,
-      unregisterOption,
-    }),
-    [
-      comboboxId,
-      isOpen,
-      inputValue,
-      selectedValue,
-      highlightedOptionId,
-      autocompleteText,
-      store,
-      send,
-      autocomplete,
-      options,
-      filteredOptions,
-      registerOption,
-      unregisterOption,
-    ],
-  )
+  const contextValue: ComboboxContextValue = {
+    comboboxId,
+    isOpen: isOpen ?? false,
+    inputValue: inputValue ?? '',
+    selectedValue: selectedValue ?? null,
+    highlightedOptionId,
+    autocompleteText,
+    store,
+    send,
+    autocomplete,
+    options,
+    filteredOptions,
+    registerOption,
+    unregisterOption,
+  }
 
   return (
     <ComboboxContext.Provider value={contextValue}>

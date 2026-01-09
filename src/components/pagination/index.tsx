@@ -1,15 +1,13 @@
 import React, {
   createContext,
   forwardRef,
-  useCallback,
   useContext,
   useId,
-  useMemo,
   type ComponentPropsWithoutRef,
   type ReactNode,
 } from 'react'
 import { useControllableState } from '@radix-ui/react-use-controllable-state'
-import { useEventMachine, type Send } from '../../../lib/event-machine'
+import { useEventMachine, type Send } from '../../event-machine'
 
 import {
   paginationMachine,
@@ -108,35 +106,29 @@ const RootInner = forwardRef<HTMLElement, RootProps>(
     const page = currentPage ?? 1
 
     // Machine context
-    const machineCtx: MachineContext = useMemo(
-      () => ({
-        page,
-        pageSize,
-        totalCount,
-        setPage: setCurrentPage,
-      }),
-      [page, pageSize, totalCount, setCurrentPage],
-    )
+    const machineCtx: MachineContext = {
+      page,
+      pageSize,
+      totalCount,
+      setPage: setCurrentPage,
+    }
 
     // Event machine
-    const send = useEventMachine(paginationMachine, machineCtx)
+    const { send } = useEventMachine(paginationMachine, machineCtx)
 
     const { ref, domId } = useNode<PaginationRole>({
       role: 'root',
       id: paginationId,
     })
 
-    const contextValue = useMemo<PaginationContextValue>(
-      () => ({
-        paginationId,
-        page,
-        pageSize,
-        totalCount,
-        store,
-        send,
-      }),
-      [paginationId, page, pageSize, totalCount, store, send],
-    )
+    const contextValue: PaginationContextValue = {
+      paginationId,
+      page,
+      pageSize,
+      totalCount,
+      store,
+      send,
+    }
 
     return (
       <PaginationContext.Provider value={contextValue}>
@@ -174,9 +166,9 @@ export const PreviousTrigger = forwardRef<HTMLButtonElement, PreviousTriggerProp
 
     const isDisabled = !hasPreviousPage(page)
 
-    const handleClick = useCallback(() => {
+    const handleClick = () => {
       send('GO_PREV')
-    }, [send])
+    }
 
     return (
       <button
@@ -215,9 +207,9 @@ export const NextTrigger = forwardRef<HTMLButtonElement, NextTriggerProps>(
 
     const isDisabled = !hasNextPage(page, totalCount, pageSize)
 
-    const handleClick = useCallback(() => {
+    const handleClick = () => {
       send('GO_NEXT')
-    }, [send])
+    }
 
     return (
       <button
@@ -260,15 +252,12 @@ export const Pages = forwardRef<HTMLUListElement, PagesProps>(
 
     const pageItems = getPageItems(page, totalCount, pageSize, siblingsCount)
 
-    const handlePageClick = useCallback(
-      (targetPage: number) => {
-        send('GO_TO_PAGE', { page: targetPage })
-        if (action.type === 'button') {
-          action.onPageClick?.(targetPage)
-        }
-      },
-      [send, action],
-    )
+    const handlePageClick = (targetPage: number) => {
+      send('GO_TO_PAGE', { page: targetPage })
+      if (action.type === 'button') {
+        action.onPageClick?.(targetPage)
+      }
+    }
 
     return (
       <ul ref={forwardedRef} {...rest}>

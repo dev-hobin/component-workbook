@@ -1,14 +1,14 @@
 import * as focusTrapLib from 'focus-trap'
-import type { EventMachine } from '../../../lib/event-machine'
+import { createEventMachine } from '../../event-machine'
 
 // ============================================
 // Types
 // ============================================
 
 export type ModalEvents = {
-  OPEN: void
-  CLOSE: void
-  OUTSIDE_CLICK: void
+  OPEN: undefined
+  CLOSE: undefined
+  OUTSIDE_CLICK: undefined
 }
 
 export type ModalContext = {
@@ -35,7 +35,12 @@ export type ModalContext = {
 // Machine
 // ============================================
 
-export const modalMachine: EventMachine<ModalContext, ModalEvents> = {
+export const modalMachine = createEventMachine<
+  ModalContext,
+  ModalEvents,
+  Record<string, never>,
+  'noop' | 'open' | 'close'
+>({
   on: {
     OPEN: 'open',
     CLOSE: 'close',
@@ -88,4 +93,4 @@ export const modalMachine: EventMachine<ModalContext, ModalEvents> = {
     open: (ctx) => ctx.setOpen(true),
     close: (ctx) => ctx.setOpen(false),
   },
-}
+})

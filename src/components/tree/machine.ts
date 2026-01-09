@@ -1,4 +1,4 @@
-import type { EventMachine } from '../../../lib/event-machine'
+import { createEventMachine } from '../../event-machine'
 
 // ============================================
 // Types
@@ -13,15 +13,15 @@ export type NodeId = string
 export type TreeEvents = {
   // Focus
   FOCUS: { nodeId: NodeId }
-  FOCUS_NEXT: void
-  FOCUS_PREV: void
-  FOCUS_FIRST: void
-  FOCUS_LAST: void
-  FOCUS_PARENT: void
+  FOCUS_NEXT: undefined
+  FOCUS_PREV: undefined
+  FOCUS_FIRST: undefined
+  FOCUS_LAST: undefined
+  FOCUS_PARENT: undefined
 
   // Selection
   SELECT: { nodeId: NodeId | null }
-  SELECT_FOCUSED: void
+  SELECT_FOCUSED: undefined
 
   // Expand/Collapse
   EXPAND: { nodeId: NodeId }
@@ -29,8 +29,8 @@ export type TreeEvents = {
   TOGGLE_EXPAND: { nodeId: NodeId }
 
   // Navigation
-  ARROW_RIGHT: void
-  ARROW_LEFT: void
+  ARROW_RIGHT: undefined
+  ARROW_LEFT: undefined
 }
 
 // ============================================
@@ -62,7 +62,29 @@ export type TreeContext = {
 // Machine
 // ============================================
 
-export const treeMachine: EventMachine<TreeContext, TreeEvents> = {
+type TreeActions =
+  | 'noop'
+  | 'focus'
+  | 'focusNext'
+  | 'focusPrev'
+  | 'focusFirst'
+  | 'focusLast'
+  | 'focusParent'
+  | 'focusFirstChild'
+  | 'select'
+  | 'selectFocused'
+  | 'expand'
+  | 'collapse'
+  | 'toggleExpand'
+  | 'expandFocused'
+  | 'collapseFocused'
+
+export const treeMachine = createEventMachine<
+  TreeContext,
+  TreeEvents,
+  Record<string, never>,
+  TreeActions
+>({
   on: {
     FOCUS: 'focus',
     FOCUS_NEXT: 'focusNext',
@@ -107,8 +129,8 @@ export const treeMachine: EventMachine<TreeContext, TreeEvents> = {
   actions: {
     noop: () => {},
 
-    focus: (ctx, payload) => {
-      ctx.setFocusedId(payload!.nodeId)
+    focus: (ctx, payload: { nodeId: NodeId }) => {
+      ctx.setFocusedId(payload.nodeId)
     },
 
     focusNext: (ctx) => {
@@ -171,28 +193,28 @@ export const treeMachine: EventMachine<TreeContext, TreeEvents> = {
       }
     },
 
-    select: (ctx, payload) => {
-      ctx.setSelectedId(payload!.nodeId)
+    select: (ctx, payload: { nodeId: NodeId | null }) => {
+      ctx.setSelectedId(payload.nodeId)
     },
 
     selectFocused: (ctx) => {
       ctx.setSelectedId(ctx.focusedId)
     },
 
-    expand: (ctx, payload) => {
+    expand: (ctx, payload: { nodeId: NodeId }) => {
       const newExpanded = new Set(ctx.expandedIds)
-      newExpanded.add(payload!.nodeId)
+      newExpanded.add(payload.nodeId)
       ctx.setExpandedIds(newExpanded)
     },
 
-    collapse: (ctx, payload) => {
+    collapse: (ctx, payload: { nodeId: NodeId }) => {
       const newExpanded = new Set(ctx.expandedIds)
-      newExpanded.delete(payload!.nodeId)
+      newExpanded.delete(payload.nodeId)
       ctx.setExpandedIds(newExpanded)
     },
 
-    toggleExpand: (ctx, payload) => {
-      const { nodeId } = payload!
+    toggleExpand: (ctx, payload: { nodeId: NodeId }) => {
+      const { nodeId } = payload
       const newExpanded = new Set(ctx.expandedIds)
       if (newExpanded.has(nodeId)) {
         newExpanded.delete(nodeId)
@@ -216,4 +238,4 @@ export const treeMachine: EventMachine<TreeContext, TreeEvents> = {
       ctx.setExpandedIds(newExpanded)
     },
   },
-}
+})

@@ -1,4 +1,4 @@
-import type { EventMachine } from '../../../lib/event-machine'
+import { createEventMachine } from '../../event-machine'
 
 // ============================================
 // Types
@@ -6,10 +6,10 @@ import type { EventMachine } from '../../../lib/event-machine'
 
 export type AccordionEvents = {
   TOGGLE: { itemId: string }
-  FOCUS_NEXT: void
-  FOCUS_PREV: void
-  FOCUS_FIRST: void
-  FOCUS_LAST: void
+  FOCUS_NEXT: undefined
+  FOCUS_PREV: undefined
+  FOCUS_FIRST: undefined
+  FOCUS_LAST: undefined
 }
 
 export type AccordionContext = {
@@ -35,7 +35,12 @@ export type AccordionContext = {
 // Machine
 // ============================================
 
-export const accordionMachine: EventMachine<AccordionContext, AccordionEvents> = {
+export const accordionMachine = createEventMachine<
+  AccordionContext,
+  AccordionEvents,
+  Record<string, never>,
+  'noop' | 'expand' | 'collapse' | 'focusNext' | 'focusPrev' | 'focusFirst' | 'focusLast'
+>({
   on: {
     TOGGLE: [
       { when: (ctx) => ctx.disabled, do: 'noop' },
@@ -67,8 +72,8 @@ export const accordionMachine: EventMachine<AccordionContext, AccordionEvents> =
   actions: {
     noop: () => {},
 
-    expand: (ctx, payload) => {
-      const { itemId } = payload!
+    expand: (ctx, payload: { itemId: string }) => {
+      const { itemId } = payload
       if (ctx.multiple) {
         ctx.setExpandedIds(new Set([...ctx.expandedIds, itemId]))
       } else {
@@ -76,8 +81,8 @@ export const accordionMachine: EventMachine<AccordionContext, AccordionEvents> =
       }
     },
 
-    collapse: (ctx, payload) => {
-      const { itemId } = payload!
+    collapse: (ctx, payload: { itemId: string }) => {
+      const { itemId } = payload
       const next = new Set(ctx.expandedIds)
       next.delete(itemId)
       ctx.setExpandedIds(next)
@@ -112,7 +117,7 @@ export const accordionMachine: EventMachine<AccordionContext, AccordionEvents> =
       if (items.length > 0) ctx.setFocusedId(items[items.length - 1])
     },
   },
-}
+})
 
 // ============================================
 // Query Helpers

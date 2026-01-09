@@ -1,17 +1,15 @@
 import {
   createContext,
   forwardRef,
-  useCallback,
   useContext,
   useId,
-  useMemo,
   useRef,
   type ComponentPropsWithoutRef,
 } from 'react'
 import { createPortal } from 'react-dom'
 import { useControllableState } from '@radix-ui/react-use-controllable-state'
 import type * as focusTrapLib from 'focus-trap'
-import { useEventMachine, type Send } from '../../../lib/event-machine'
+import { useEventMachine, type Send } from '../../event-machine'
 
 import { modalMachine, type ModalContext, type ModalEvents } from './machine'
 import { usePresence } from '../../hooks/usePresence'
@@ -115,43 +113,33 @@ function RootInner({
   })
 
   // Build context for machine
-  const machineCtx: ModalContext = useMemo(
-    () => ({
-      isOpen,
-      setOpen,
-      closeOnEscape,
-      closeOnOutsideClick,
-      getContentElement: () => store.getElement(modalId, 'content'),
-      getInitialFocusElement,
-      // React-agnostic getter/setter for effect state
-      getTrap: () => trapRef.current,
-      setTrap: (trap) => { trapRef.current = trap },
-      getPrevOverflow: () => prevOverflowRef.current,
-      setPrevOverflow: (overflow) => { prevOverflowRef.current = overflow },
-    }),
-    [
-      isOpen,
-      setOpen,
-      closeOnEscape,
-      closeOnOutsideClick,
-      store,
-      modalId,
-      getInitialFocusElement,
-    ],
-  )
+  const machineCtx: ModalContext = {
+    isOpen,
+    setOpen,
+    closeOnEscape,
+    closeOnOutsideClick,
+    getContentElement: () => store.getElement(modalId, 'content'),
+    getInitialFocusElement,
+    // React-agnostic getter/setter for effect state
+    getTrap: () => trapRef.current,
+    setTrap: (trap: focusTrapLib.FocusTrap | null) => {
+      trapRef.current = trap
+    },
+    getPrevOverflow: () => prevOverflowRef.current,
+    setPrevOverflow: (overflow: string) => {
+      prevOverflowRef.current = overflow
+    },
+  }
 
   // Event machine
-  const send = useEventMachine(modalMachine, machineCtx)
+  const { send } = useEventMachine(modalMachine, machineCtx)
 
-  const contextValue = useMemo<ModalContextValue>(
-    () => ({
-      modalId,
-      isOpen,
-      send,
-      store,
-    }),
-    [modalId, isOpen, send, store],
-  )
+  const contextValue: ModalContextValue = {
+    modalId,
+    isOpen,
+    send,
+    store,
+  }
 
   return (
     <ModalContext.Provider value={contextValue}>
@@ -175,9 +163,9 @@ export const Trigger = forwardRef<HTMLButtonElement, TriggerProps>(
       id: modalId,
     })
 
-    const handleClick = useCallback(() => {
+    const handleClick = () => {
       send('OPEN')
-    }, [send])
+    }
 
     return (
       <button
@@ -212,9 +200,9 @@ export const CloseTrigger = forwardRef<HTMLButtonElement, CloseTriggerProps>(
       id: modalId,
     })
 
-    const handleClick = useCallback(() => {
+    const handleClick = () => {
       send('CLOSE')
-    }, [send])
+    }
 
     return (
       <button
@@ -310,9 +298,9 @@ export const Backdrop = forwardRef<HTMLDivElement, BackdropProps>(
       resolveElement: () => elementRef.current,
     })
 
-    const handleClick = useCallback(() => {
+    const handleClick = () => {
       send('OUTSIDE_CLICK')
-    }, [send])
+    }
 
     if (!isPresent) {
       return null

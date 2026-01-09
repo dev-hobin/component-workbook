@@ -1,13 +1,11 @@
 import React, {
   createContext,
   useContext,
-  useCallback,
-  useMemo,
   useId,
   useRef,
 } from 'react'
 import { useControllableState } from '@radix-ui/react-use-controllable-state'
-import { useEventMachine, type Send } from '../../../lib/event-machine'
+import { useEventMachine, type Send } from '../../event-machine'
 
 import {
   treeMachine,
@@ -168,117 +166,102 @@ function RootInner({
   expandedIdsRef.current = expandedIds
 
   // Machine context
-  const machineCtx: MachineContext = useMemo(
-    () => ({
-      focusedId: focusedId ?? null,
-      selectedId: selectedId ?? null,
-      expandedIds: expandedIds ?? new Set(),
+  const machineCtx: MachineContext = {
+    focusedId: focusedId ?? null,
+    selectedId: selectedId ?? null,
+    expandedIds: expandedIds ?? new Set(),
 
-      setFocusedId: (id) => setFocusedId(id),
-      setSelectedId: (id) => setSelectedId(id),
-      setExpandedIds: (ids) => setExpandedIds(ids),
+    setFocusedId: (id) => setFocusedId(id),
+    setSelectedId: (id) => setSelectedId(id),
+    setExpandedIds: (ids) => setExpandedIds(ids),
 
-      getVisibleItemIds: () => getVisibleItemIds(storeRef.current, expandedIdsRef.current ?? new Set()),
-      getChildrenIds: (nodeId) => storeRef.current.getChildrenByRole(nodeId, 'item').map((n) => n.id),
-      getParentId: (nodeId) => {
-        const node = storeRef.current.getNode(nodeId, 'item')
-        if (!node?.parentId) return null
-        const parentNode = storeRef.current.getNode(node.parentId, 'item')
-        return parentNode ? parentNode.id : null
-      },
-      isLeaf: (nodeId) => storeRef.current.getChildrenByRole(nodeId, 'item').length === 0,
-      getItemElement: (nodeId) => storeRef.current.getElement(nodeId, 'item'),
-    }),
-    [focusedId, selectedId, expandedIds, setFocusedId, setSelectedId, setExpandedIds],
-  )
+    getVisibleItemIds: () => getVisibleItemIds(storeRef.current, expandedIdsRef.current ?? new Set()),
+    getChildrenIds: (nodeId) => storeRef.current.getChildrenByRole(nodeId, 'item').map((n) => n.id),
+    getParentId: (nodeId) => {
+      const node = storeRef.current.getNode(nodeId, 'item')
+      if (!node?.parentId) return null
+      const parentNode = storeRef.current.getNode(node.parentId, 'item')
+      return parentNode ? parentNode.id : null
+    },
+    isLeaf: (nodeId) => storeRef.current.getChildrenByRole(nodeId, 'item').length === 0,
+    getItemElement: (nodeId) => storeRef.current.getElement(nodeId, 'item'),
+  }
 
   // Event machine
-  const send = useEventMachine(treeMachine, machineCtx)
+  const { send } = useEventMachine(treeMachine, machineCtx)
 
   // 키보드 핸들러
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      switch (e.key) {
-        case 'ArrowDown':
-          e.preventDefault()
-          send('FOCUS_NEXT')
-          break
-        case 'ArrowUp':
-          e.preventDefault()
-          send('FOCUS_PREV')
-          break
-        case 'ArrowRight':
-          e.preventDefault()
-          send('ARROW_RIGHT')
-          break
-        case 'ArrowLeft':
-          e.preventDefault()
-          send('ARROW_LEFT')
-          break
-        case 'Home':
-          e.preventDefault()
-          send('FOCUS_FIRST')
-          break
-        case 'End':
-          e.preventDefault()
-          send('FOCUS_LAST')
-          break
-        case 'Enter':
-          e.preventDefault()
-          send('SELECT_FOCUSED')
-          break
-      }
-    },
-    [send],
-  )
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    switch (e.key) {
+      case 'ArrowDown':
+        e.preventDefault()
+        send('FOCUS_NEXT')
+        break
+      case 'ArrowUp':
+        e.preventDefault()
+        send('FOCUS_PREV')
+        break
+      case 'ArrowRight':
+        e.preventDefault()
+        send('ARROW_RIGHT')
+        break
+      case 'ArrowLeft':
+        e.preventDefault()
+        send('ARROW_LEFT')
+        break
+      case 'Home':
+        e.preventDefault()
+        send('FOCUS_FIRST')
+        break
+      case 'End':
+        e.preventDefault()
+        send('FOCUS_LAST')
+        break
+      case 'Enter':
+        e.preventDefault()
+        send('SELECT_FOCUSED')
+        break
+    }
+  }
 
-  const handleClick = useCallback(
-    (e: React.MouseEvent) => {
-      const itemNodes = store.getNodesByRole('item')
-      const elements = new Map(
-        itemNodes
-          .filter((n) => n.element)
-          .map((n) => [n.id, n.element as HTMLElement]),
-      )
-      const nodeId = findNodeFromMouseEvent(e, elements)
-      if (nodeId) {
-        send('FOCUS', { nodeId })
-        send('SELECT', { nodeId })
-      }
-    },
-    [store, send],
-  )
+  const handleClick = (e: React.MouseEvent) => {
+    const itemNodes = store.getNodesByRole('item')
+    const elements = new Map(
+      itemNodes
+        .filter((n) => n.element)
+        .map((n) => [n.id, n.element as HTMLElement]),
+    )
+    const nodeId = findNodeFromMouseEvent(e, elements)
+    if (nodeId) {
+      send('FOCUS', { nodeId })
+      send('SELECT', { nodeId })
+    }
+  }
 
-  const handleDoubleClick = useCallback(
-    (e: React.MouseEvent) => {
-      const itemNodes = store.getNodesByRole('item')
-      const elements = new Map(
-        itemNodes
-          .filter((n) => n.element)
-          .map((n) => [n.id, n.element as HTMLElement]),
-      )
-      const nodeId = findNodeFromMouseEvent(e, elements)
-      if (nodeId) {
-        const children = store.getChildrenByRole(nodeId, 'item')
-        const isLeaf = children.length === 0
-        if (!isLeaf) {
-          send('TOGGLE_EXPAND', { nodeId })
-        }
+  const handleDoubleClick = (e: React.MouseEvent) => {
+    const itemNodes = store.getNodesByRole('item')
+    const elements = new Map(
+      itemNodes
+        .filter((n) => n.element)
+        .map((n) => [n.id, n.element as HTMLElement]),
+    )
+    const nodeId = findNodeFromMouseEvent(e, elements)
+    if (nodeId) {
+      const children = store.getChildrenByRole(nodeId, 'item')
+      const isLeaf = children.length === 0
+      if (!isLeaf) {
+        send('TOGGLE_EXPAND', { nodeId })
       }
-    },
-    [store, send],
-  )
+    }
+  }
 
-  const treeContextValue = useMemo<TreeContextValue>(
-    () => ({
-      focusedId: focusedId ?? null,
-      selectedId: selectedId ?? null,
-      expandedIds: expandedIds ?? new Set(),
-      store,
-      send,
-    }),
-    [focusedId, selectedId, expandedIds, store, send],
-  )
+  const treeContextValue: TreeContextValue = {
+    focusedId: focusedId ?? null,
+    selectedId: selectedId ?? null,
+    expandedIds: expandedIds ?? new Set(),
+    store,
+    send,
+  }
 
   return (
     <TreeContext.Provider value={treeContextValue}>
