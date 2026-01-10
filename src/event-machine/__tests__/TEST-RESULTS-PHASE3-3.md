@@ -13,14 +13,14 @@ Phase 3-3에서는 `useEventMachine`의 반환값에 `state`를 추가했습니�
 { send: Send<TEvents>; computed: TComputed }
 
 // 변경 후
-{ send: Send<TEvents>; computed: TComputed; state: TState | undefined }
+{ send: Send<TEvents>; computed: TComputed; state: TState }  // default: '' (빈 문자열)
 ```
 
 ### 구현
 
 ```ts
 // useEventMachine 내부
-const state = (fullCtx as { state?: TState }).state;
+const state = ((fullCtx as { state?: TState }).state ?? '') as TState;
 return { send, computed, state };
 ```
 
@@ -96,7 +96,7 @@ Phase 3-3 `state` 반환이 정상 동작함을 확인:
 
 1. **반환 타입:** `{ send, computed, state }` 정상 반환
 2. **state 추출:** `ctx.state`에서 올바르게 추출
-3. **undefined 처리:** state 없는 context → undefined
+3. **기본값 처리:** state 없는 context → `''` (빈 문자열)
 4. **타입 안전성:** TState 제네릭으로 타입 추론
 5. **동기화:** 외부 state 변경 시 반환값도 동기화
 6. **회귀 테스트:** 기존 기능 정상 동작
