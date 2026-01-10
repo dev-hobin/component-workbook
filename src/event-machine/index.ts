@@ -1,4 +1,3 @@
-/* eslint-disable react-hooks/exhaustive-deps */
 /**
  * Event Machine
  *
@@ -16,14 +15,20 @@ import { useCallback, useRef, useEffect, useMemo } from 'react'
 // Types
 // ============================================
 
-export type Rule<TContext, TPayload = undefined> = {
+export type Rule<
+  TContext,
+  TPayload = undefined,
+  TActions extends string = string,
+> = {
   when?: (ctx: TContext, payload: TPayload) => boolean
-  do: string
+  do: TActions
 }
 
-export type Handler<TContext, TPayload = undefined> =
-  | string
-  | Rule<TContext, TPayload>[]
+export type Handler<
+  TContext,
+  TPayload = undefined,
+  TActions extends string = string,
+> = TActions | Rule<TContext, TPayload, TActions>[]
 
 // Effect helpers - effects 콜백에서 사용할 수 있는 유틸리티
 export type EffectHelpers<TEvents extends EventsConfig> = {
@@ -102,25 +107,41 @@ type GetState<T extends MachineTypes> = T['state'] extends string
 type FullContext<T extends MachineTypes> = GetContext<T> & GetComputed<T>
 
 // State-based handler configuration
-export type StateConfig<TContext, TEvents extends EventsConfig> = {
-  on?: { [K in keyof TEvents]?: Handler<TContext, TEvents[K]> }
+export type StateConfig<
+  TContext,
+  TEvents extends EventsConfig,
+  TActions extends string = string,
+> = {
+  on?: { [K in keyof TEvents]?: Handler<TContext, TEvents[K], TActions> }
 }
 
 export type StatesConfig<
   TState extends string,
   TContext,
   TEvents extends EventsConfig,
+  TActions extends string = string,
 > = {
-  [K in TState]?: StateConfig<TContext, TEvents>
+  [K in TState]?: StateConfig<TContext, TEvents, TActions>
 }
 
 export type EventMachine<T extends MachineTypes> = {
   computed?: {
     [K in keyof GetComputed<T>]: (ctx: GetContext<T>) => GetComputed<T>[K]
   }
-  on?: { [K in keyof GetEvents<T>]?: Handler<FullContext<T>, GetEvents<T>[K]> }
-  states?: StatesConfig<GetState<T>, FullContext<T>, GetEvents<T>>
-  always?: Rule<FullContext<T>, undefined>[]
+  on?: {
+    [K in keyof GetEvents<T>]?: Handler<
+      FullContext<T>,
+      GetEvents<T>[K],
+      GetActions<T>
+    >
+  }
+  states?: StatesConfig<
+    GetState<T>,
+    FullContext<T>,
+    GetEvents<T>,
+    GetActions<T>
+  >
+  always?: Rule<FullContext<T>, undefined, GetActions<T>>[]
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   effects?: Effect<FullContext<T>, GetEvents<T>, any>[]
   actions?: {
@@ -133,6 +154,18 @@ export type Send<TEvents extends EventsConfig> = <K extends keyof TEvents>(
   event: K,
   ...args: TEvents[K] extends undefined ? [] : [payload: TEvents[K]]
 ) => void
+
+// createEventMachine 반환 타입
+export type MachineInstance<T extends MachineTypes> = EventMachine<T> & {
+  send: <K extends keyof GetEvents<T>>(
+    event: K,
+    ctx: GetContext<T>,
+    ...args: GetEvents<T>[K] extends undefined ? [] : [payload: GetEvents<T>[K]]
+  ) => void
+  evaluate: (ctx: GetContext<T>) => void
+  getComputed: (ctx: GetContext<T>) => GetComputed<T>
+  cleanup: () => void
+}
 
 // ============================================
 // Core Logic (Pure)
@@ -187,6 +220,92 @@ function shallowEqual(a: unknown, b: unknown): boolean {
   return false
 }
 
+// Effects 처리용 상태 저장소
+type EffectStore = {
+  watchedValues: Map<number, unknown>
+  enterCleanups: Map<number, () => void>
+  changeCleanups: Map<number, () => void>
+  exitCleanups: Map<number, () => void>
+}
+
+/**
+ * Effects 처리 공통 로직
+ */
+function processEffects<TContext, TEvents extends EventsConfig>(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  effects: Effect<TContext, TEvents, any>[] | undefined,
+  fullCtx: TContext,
+  effectHelpers: EffectHelpers<TEvents>,
+  store: EffectStore,
+): void {
+  if (!effects) return
+
+  effects.forEach((effect, i) => {
+    const prev = store.watchedValues.get(i)
+    const curr = effect.watch(fullCtx)
+
+    if (!shallowEqual(prev, curr)) {
+      // cleanup previous enter
+      const enterCleanup = store.enterCleanups.get(i)
+      if (enterCleanup) {
+        enterCleanup()
+        store.enterCleanups.delete(i)
+      }
+
+      // cleanup previous change
+      const changeCleanup = store.changeCleanups.get(i)
+      if (changeCleanup) {
+        changeCleanup()
+        store.changeCleanups.delete(i)
+      }
+
+      // change callback (can return cleanup)
+      const changeResult = effect.change?.(fullCtx, prev, curr, effectHelpers)
+      if (typeof changeResult === 'function') {
+        store.changeCleanups.set(i, changeResult)
+      }
+
+      // enter (falsy → truthy)
+      if (!prev && curr) {
+        // cleanup previous exit
+        const exitCleanup = store.exitCleanups.get(i)
+        if (exitCleanup) {
+          exitCleanup()
+          store.exitCleanups.delete(i)
+        }
+
+        const enterResult = effect.enter?.(fullCtx, effectHelpers)
+        if (typeof enterResult === 'function') {
+          store.enterCleanups.set(i, enterResult)
+        }
+      }
+
+      // exit (truthy → falsy)
+      if (prev && !curr) {
+        const exitResult = effect.exit?.(fullCtx, effectHelpers)
+        if (typeof exitResult === 'function') {
+          store.exitCleanups.set(i, exitResult)
+        }
+      }
+
+      store.watchedValues.set(i, curr)
+    }
+  })
+}
+
+/**
+ * Effect store 정리
+ */
+function clearEffectStore(store: EffectStore): void {
+  store.enterCleanups.forEach((fn) => fn())
+  store.enterCleanups.clear()
+  store.changeCleanups.forEach((fn) => fn())
+  store.changeCleanups.clear()
+  store.exitCleanups.forEach((fn) => fn())
+  store.exitCleanups.clear()
+  store.watchedValues.clear()
+}
+
 // ============================================
 // React Hook
 // ============================================
@@ -228,10 +347,12 @@ export function useEventMachine<T extends MachineTypes>(
   fullCtxRef.current = fullCtx
 
   const prevFullCtxRef = useRef<TContext & TComputed>(fullCtx)
-  const watchedValuesRef = useRef<Map<number, unknown>>(new Map())
-  const enterCleanupsRef = useRef<Map<number, () => void>>(new Map())
-  const changeCleanupsRef = useRef<Map<number, () => void>>(new Map())
-  const exitCleanupsRef = useRef<Map<number, () => void>>(new Map())
+  const effectStoreRef = useRef<EffectStore>({
+    watchedValues: new Map(),
+    enterCleanups: new Map(),
+    changeCleanups: new Map(),
+    exitCleanups: new Map(),
+  })
 
   // always: context 바뀔 때 자동 평가 (동기적, 렌더 중)
   const { always, actions } = machine
@@ -307,76 +428,16 @@ export function useEventMachine<T extends MachineTypes>(
   // effects: watch 값 변경 감지
   const { effects } = machine
   useEffect(() => {
-    if (!effects) return
-
-    effects.forEach((effect, i) => {
-      const prev = watchedValuesRef.current.get(i)
-      const curr = effect.watch(fullCtx)
-
-      if (!shallowEqual(prev, curr)) {
-        // cleanup previous enter
-        const enterCleanup = enterCleanupsRef.current.get(i)
-        if (enterCleanup) {
-          enterCleanup()
-          enterCleanupsRef.current.delete(i)
-        }
-
-        // cleanup previous change
-        const changeCleanup = changeCleanupsRef.current.get(i)
-        if (changeCleanup) {
-          changeCleanup()
-          changeCleanupsRef.current.delete(i)
-        }
-
-        // change callback (can return cleanup)
-        const changeResult = effect.change?.(fullCtx, prev, curr, effectHelpers)
-        if (typeof changeResult === 'function') {
-          changeCleanupsRef.current.set(i, changeResult)
-        }
-
-        // enter (falsy → truthy)
-        if (!prev && curr) {
-          // cleanup previous exit
-          const exitCleanup = exitCleanupsRef.current.get(i)
-          if (exitCleanup) {
-            exitCleanup()
-            exitCleanupsRef.current.delete(i)
-          }
-
-          const enterResult = effect.enter?.(fullCtx, effectHelpers)
-          if (typeof enterResult === 'function') {
-            enterCleanupsRef.current.set(i, enterResult)
-          }
-        }
-
-        // exit (truthy → falsy)
-        if (prev && !curr) {
-          const exitResult = effect.exit?.(fullCtx, effectHelpers)
-          if (typeof exitResult === 'function') {
-            exitCleanupsRef.current.set(i, exitResult)
-          }
-        }
-
-        watchedValuesRef.current.set(i, curr)
-      }
-    })
+    processEffects(effects, fullCtx, effectHelpers, effectStoreRef.current)
   }, [fullCtx, effects, effectHelpers])
 
   // mount/unmount 관리
   useEffect(() => {
     isMountedRef.current = true
-    const enterCleanups = enterCleanupsRef.current
-    const changeCleanups = changeCleanupsRef.current
-    const exitCleanups = exitCleanupsRef.current
-
+    const store = effectStoreRef.current
     return () => {
       isMountedRef.current = false
-      enterCleanups.forEach((cleanup) => cleanup())
-      enterCleanups.clear()
-      changeCleanups.forEach((cleanup) => cleanup())
-      changeCleanups.clear()
-      exitCleanups.forEach((cleanup) => cleanup())
-      exitCleanups.clear()
+      clearEffectStore(store)
     }
   }, [])
 
@@ -390,72 +451,35 @@ export function useEventMachine<T extends MachineTypes>(
 // Vanilla (non-React) + 타입 추론 헬퍼
 // ============================================
 
-export function createEventMachine<T extends MachineTypes>(config: {
-  computed?: {
-    [K in keyof GetComputed<T>]: (ctx: GetContext<T>) => GetComputed<T>[K]
+export function createEventMachine<T extends MachineTypes>(
+  config: EventMachine<T>,
+): MachineInstance<T> {
+  const effectStore: EffectStore = {
+    watchedValues: new Map(),
+    enterCleanups: new Map(),
+    changeCleanups: new Map(),
+    exitCleanups: new Map(),
   }
-  on?: {
-    [K in keyof GetEvents<T>]?:
-      | GetActions<T>
-      | {
-          when?: (ctx: FullContext<T>, payload: GetEvents<T>[K]) => boolean
-          do: GetActions<T>
-        }[]
-  }
-  states?: {
-    [S in GetState<T>]?: {
-      on?: {
-        [K in keyof GetEvents<T>]?:
-          | GetActions<T>
-          | {
-              when?: (ctx: FullContext<T>, payload: GetEvents<T>[K]) => boolean
-              do: GetActions<T>
-            }[]
-      }
-    }
-  }
-  always?: { when?: (ctx: FullContext<T>) => boolean; do: GetActions<T> }[]
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  effects?: Effect<FullContext<T>, GetEvents<T>, any>[]
-  actions?: {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    [K in GetActions<T>]: (ctx: FullContext<T>, payload?: any) => void
-  }
-}): EventMachine<T> & {
-  send: <K extends keyof GetEvents<T>>(
-    event: K,
-    ctx: GetContext<T>,
-    ...args: GetEvents<T>[K] extends undefined ? [] : [payload: GetEvents<T>[K]]
-  ) => void
-  evaluate: (ctx: GetContext<T>) => void
-  getComputed: (ctx: GetContext<T>) => GetComputed<T>
-  cleanup: () => void
-} {
-  const machine = config as EventMachine<T>
-  const watchedValues = new Map<number, unknown>()
-  const enterCleanups = new Map<number, () => void>()
-  const changeCleanups = new Map<number, () => void>()
-  const exitCleanups = new Map<number, () => void>()
 
   const send = (<K extends keyof GetEvents<T>>(
     event: K,
     ctx: GetContext<T>,
     ...args: GetEvents<T>[K] extends undefined ? [] : [payload: GetEvents<T>[K]]
   ) => {
-    const fullCtx = computeValues(ctx, machine.computed)
+    const fullCtx = computeValues(ctx, config.computed)
     const payload = args[0] as GetEvents<T>[K]
 
     // 1. state별 핸들러 먼저 실행
     const state = (fullCtx as { state?: GetState<T> }).state
-    if (state && machine.states?.[state]?.on?.[event]) {
-      const stateHandler = machine.states[state].on![event]!
-      executeHandler(stateHandler, machine.actions ?? {}, fullCtx, payload)
+    if (state && config.states?.[state]?.on?.[event]) {
+      const stateHandler = config.states[state].on![event]!
+      executeHandler(stateHandler, config.actions ?? {}, fullCtx, payload)
     }
 
     // 2. 전역 핸들러 실행
-    const globalHandler = machine.on?.[event]
+    const globalHandler = config.on?.[event]
     if (globalHandler) {
-      executeHandler(globalHandler, machine.actions ?? {}, fullCtx, payload)
+      executeHandler(globalHandler, config.actions ?? {}, fullCtx, payload)
     }
   }) as <K extends keyof GetEvents<T>>(
     event: K,
@@ -478,16 +502,16 @@ export function createEventMachine<T extends MachineTypes>(config: {
   })
 
   const evaluate = (ctx: GetContext<T>) => {
-    const fullCtx = computeValues(ctx, machine.computed)
+    const fullCtx = computeValues(ctx, config.computed)
     const effectHelpers = createEffectHelpers(ctx)
 
     // always
-    if (machine.always && machine.actions) {
-      const actions = machine.actions as Record<
+    if (config.always && config.actions) {
+      const actions = config.actions as Record<
         string,
         (ctx: FullContext<T>) => void
       >
-      for (const rule of machine.always) {
+      for (const rule of config.always) {
         if (!rule.when || rule.when(fullCtx, undefined)) {
           actions[rule.do]?.(fullCtx)
           break
@@ -496,78 +520,20 @@ export function createEventMachine<T extends MachineTypes>(config: {
     }
 
     // effects
-    machine.effects?.forEach((effect, i) => {
-      const prev = watchedValues.get(i)
-      const curr = effect.watch(fullCtx)
-
-      if (!shallowEqual(prev, curr)) {
-        // cleanup previous enter
-        const enterCleanup = enterCleanups.get(i)
-        if (enterCleanup) {
-          enterCleanup()
-          enterCleanups.delete(i)
-        }
-
-        // cleanup previous change
-        const changeCleanup = changeCleanups.get(i)
-        if (changeCleanup) {
-          changeCleanup()
-          changeCleanups.delete(i)
-        }
-
-        // change (can return cleanup)
-        const changeResult = effect.change?.(fullCtx, prev, curr, effectHelpers)
-        if (typeof changeResult === 'function') {
-          changeCleanups.set(i, changeResult)
-        }
-
-        // enter
-        if (!prev && curr) {
-          // cleanup previous exit
-          const exitCleanup = exitCleanups.get(i)
-          if (exitCleanup) {
-            exitCleanup()
-            exitCleanups.delete(i)
-          }
-
-          const enterResult = effect.enter?.(fullCtx, effectHelpers)
-          if (typeof enterResult === 'function') {
-            enterCleanups.set(i, enterResult)
-          }
-        }
-
-        // exit
-        if (prev && !curr) {
-          const exitResult = effect.exit?.(fullCtx, effectHelpers)
-          if (typeof exitResult === 'function') {
-            exitCleanups.set(i, exitResult)
-          }
-        }
-
-        watchedValues.set(i, curr)
-      }
-    })
+    processEffects(config.effects, fullCtx, effectHelpers, effectStore)
   }
 
   const getComputed = (ctx: GetContext<T>): GetComputed<T> => {
-    const fullCtx = computeValues(ctx, machine.computed)
-    if (!machine.computed) return {} as GetComputed<T>
+    const fullCtx = computeValues(ctx, config.computed)
+    if (!config.computed) return {} as GetComputed<T>
     const result = {} as GetComputed<T>
-    for (const key in machine.computed) {
+    for (const key in config.computed) {
       result[key] = fullCtx[key]
     }
     return result
   }
 
-  const cleanup = () => {
-    enterCleanups.forEach((fn) => fn())
-    enterCleanups.clear()
-    changeCleanups.forEach((fn) => fn())
-    changeCleanups.clear()
-    exitCleanups.forEach((fn) => fn())
-    exitCleanups.clear()
-    watchedValues.clear()
-  }
+  const cleanup = () => clearEffectStore(effectStore)
 
-  return Object.assign(machine, { send, evaluate, getComputed, cleanup })
+  return Object.assign(config, { send, evaluate, getComputed, cleanup })
 }
