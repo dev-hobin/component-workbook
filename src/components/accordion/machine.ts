@@ -35,12 +35,11 @@ export type AccordionContext = {
 // Machine
 // ============================================
 
-export const accordionMachine = createEventMachine<
-  AccordionContext,
-  AccordionEvents,
-  Record<string, never>,
-  'noop' | 'expand' | 'collapse' | 'focusNext' | 'focusPrev' | 'focusFirst' | 'focusLast'
->({
+export const accordionMachine = createEventMachine<{
+  context: AccordionContext
+  events: AccordionEvents
+  actions: 'noop' | 'expand' | 'collapse' | 'focusNext' | 'focusPrev' | 'focusFirst' | 'focusLast'
+}>({
   on: {
     TOGGLE: [
       { when: (ctx) => ctx.disabled, do: 'noop' },

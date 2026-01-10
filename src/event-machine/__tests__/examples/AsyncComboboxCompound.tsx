@@ -16,7 +16,7 @@ import {
   type ReactNode,
   type ChangeEvent,
 } from 'react'
-import { createEventMachine, useEventMachine } from '../../index'
+import { createEventMachine, useEventMachine, type Send } from '../../index'
 
 // ============================================
 // Types
@@ -52,13 +52,12 @@ type MachineContext = {
 // Machine
 // ============================================
 
-const comboboxMachine = createEventMachine<
-  MachineContext,
-  Events,
-  Record<string, never>,
-  'handleInput' | 'handleFetchSuccess' | 'handleFetchError' | 'handleSelect' | 'handleClose',
-  State
->({
+const comboboxMachine = createEventMachine<{
+  context: MachineContext
+  events: Events
+  actions: 'handleInput' | 'handleFetchSuccess' | 'handleFetchError' | 'handleSelect' | 'handleClose'
+  state: State
+}>({
   states: {
     idle: {
       on: { INPUT_CHANGE: 'handleInput' },
@@ -150,7 +149,7 @@ type ComboboxContextValue = {
   inputValue: string
   items: Item[]
   selectedItem: Item | null
-  send: ReturnType<typeof useEventMachine<MachineContext, Events>>['send']
+  send: Send<Events>
   inputRef: React.RefObject<HTMLInputElement | null>
 }
 

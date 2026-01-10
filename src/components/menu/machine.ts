@@ -68,12 +68,11 @@ type MenuActions =
   | 'openFocusedSubmenu'
   | 'closeActiveSubmenu'
 
-export const menuMachine = createEventMachine<
-  MenuContext,
-  MenuEvents,
-  Record<string, never>,
-  MenuActions
->({
+export const menuMachine = createEventMachine<{
+  context: MenuContext
+  events: MenuEvents
+  actions: MenuActions
+}>({
   on: {
     OPEN_MENU: 'openMenu',
     CLOSE_MENU: 'closeMenu',

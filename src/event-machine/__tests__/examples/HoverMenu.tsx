@@ -37,13 +37,12 @@ type Context = {
 const OPEN_DELAY = 300
 const CLOSE_DELAY = 200
 
-const hoverMenuMachine = createEventMachine<
-  Context,
-  Events,
-  Record<string, never>,
-  'startHover' | 'open' | 'startClosing' | 'close' | 'cancelClose' | 'noop',
-  State
->({
+const hoverMenuMachine = createEventMachine<{
+  context: Context
+  events: Events
+  actions: 'startHover' | 'open' | 'startClosing' | 'close' | 'cancelClose' | 'noop'
+  state: State
+}>({
   states: {
     idle: {
       on: {

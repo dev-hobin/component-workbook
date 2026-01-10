@@ -36,12 +36,11 @@ export type PaginationContext = {
 // Machine
 // ============================================
 
-export const paginationMachine = createEventMachine<
-  PaginationContext,
-  PaginationEvents,
-  Record<string, never>,
-  'noop' | 'goToPage' | 'goPrev' | 'goNext'
->({
+export const paginationMachine = createEventMachine<{
+  context: PaginationContext
+  events: PaginationEvents
+  actions: 'noop' | 'goToPage' | 'goPrev' | 'goNext'
+}>({
   on: {
     GO_TO_PAGE: 'goToPage',
     GO_PREV: [

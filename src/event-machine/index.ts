@@ -61,6 +61,46 @@ export function effect<TContext, TEvents extends EventsConfig, TWatched>(
 export type EventsConfig = Record<string, unknown>
 export type ComputedConfig = Record<string, unknown>
 
+// ============================================
+// Object-based Generic Types
+// ============================================
+
+/**
+ * 객체 기반 제네릭 타입 - 순서 무관하게 필요한 타입만 지정
+ *
+ * @example
+ * createEventMachine<{
+ *   context: MyContext
+ *   events: MyEvents
+ *   actions: 'foo' | 'bar'
+ * }>({...})
+ */
+export type MachineTypes = {
+  context: unknown
+  events?: EventsConfig
+  computed?: ComputedConfig
+  actions?: string
+  state?: string
+}
+
+// Helper types to extract with defaults
+type GetContext<T extends MachineTypes> = T['context']
+type GetEvents<T extends MachineTypes> = T['events'] extends EventsConfig
+  ? T['events']
+  : Record<string, undefined>
+type GetComputed<T extends MachineTypes> = T['computed'] extends ComputedConfig
+  ? T['computed']
+  : Record<string, never>
+type GetActions<T extends MachineTypes> = T['actions'] extends string
+  ? T['actions']
+  : string
+type GetState<T extends MachineTypes> = T['state'] extends string
+  ? T['state']
+  : string
+
+// Combined context type (context + computed)
+type FullContext<T extends MachineTypes> = GetContext<T> & GetComputed<T>
+
 // State-based handler configuration
 export type StateConfig<TContext, TEvents extends EventsConfig> = {
   on?: { [K in keyof TEvents]?: Handler<TContext, TEvents[K]> }
@@ -74,20 +114,19 @@ export type StatesConfig<
   [K in TState]?: StateConfig<TContext, TEvents>
 }
 
-export type EventMachine<
-  TContext,
-  TEvents extends EventsConfig = Record<string, undefined>,
-  TComputed extends ComputedConfig = Record<string, never>,
-  TState extends string = string,
-> = {
-  computed?: { [K in keyof TComputed]: (ctx: TContext) => TComputed[K] }
-  on?: { [K in keyof TEvents]?: Handler<TContext & TComputed, TEvents[K]> }
-  states?: StatesConfig<TState, TContext & TComputed, TEvents>
-  always?: Rule<TContext & TComputed, undefined>[]
+export type EventMachine<T extends MachineTypes> = {
+  computed?: {
+    [K in keyof GetComputed<T>]: (ctx: GetContext<T>) => GetComputed<T>[K]
+  }
+  on?: { [K in keyof GetEvents<T>]?: Handler<FullContext<T>, GetEvents<T>[K]> }
+  states?: StatesConfig<GetState<T>, FullContext<T>, GetEvents<T>>
+  always?: Rule<FullContext<T>, undefined>[]
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  effects?: Effect<TContext & TComputed, TEvents, any>[]
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  actions: Record<string, (ctx: TContext & TComputed, payload?: any) => void>
+  effects?: Effect<FullContext<T>, GetEvents<T>, any>[]
+  actions?: {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    [K in GetActions<T>]: (ctx: FullContext<T>, payload?: any) => void
+  }
 }
 
 export type Send<TEvents extends EventsConfig> = <K extends keyof TEvents>(
@@ -152,15 +191,14 @@ function shallowEqual(a: unknown, b: unknown): boolean {
 // React Hook
 // ============================================
 
-export function useEventMachine<
-  TContext,
-  TEvents extends EventsConfig = Record<string, undefined>,
-  TComputed extends ComputedConfig = Record<string, never>,
-  TState extends string = string,
->(
-  machine: EventMachine<TContext, TEvents, TComputed, TState>,
-  ctx: TContext,
-): { send: Send<TEvents>; computed: TComputed; state: TState } {
+export function useEventMachine<T extends MachineTypes>(
+  machine: EventMachine<T>,
+  ctx: GetContext<T>,
+): { send: Send<GetEvents<T>>; computed: GetComputed<T>; state: GetState<T> } {
+  type TContext = GetContext<T>
+  type TEvents = GetEvents<T>
+  type TComputed = GetComputed<T>
+  type TState = GetState<T>
   // refs for stable callbacks
   const ctxRef = useRef(ctx)
   const machineRef = useRef(machine)
@@ -197,10 +235,14 @@ export function useEventMachine<
 
   // always: context 바뀔 때 자동 평가 (동기적, 렌더 중)
   const { always, actions } = machine
-  if (prevFullCtxRef.current !== fullCtx && always) {
+  if (prevFullCtxRef.current !== fullCtx && always && actions) {
+    const actionsMap = actions as Record<
+      string,
+      (ctx: TContext & TComputed) => void
+    >
     for (const rule of always) {
       if (!rule.when || rule.when(fullCtx, undefined)) {
-        actions[rule.do]?.(fullCtx)
+        actionsMap[rule.do]?.(fullCtx)
         break
       }
     }
@@ -224,7 +266,7 @@ export function useEventMachine<
         const stateHandler = currentMachine.states[state].on![event]!
         executeHandler(
           stateHandler,
-          currentMachine.actions,
+          currentMachine.actions ?? {},
           currentFullCtx,
           payload,
         )
@@ -235,7 +277,7 @@ export function useEventMachine<
       if (globalHandler) {
         executeHandler(
           globalHandler,
-          currentMachine.actions,
+          currentMachine.actions ?? {},
           currentFullCtx,
           payload,
         )
@@ -339,7 +381,7 @@ export function useEventMachine<
   }, [])
 
   // state from context (default to empty string if not provided)
-  const state = ((fullCtx as { state?: TState }).state ?? '') as TState
+  const state = (fullCtx as { state?: TState }).state ?? ('' as TState)
 
   return { send, computed, state }
 }
@@ -348,102 +390,106 @@ export function useEventMachine<
 // Vanilla (non-React) + 타입 추론 헬퍼
 // ============================================
 
-export function createEventMachine<
-  TContext,
-  TEvents extends EventsConfig = Record<string, undefined>,
-  TComputed extends ComputedConfig = Record<string, never>,
-  TActions extends string = string,
-  TState extends string = string,
->(config: {
-  computed?: { [K in keyof TComputed]: (ctx: TContext) => TComputed[K] }
+export function createEventMachine<T extends MachineTypes>(config: {
+  computed?: {
+    [K in keyof GetComputed<T>]: (ctx: GetContext<T>) => GetComputed<T>[K]
+  }
   on?: {
-    [K in keyof TEvents]?:
-      | TActions
+    [K in keyof GetEvents<T>]?:
+      | GetActions<T>
       | {
-          when?: (ctx: TContext & TComputed, payload: TEvents[K]) => boolean
-          do: TActions
+          when?: (ctx: FullContext<T>, payload: GetEvents<T>[K]) => boolean
+          do: GetActions<T>
         }[]
   }
   states?: {
-    [S in TState]?: {
+    [S in GetState<T>]?: {
       on?: {
-        [K in keyof TEvents]?:
-          | TActions
+        [K in keyof GetEvents<T>]?:
+          | GetActions<T>
           | {
-              when?: (ctx: TContext & TComputed, payload: TEvents[K]) => boolean
-              do: TActions
+              when?: (ctx: FullContext<T>, payload: GetEvents<T>[K]) => boolean
+              do: GetActions<T>
             }[]
       }
     }
   }
-  always?: { when?: (ctx: TContext & TComputed) => boolean; do: TActions }[]
+  always?: { when?: (ctx: FullContext<T>) => boolean; do: GetActions<T> }[]
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  effects?: Effect<TContext & TComputed, TEvents, any>[]
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  actions: {
-    [K in TActions]: (ctx: TContext & TComputed, payload?: any) => void
+  effects?: Effect<FullContext<T>, GetEvents<T>, any>[]
+  actions?: {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    [K in GetActions<T>]: (ctx: FullContext<T>, payload?: any) => void
   }
-}): EventMachine<TContext, TEvents, TComputed, TState> & {
-  send: <K extends keyof TEvents>(
+}): EventMachine<T> & {
+  send: <K extends keyof GetEvents<T>>(
     event: K,
-    ctx: TContext,
-    ...args: TEvents[K] extends undefined ? [] : [payload: TEvents[K]]
+    ctx: GetContext<T>,
+    ...args: GetEvents<T>[K] extends undefined ? [] : [payload: GetEvents<T>[K]]
   ) => void
-  evaluate: (ctx: TContext) => void
-  getComputed: (ctx: TContext) => TComputed
+  evaluate: (ctx: GetContext<T>) => void
+  getComputed: (ctx: GetContext<T>) => GetComputed<T>
   cleanup: () => void
 } {
-  const machine = config as EventMachine<TContext, TEvents, TComputed, TState>
+  const machine = config as EventMachine<T>
   const watchedValues = new Map<number, unknown>()
   const enterCleanups = new Map<number, () => void>()
   const changeCleanups = new Map<number, () => void>()
   const exitCleanups = new Map<number, () => void>()
 
-  const send = (<K extends keyof TEvents>(
+  const send = (<K extends keyof GetEvents<T>>(
     event: K,
-    ctx: TContext,
-    ...args: TEvents[K] extends undefined ? [] : [payload: TEvents[K]]
+    ctx: GetContext<T>,
+    ...args: GetEvents<T>[K] extends undefined ? [] : [payload: GetEvents<T>[K]]
   ) => {
     const fullCtx = computeValues(ctx, machine.computed)
-    const payload = args[0] as TEvents[K]
+    const payload = args[0] as GetEvents<T>[K]
 
     // 1. state별 핸들러 먼저 실행
-    const state = (fullCtx as { state?: TState }).state
+    const state = (fullCtx as { state?: GetState<T> }).state
     if (state && machine.states?.[state]?.on?.[event]) {
       const stateHandler = machine.states[state].on![event]!
-      executeHandler(stateHandler, machine.actions, fullCtx, payload)
+      executeHandler(stateHandler, machine.actions ?? {}, fullCtx, payload)
     }
 
     // 2. 전역 핸들러 실행
     const globalHandler = machine.on?.[event]
     if (globalHandler) {
-      executeHandler(globalHandler, machine.actions, fullCtx, payload)
+      executeHandler(globalHandler, machine.actions ?? {}, fullCtx, payload)
     }
-  }) as <K extends keyof TEvents>(
+  }) as <K extends keyof GetEvents<T>>(
     event: K,
-    ctx: TContext,
-    ...args: TEvents[K] extends undefined ? [] : [payload: TEvents[K]]
+    ctx: GetContext<T>,
+    ...args: GetEvents<T>[K] extends undefined ? [] : [payload: GetEvents<T>[K]]
   ) => void
 
   // vanilla용 send wrapper (ctx 바인딩)
-  const createEffectHelpers = (ctx: TContext): EffectHelpers<TEvents> => ({
-    send: (<K extends keyof TEvents>(
+  const createEffectHelpers = (
+    ctx: GetContext<T>,
+  ): EffectHelpers<GetEvents<T>> => ({
+    send: (<K extends keyof GetEvents<T>>(
       event: K,
-      ...args: TEvents[K] extends undefined ? [] : [payload: TEvents[K]]
+      ...args: GetEvents<T>[K] extends undefined
+        ? []
+        : [payload: GetEvents<T>[K]]
     ) => {
       send(event, ctx, ...args)
-    }) as Send<TEvents>,
+    }) as Send<GetEvents<T>>,
   })
 
-  const evaluate = (ctx: TContext) => {
+  const evaluate = (ctx: GetContext<T>) => {
     const fullCtx = computeValues(ctx, machine.computed)
     const effectHelpers = createEffectHelpers(ctx)
 
     // always
-    if (machine.always) {
+    if (machine.always && machine.actions) {
+      const actions = machine.actions as Record<
+        string,
+        (ctx: FullContext<T>) => void
+      >
       for (const rule of machine.always) {
         if (!rule.when || rule.when(fullCtx, undefined)) {
-          machine.actions[rule.do]?.(fullCtx)
+          actions[rule.do]?.(fullCtx)
           break
         }
       }
@@ -503,10 +549,10 @@ export function createEventMachine<
     })
   }
 
-  const getComputed = (ctx: TContext): TComputed => {
+  const getComputed = (ctx: GetContext<T>): GetComputed<T> => {
     const fullCtx = computeValues(ctx, machine.computed)
-    if (!machine.computed) return {} as TComputed
-    const result = {} as TComputed
+    if (!machine.computed) return {} as GetComputed<T>
+    const result = {} as GetComputed<T>
     for (const key in machine.computed) {
       result[key] = fullCtx[key]
     }

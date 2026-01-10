@@ -8,7 +8,7 @@
  */
 
 import { createContext, useContext, useState, type ReactNode } from 'react'
-import { createEventMachine, useEventMachine } from '../../index'
+import { createEventMachine, useEventMachine, type Send } from '../../index'
 
 // ============================================
 // Types
@@ -36,13 +36,12 @@ type MachineContext = {
 const OPEN_DELAY = 300
 const CLOSE_DELAY = 200
 
-const hoverMenuMachine = createEventMachine<
-  MachineContext,
-  Events,
-  Record<string, never>,
-  'startHover' | 'open' | 'startClosing' | 'close' | 'cancelClose' | 'noop',
-  State
->({
+const hoverMenuMachine = createEventMachine<{
+  context: MachineContext
+  events: Events
+  actions: 'startHover' | 'open' | 'startClosing' | 'close' | 'cancelClose' | 'noop'
+  state: State
+}>({
   states: {
     idle: {
       on: {
@@ -106,7 +105,7 @@ const hoverMenuMachine = createEventMachine<
 type HoverMenuContextValue = {
   state: State
   isOpen: boolean
-  send: ReturnType<typeof useEventMachine<MachineContext, Events>>['send']
+  send: Send<Events>
 }
 
 const HoverMenuContext = createContext<HoverMenuContextValue | null>(null)

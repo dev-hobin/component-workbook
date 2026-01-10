@@ -79,12 +79,11 @@ type TreeActions =
   | 'expandFocused'
   | 'collapseFocused'
 
-export const treeMachine = createEventMachine<
-  TreeContext,
-  TreeEvents,
-  Record<string, never>,
-  TreeActions
->({
+export const treeMachine = createEventMachine<{
+  context: TreeContext
+  events: TreeEvents
+  actions: TreeActions
+}>({
   on: {
     FOCUS: 'focus',
     FOCUS_NEXT: 'focusNext',

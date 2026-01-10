@@ -46,12 +46,11 @@ export type TabsContext = {
 // Machine
 // ============================================
 
-export const tabsMachine = createEventMachine<
-  TabsContext,
-  TabsEvents,
-  Record<string, never>,
-  'select' | 'focus' | 'blur' | 'focusNext' | 'focusPrev' | 'focusFirst' | 'focusLast'
->({
+export const tabsMachine = createEventMachine<{
+  context: TabsContext
+  events: TabsEvents
+  actions: 'select' | 'focus' | 'blur' | 'focusNext' | 'focusPrev' | 'focusFirst' | 'focusLast'
+}>({
   on: {
     SELECT: 'select',
     FOCUS: 'focus',

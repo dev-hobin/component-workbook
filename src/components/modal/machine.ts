@@ -35,12 +35,11 @@ export type ModalContext = {
 // Machine
 // ============================================
 
-export const modalMachine = createEventMachine<
-  ModalContext,
-  ModalEvents,
-  Record<string, never>,
-  'noop' | 'open' | 'close'
->({
+export const modalMachine = createEventMachine<{
+  context: ModalContext
+  events: ModalEvents
+  actions: 'noop' | 'open' | 'close'
+}>({
   on: {
     OPEN: 'open',
     CLOSE: 'close',

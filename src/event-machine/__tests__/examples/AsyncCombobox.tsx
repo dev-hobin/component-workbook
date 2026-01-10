@@ -49,20 +49,20 @@ type Context = {
 // Machine
 // ============================================
 
-const comboboxMachine = createEventMachine<
-  Context,
-  Events,
-  Record<string, never>,
-  | 'handleInput'
-  | 'handleFetchSuccess'
-  | 'handleFetchError'
-  | 'handleSelect'
-  | 'handleClose'
-  | 'handleFocus'
-  | 'handleBlur'
-  | 'noop',
-  State
->({
+const comboboxMachine = createEventMachine<{
+  context: Context
+  events: Events
+  actions:
+    | 'handleInput'
+    | 'handleFetchSuccess'
+    | 'handleFetchError'
+    | 'handleSelect'
+    | 'handleClose'
+    | 'handleFocus'
+    | 'handleBlur'
+    | 'noop'
+  state: State
+}>({
   // 전역 핸들러 (모든 state에서)
   on: {
     FOCUS: 'handleFocus',

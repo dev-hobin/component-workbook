@@ -112,12 +112,11 @@ type ComboboxActions =
   | 'handleInputChange'
   | 'handleInputBlur'
 
-export const comboboxMachine = createEventMachine<
-  ComboboxContext,
-  ComboboxEvents,
-  Record<string, never>,
-  ComboboxActions
->({
+export const comboboxMachine = createEventMachine<{
+  context: ComboboxContext
+  events: ComboboxEvents
+  actions: ComboboxActions
+}>({
   on: {
     OPEN: 'open',
     CLOSE: 'close',
