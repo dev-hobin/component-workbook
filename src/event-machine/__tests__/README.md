@@ -9,6 +9,7 @@
 | `phase1-2.test.ts` | 1-2 | change cleanup 반환 - 타입 체크 + vanilla 런타임 |
 | `Phase1-2TestComponent.tsx` | 1-2 | change cleanup 반환 - React 런타임 |
 | `Phase2-1TestComponent.tsx` | 2-1 | 복합 watch (shallowEqual) - React 런타임 |
+| `Phase3-2TestComponent.tsx` | 3-2 | states 실행 로직 - React 런타임 |
 
 ---
 
@@ -94,6 +95,24 @@ function App() {
    - 입력창에 텍스트 입력 → change 트리거
    - 모드 버튼 클릭 → change 트리거 (inputValue 동일해도)
    - 같은 모드 버튼 다시 클릭 → change 트리거 안 됨 (shallowEqual)
+
+**Phase 3-2:**
+1. `src/App.tsx` 수정:
+```tsx
+import { TestPhase3_2Component } from './event-machine/__tests__/Phase3-2TestComponent'
+
+function App() {
+  return <TestPhase3_2Component />
+}
+```
+
+2. Dev 서버 실행: `pnpm dev`
+
+3. 테스트 시나리오:
+   - idle에서 OPEN → loading 전이
+   - loading에서 OPEN → open 전이
+   - open에서 CLOSE → idle 전이
+   - 모든 상태에서 FOCUS → 전역 핸들러 실행
 
 ---
 

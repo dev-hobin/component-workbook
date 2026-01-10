@@ -47,13 +47,28 @@ export function effect<TContext, TEvents extends EventsConfig, TWatched>(
 export type EventsConfig = Record<string, unknown>;
 export type ComputedConfig = Record<string, unknown>;
 
+// State-based handler configuration
+export type StateConfig<TContext, TEvents extends EventsConfig> = {
+  on?: { [K in keyof TEvents]?: Handler<TContext, TEvents[K]> };
+};
+
+export type StatesConfig<
+  TState extends string,
+  TContext,
+  TEvents extends EventsConfig
+> = {
+  [K in TState]?: StateConfig<TContext, TEvents>;
+};
+
 export type EventMachine<
   TContext,
   TEvents extends EventsConfig = Record<string, undefined>,
-  TComputed extends ComputedConfig = Record<string, never>
+  TComputed extends ComputedConfig = Record<string, never>,
+  TState extends string = string
 > = {
   computed?: { [K in keyof TComputed]: (ctx: TContext) => TComputed[K] };
-  on: { [K in keyof TEvents]?: Handler<TContext & TComputed, TEvents[K]> };
+  on?: { [K in keyof TEvents]?: Handler<TContext & TComputed, TEvents[K]> };
+  states?: StatesConfig<TState, TContext & TComputed, TEvents>;
   always?: Rule<TContext & TComputed, undefined>[];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   effects?: Effect<TContext & TComputed, TEvents, any>[];
@@ -126,11 +141,12 @@ function shallowEqual(a: unknown, b: unknown): boolean {
 export function useEventMachine<
   TContext,
   TEvents extends EventsConfig = Record<string, undefined>,
-  TComputed extends ComputedConfig = Record<string, never>
+  TComputed extends ComputedConfig = Record<string, never>,
+  TState extends string = string
 >(
-  machine: EventMachine<TContext, TEvents, TComputed>,
+  machine: EventMachine<TContext, TEvents, TComputed, TState>,
   ctx: TContext
-): { send: Send<TEvents>; computed: TComputed } {
+): { send: Send<TEvents>; computed: TComputed; state: TState | undefined } {
   // refs for stable callbacks
   const ctxRef = useRef(ctx);
   const machineRef = useRef(machine);
@@ -185,12 +201,20 @@ export function useEventMachine<
     ) => {
       const currentMachine = machineRef.current;
       const currentCtx = ctxRef.current;
-      const handler = currentMachine.on[event];
+      const currentFullCtx = computeValues(currentCtx, currentMachine.computed);
+      const payload = args[0] as TEvents[K];
 
-      if (handler) {
-        const currentFullCtx = computeValues(currentCtx, currentMachine.computed);
-        const payload = args[0] as TEvents[K];
-        executeHandler(handler, currentMachine.actions, currentFullCtx, payload);
+      // 1. state별 핸들러 먼저 실행
+      const state = (currentFullCtx as { state?: TState }).state;
+      if (state && currentMachine.states?.[state]?.on?.[event]) {
+        const stateHandler = currentMachine.states[state].on![event]!;
+        executeHandler(stateHandler, currentMachine.actions, currentFullCtx, payload);
+      }
+
+      // 2. 전역 핸들러 실행
+      const globalHandler = currentMachine.on?.[event];
+      if (globalHandler) {
+        executeHandler(globalHandler, currentMachine.actions, currentFullCtx, payload);
       }
     }),
     [] // 의존성 없음 - ref 사용
@@ -290,7 +314,10 @@ export function useEventMachine<
     };
   }, []);
 
-  return { send, computed };
+  // state from context
+  const state = (fullCtx as { state?: TState }).state;
+
+  return { send, computed, state };
 }
 
 // ============================================
@@ -301,20 +328,30 @@ export function createEventMachine<
   TContext,
   TEvents extends EventsConfig = Record<string, undefined>,
   TComputed extends ComputedConfig = Record<string, never>,
-  TActions extends string = string
+  TActions extends string = string,
+  TState extends string = string
 >(config: {
   computed?: { [K in keyof TComputed]: (ctx: TContext) => TComputed[K] };
-  on: {
+  on?: {
     [K in keyof TEvents]?:
       | TActions
       | { when?: (ctx: TContext & TComputed, payload: TEvents[K]) => boolean; do: TActions }[]
+  };
+  states?: {
+    [S in TState]?: {
+      on?: {
+        [K in keyof TEvents]?:
+          | TActions
+          | { when?: (ctx: TContext & TComputed, payload: TEvents[K]) => boolean; do: TActions }[]
+      };
+    };
   };
   always?: { when?: (ctx: TContext & TComputed) => boolean; do: TActions }[];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   effects?: Effect<TContext & TComputed, TEvents, any>[];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   actions: { [K in TActions]: (ctx: TContext & TComputed, payload?: any) => void };
-}): EventMachine<TContext, TEvents, TComputed> & {
+}): EventMachine<TContext, TEvents, TComputed, TState> & {
   send: <K extends keyof TEvents>(
     event: K,
     ctx: TContext,
@@ -324,7 +361,7 @@ export function createEventMachine<
   getComputed: (ctx: TContext) => TComputed;
   cleanup: () => void;
 } {
-  const machine = config as EventMachine<TContext, TEvents, TComputed>;
+  const machine = config as EventMachine<TContext, TEvents, TComputed, TState>;
   const watchedValues = new Map<number, unknown>();
   const enterCleanups = new Map<number, () => void>();
   const changeCleanups = new Map<number, () => void>();
@@ -335,11 +372,20 @@ export function createEventMachine<
     ctx: TContext,
     ...args: TEvents[K] extends undefined ? [] : [payload: TEvents[K]]
   ) => {
-    const handler = machine.on[event];
-    if (handler) {
-      const fullCtx = computeValues(ctx, machine.computed);
-      const payload = args[0] as TEvents[K];
-      executeHandler(handler, machine.actions, fullCtx, payload);
+    const fullCtx = computeValues(ctx, machine.computed);
+    const payload = args[0] as TEvents[K];
+
+    // 1. state별 핸들러 먼저 실행
+    const state = (fullCtx as { state?: TState }).state;
+    if (state && machine.states?.[state]?.on?.[event]) {
+      const stateHandler = machine.states[state].on![event]!;
+      executeHandler(stateHandler, machine.actions, fullCtx, payload);
+    }
+
+    // 2. 전역 핸들러 실행
+    const globalHandler = machine.on?.[event];
+    if (globalHandler) {
+      executeHandler(globalHandler, machine.actions, fullCtx, payload);
     }
   }) as <K extends keyof TEvents>(
     event: K,
