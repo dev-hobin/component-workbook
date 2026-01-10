@@ -47,7 +47,7 @@ export type TabsContext = {
 // ============================================
 
 export const tabsMachine = createEventMachine<{
-  context: TabsContext
+  input: TabsContext
   events: TabsEvents
   actions: 'select' | 'focus' | 'blur' | 'focusNext' | 'focusPrev' | 'focusFirst' | 'focusLast'
 }>({

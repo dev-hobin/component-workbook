@@ -36,7 +36,7 @@ export type ModalContext = {
 // ============================================
 
 export const modalMachine = createEventMachine<{
-  context: ModalContext
+  input: ModalContext
   events: ModalEvents
   actions: 'noop' | 'open' | 'close'
 }>({

@@ -69,7 +69,7 @@ type MenuActions =
   | 'closeActiveSubmenu'
 
 export const menuMachine = createEventMachine<{
-  context: MenuContext
+  input: MenuContext
   events: MenuEvents
   actions: MenuActions
 }>({

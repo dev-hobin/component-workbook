@@ -50,7 +50,7 @@ type Context = {
 // ============================================
 
 const comboboxMachine = createEventMachine<{
-  context: Context
+  input: Context
   events: Events
   actions:
     | 'handleInput'

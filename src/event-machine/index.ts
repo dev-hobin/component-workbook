@@ -3,7 +3,9 @@
  *
  * 상태 없는 선언적 이벤트 핸들러.
  *
- * - computed: context에서 "상태" 파생
+ * - input: 외부에서 전달하는 데이터
+ * - computed: input에서 파생되는 값
+ * - context: input + computed (핸들러에서 받는 전체 컨텍스트)
  * - on: 이벤트 → 조건부 액션
  * - effects: watch 기반 사이드 이펙트
  * - always: 자동 평가 규칙
@@ -20,7 +22,7 @@ export type Rule<
   TPayload = undefined,
   TActions extends string = string,
 > = {
-  when?: (ctx: TContext, payload: TPayload) => boolean
+  when?: (context: TContext, payload: TPayload) => boolean
   do: TActions
 }
 
@@ -42,14 +44,14 @@ export type Effect<
   TEvents extends EventsConfig,
   TWatched = unknown,
 > = {
-  watch: (ctx: TContext) => TWatched
+  watch: (context: TContext) => TWatched
   enter?: (
-    ctx: TContext,
+    context: TContext,
     helpers: EffectHelpers<TEvents>,
   ) => void | Cleanup | Promise<void>
-  exit?: (ctx: TContext, helpers: EffectHelpers<TEvents>) => void | Cleanup
+  exit?: (context: TContext, helpers: EffectHelpers<TEvents>) => void | Cleanup
   change?: (
-    ctx: TContext,
+    context: TContext,
     prev: TWatched | undefined,
     curr: TWatched,
     helpers: EffectHelpers<TEvents>,
@@ -75,36 +77,35 @@ export type ComputedConfig = Record<string, unknown>
  *
  * @example
  * createEventMachine<{
- *   context: MyContext
+ *   input: MyInput
  *   events: MyEvents
  *   actions: 'foo' | 'bar'
  * }>({...})
  */
 export type MachineTypes = {
-  context: unknown
+  input?: unknown
   events?: EventsConfig
   computed?: ComputedConfig
   actions?: string
   state?: string
 }
 
-// Helper types to extract with defaults
-type GetContext<T extends MachineTypes> = T['context']
-type GetEvents<T extends MachineTypes> = T['events'] extends EventsConfig
+type Input<T extends MachineTypes> = T['input']
+type Events<T extends MachineTypes> = T['events'] extends EventsConfig
   ? T['events']
   : Record<string, undefined>
-type GetComputed<T extends MachineTypes> = T['computed'] extends ComputedConfig
+type Computed<T extends MachineTypes> = T['computed'] extends ComputedConfig
   ? T['computed']
   : Record<string, never>
-type GetActions<T extends MachineTypes> = T['actions'] extends string
+type Actions<T extends MachineTypes> = T['actions'] extends string
   ? T['actions']
   : string
-type GetState<T extends MachineTypes> = T['state'] extends string
+type State<T extends MachineTypes> = T['state'] extends string
   ? T['state']
   : string
 
-// Combined context type (context + computed)
-type FullContext<T extends MachineTypes> = GetContext<T> & GetComputed<T>
+// Context = Input + Computed (핸들러에서 받는 전체 컨텍스트)
+type Context<T extends MachineTypes> = Input<T> & Computed<T>
 
 // State-based handler configuration
 export type StateConfig<
@@ -126,27 +127,18 @@ export type StatesConfig<
 
 export type EventMachine<T extends MachineTypes> = {
   computed?: {
-    [K in keyof GetComputed<T>]: (ctx: GetContext<T>) => GetComputed<T>[K]
+    [K in keyof Computed<T>]: (input: Input<T>) => Computed<T>[K]
   }
   on?: {
-    [K in keyof GetEvents<T>]?: Handler<
-      FullContext<T>,
-      GetEvents<T>[K],
-      GetActions<T>
-    >
+    [K in keyof Events<T>]?: Handler<Context<T>, Events<T>[K], Actions<T>>
   }
-  states?: StatesConfig<
-    GetState<T>,
-    FullContext<T>,
-    GetEvents<T>,
-    GetActions<T>
-  >
-  always?: Rule<FullContext<T>, undefined, GetActions<T>>[]
+  states?: StatesConfig<State<T>, Context<T>, Events<T>, Actions<T>>
+  always?: Rule<Context<T>, undefined, Actions<T>>[]
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  effects?: Effect<FullContext<T>, GetEvents<T>, any>[]
+  effects?: Effect<Context<T>, Events<T>, any>[]
   actions?: {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    [K in GetActions<T>]: (ctx: FullContext<T>, payload?: any) => void
+    [K in Actions<T>]: (context: Context<T>, payload?: any) => void
   }
 }
 
@@ -157,13 +149,13 @@ export type Send<TEvents extends EventsConfig> = <K extends keyof TEvents>(
 
 // createEventMachine 반환 타입
 export type MachineInstance<T extends MachineTypes> = EventMachine<T> & {
-  send: <K extends keyof GetEvents<T>>(
+  send: <K extends keyof Events<T>>(
     event: K,
-    ctx: GetContext<T>,
-    ...args: GetEvents<T>[K] extends undefined ? [] : [payload: GetEvents<T>[K]]
+    input: Input<T>,
+    ...args: Events<T>[K] extends undefined ? [] : [payload: Events<T>[K]]
   ) => void
-  evaluate: (ctx: GetContext<T>) => void
-  getComputed: (ctx: GetContext<T>) => GetComputed<T>
+  evaluate: (input: Input<T>) => void
+  getComputed: (input: Input<T>) => Computed<T>
   cleanup: () => void
 }
 
@@ -173,16 +165,16 @@ export type MachineInstance<T extends MachineTypes> = EventMachine<T> & {
 
 function executeHandler<TContext, TPayload>(
   handler: Handler<TContext, TPayload>,
-  actions: Record<string, (ctx: TContext, payload?: TPayload) => void>,
-  ctx: TContext,
+  actions: Record<string, (context: TContext, payload?: TPayload) => void>,
+  context: TContext,
   payload: TPayload,
 ): void {
   if (typeof handler === 'string') {
-    actions[handler]?.(ctx, payload)
+    actions[handler]?.(context, payload)
   } else {
     for (const rule of handler) {
-      if (!rule.when || rule.when(ctx, payload)) {
-        actions[rule.do]?.(ctx, payload)
+      if (!rule.when || rule.when(context, payload)) {
+        actions[rule.do]?.(context, payload)
         break
       }
     }
@@ -190,16 +182,16 @@ function executeHandler<TContext, TPayload>(
 }
 
 function computeValues<TContext, TComputed extends ComputedConfig>(
-  ctx: TContext,
-  computed?: { [K in keyof TComputed]: (ctx: TContext) => TComputed[K] },
+  context: TContext,
+  computed?: { [K in keyof TComputed]: (context: TContext) => TComputed[K] },
 ): TContext & TComputed {
-  if (!computed) return ctx as TContext & TComputed
+  if (!computed) return context as TContext & TComputed
 
   const values = {} as TComputed
   for (const key in computed) {
-    values[key] = computed[key](ctx)
+    values[key] = computed[key](context)
   }
-  return { ...ctx, ...values }
+  return { ...context, ...values }
 }
 
 /**
@@ -234,7 +226,7 @@ type EffectStore = {
 function processEffects<TContext, TEvents extends EventsConfig>(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   effects: Effect<TContext, TEvents, any>[] | undefined,
-  fullCtx: TContext,
+  context: TContext,
   effectHelpers: EffectHelpers<TEvents>,
   store: EffectStore,
 ): void {
@@ -242,7 +234,7 @@ function processEffects<TContext, TEvents extends EventsConfig>(
 
   effects.forEach((effect, i) => {
     const prev = store.watchedValues.get(i)
-    const curr = effect.watch(fullCtx)
+    const curr = effect.watch(context)
 
     if (!shallowEqual(prev, curr)) {
       // cleanup previous enter
@@ -260,7 +252,7 @@ function processEffects<TContext, TEvents extends EventsConfig>(
       }
 
       // change callback (can return cleanup)
-      const changeResult = effect.change?.(fullCtx, prev, curr, effectHelpers)
+      const changeResult = effect.change?.(context, prev, curr, effectHelpers)
       if (typeof changeResult === 'function') {
         store.changeCleanups.set(i, changeResult)
       }
@@ -274,7 +266,7 @@ function processEffects<TContext, TEvents extends EventsConfig>(
           store.exitCleanups.delete(i)
         }
 
-        const enterResult = effect.enter?.(fullCtx, effectHelpers)
+        const enterResult = effect.enter?.(context, effectHelpers)
         if (typeof enterResult === 'function') {
           store.enterCleanups.set(i, enterResult)
         }
@@ -282,7 +274,7 @@ function processEffects<TContext, TEvents extends EventsConfig>(
 
       // exit (truthy → falsy)
       if (prev && !curr) {
-        const exitResult = effect.exit?.(fullCtx, effectHelpers)
+        const exitResult = effect.exit?.(context, effectHelpers)
         if (typeof exitResult === 'function') {
           store.exitCleanups.set(i, exitResult)
         }
@@ -312,41 +304,37 @@ function clearEffectStore(store: EffectStore): void {
 
 export function useEventMachine<T extends MachineTypes>(
   machine: EventMachine<T>,
-  ctx: GetContext<T>,
-): { send: Send<GetEvents<T>>; computed: GetComputed<T>; state: GetState<T> } {
-  type TContext = GetContext<T>
-  type TEvents = GetEvents<T>
-  type TComputed = GetComputed<T>
-  type TState = GetState<T>
+  input: Input<T>,
+): { send: Send<Events<T>>; computed: Computed<T>; state: State<T> } {
   // refs for stable callbacks
-  const ctxRef = useRef(ctx)
+  const inputRef = useRef(input)
   const machineRef = useRef(machine)
   const isMountedRef = useRef(true)
 
-  ctxRef.current = ctx
+  inputRef.current = input
   machineRef.current = machine
 
   // computed 값 계산
   const { computed: computedDef } = machine
-  const fullCtx = useMemo(
-    () => computeValues(ctx, computedDef),
-    [ctx, computedDef],
+  const context = useMemo(
+    () => computeValues(input, computedDef),
+    [input, computedDef],
   )
 
   // computed만 추출
   const computed = useMemo(() => {
-    if (!computedDef) return {} as TComputed
-    const result = {} as TComputed
+    if (!computedDef) return {} as Computed<T>
+    const result = {} as Computed<T>
     for (const key in computedDef) {
-      result[key] = fullCtx[key]
+      result[key] = context[key]
     }
     return result
-  }, [fullCtx, computedDef])
+  }, [context, computedDef])
 
-  const fullCtxRef = useRef(fullCtx)
-  fullCtxRef.current = fullCtx
+  const contextRef = useRef(context)
+  contextRef.current = context
 
-  const prevFullCtxRef = useRef<TContext & TComputed>(fullCtx)
+  const prevContextRef = useRef<Context<T>>(context)
   const effectStoreRef = useRef<EffectStore>({
     watchedValues: new Map(),
     enterCleanups: new Map(),
@@ -356,39 +344,39 @@ export function useEventMachine<T extends MachineTypes>(
 
   // always: context 바뀔 때 자동 평가 (동기적, 렌더 중)
   const { always, actions } = machine
-  if (prevFullCtxRef.current !== fullCtx && always && actions) {
-    const actionsMap = actions as Record<
-      string,
-      (ctx: TContext & TComputed) => void
-    >
+  if (prevContextRef.current !== context && always && actions) {
+    const actionsMap = actions as Record<string, (context: Context<T>) => void>
     for (const rule of always) {
-      if (!rule.when || rule.when(fullCtx, undefined)) {
-        actionsMap[rule.do]?.(fullCtx)
+      if (!rule.when || rule.when(context, undefined)) {
+        actionsMap[rule.do]?.(context)
         break
       }
     }
   }
-  prevFullCtxRef.current = fullCtx
+  prevContextRef.current = context
 
   // send: 안정적인 함수 (deps 없음, ref 사용)
-  const send: Send<TEvents> = useCallback(
-    <K extends keyof TEvents>(
+  const send: Send<Events<T>> = useCallback(
+    <K extends keyof Events<T>>(
       event: K,
-      ...args: TEvents[K] extends undefined ? [] : [payload: TEvents[K]]
+      ...args: Events<T>[K] extends undefined ? [] : [payload: Events<T>[K]]
     ) => {
       const currentMachine = machineRef.current
-      const currentCtx = ctxRef.current
-      const currentFullCtx = computeValues(currentCtx, currentMachine.computed)
-      const payload = args[0] as TEvents[K]
+      const currentInput = inputRef.current
+      const currentContext = computeValues(
+        currentInput,
+        currentMachine.computed,
+      )
+      const payload = args[0] as Events<T>[K]
 
       // 1. state별 핸들러 먼저 실행
-      const state = (currentFullCtx as { state?: TState }).state
+      const state = (currentContext as { state?: State<T> }).state
       if (state && currentMachine.states?.[state]?.on?.[event]) {
         const stateHandler = currentMachine.states[state].on![event]!
         executeHandler(
           stateHandler,
           currentMachine.actions ?? {},
-          currentFullCtx,
+          currentContext,
           payload,
         )
       }
@@ -399,7 +387,7 @@ export function useEventMachine<T extends MachineTypes>(
         executeHandler(
           globalHandler,
           currentMachine.actions ?? {},
-          currentFullCtx,
+          currentContext,
           payload,
         )
       }
@@ -408,10 +396,10 @@ export function useEventMachine<T extends MachineTypes>(
   )
 
   // safeSend: 언마운트된 후에는 호출되지 않도록
-  const safeSend: Send<TEvents> = useCallback(
-    <K extends keyof TEvents>(
+  const safeSend: Send<Events<T>> = useCallback(
+    <K extends keyof Events<T>>(
       event: K,
-      ...args: TEvents[K] extends undefined ? [] : [payload: TEvents[K]]
+      ...args: Events<T>[K] extends undefined ? [] : [payload: Events<T>[K]]
     ) => {
       if (!isMountedRef.current) return
       send(event, ...args)
@@ -420,7 +408,7 @@ export function useEventMachine<T extends MachineTypes>(
   )
 
   // effect helpers
-  const effectHelpers: EffectHelpers<TEvents> = useMemo(
+  const effectHelpers: EffectHelpers<Events<T>> = useMemo(
     () => ({ send: safeSend }),
     [safeSend],
   )
@@ -428,8 +416,8 @@ export function useEventMachine<T extends MachineTypes>(
   // effects: watch 값 변경 감지
   const { effects } = machine
   useEffect(() => {
-    processEffects(effects, fullCtx, effectHelpers, effectStoreRef.current)
-  }, [fullCtx, effects, effectHelpers])
+    processEffects(effects, context, effectHelpers, effectStoreRef.current)
+  }, [context, effects, effectHelpers])
 
   // mount/unmount 관리
   useEffect(() => {
@@ -442,7 +430,7 @@ export function useEventMachine<T extends MachineTypes>(
   }, [])
 
   // state from context (default to empty string if not provided)
-  const state = (fullCtx as { state?: TState }).state ?? ('' as TState)
+  const state = (context as { state?: State<T> }).state ?? ('' as State<T>)
 
   return { send, computed, state }
 }
@@ -461,74 +449,70 @@ export function createEventMachine<T extends MachineTypes>(
     exitCleanups: new Map(),
   }
 
-  const send = (<K extends keyof GetEvents<T>>(
+  const send = (<K extends keyof Events<T>>(
     event: K,
-    ctx: GetContext<T>,
-    ...args: GetEvents<T>[K] extends undefined ? [] : [payload: GetEvents<T>[K]]
+    input: Input<T>,
+    ...args: Events<T>[K] extends undefined ? [] : [payload: Events<T>[K]]
   ) => {
-    const fullCtx = computeValues(ctx, config.computed)
-    const payload = args[0] as GetEvents<T>[K]
+    const context = computeValues(input, config.computed)
+    const payload = args[0] as Events<T>[K]
 
     // 1. state별 핸들러 먼저 실행
-    const state = (fullCtx as { state?: GetState<T> }).state
+    const state = (context as { state?: State<T> }).state
     if (state && config.states?.[state]?.on?.[event]) {
-      const stateHandler = config.states[state].on![event]!
-      executeHandler(stateHandler, config.actions ?? {}, fullCtx, payload)
+      const stateHandler = config.states[state].on[event]
+      executeHandler(stateHandler, config.actions ?? {}, context, payload)
     }
 
     // 2. 전역 핸들러 실행
     const globalHandler = config.on?.[event]
     if (globalHandler) {
-      executeHandler(globalHandler, config.actions ?? {}, fullCtx, payload)
+      executeHandler(globalHandler, config.actions ?? {}, context, payload)
     }
-  }) as <K extends keyof GetEvents<T>>(
+  }) as <K extends keyof Events<T>>(
     event: K,
-    ctx: GetContext<T>,
-    ...args: GetEvents<T>[K] extends undefined ? [] : [payload: GetEvents<T>[K]]
+    input: Input<T>,
+    ...args: Events<T>[K] extends undefined ? [] : [payload: Events<T>[K]]
   ) => void
 
-  // vanilla용 send wrapper (ctx 바인딩)
-  const createEffectHelpers = (
-    ctx: GetContext<T>,
-  ): EffectHelpers<GetEvents<T>> => ({
-    send: (<K extends keyof GetEvents<T>>(
+  // vanilla용 send wrapper (input 바인딩)
+  const createEffectHelpers = (input: Input<T>): EffectHelpers<Events<T>> => ({
+    send: (<K extends keyof Events<T>>(
       event: K,
-      ...args: GetEvents<T>[K] extends undefined
-        ? []
-        : [payload: GetEvents<T>[K]]
+      ...args: Events<T>[K] extends undefined ? [] : [payload: Events<T>[K]]
     ) => {
-      send(event, ctx, ...args)
-    }) as Send<GetEvents<T>>,
+      send(event, input, ...args)
+    }) as Send<Events<T>>,
   })
 
-  const evaluate = (ctx: GetContext<T>) => {
-    const fullCtx = computeValues(ctx, config.computed)
-    const effectHelpers = createEffectHelpers(ctx)
+  const evaluate = (input: Input<T>) => {
+    const context = computeValues(input, config.computed)
+    const effectHelpers = createEffectHelpers(input)
 
     // always
     if (config.always && config.actions) {
       const actions = config.actions as Record<
         string,
-        (ctx: FullContext<T>) => void
+        (context: Context<T>) => void
       >
       for (const rule of config.always) {
-        if (!rule.when || rule.when(fullCtx, undefined)) {
-          actions[rule.do]?.(fullCtx)
+        if (!rule.when || rule.when(context, undefined)) {
+          actions[rule.do]?.(context)
           break
         }
       }
     }
 
     // effects
-    processEffects(config.effects, fullCtx, effectHelpers, effectStore)
+    processEffects(config.effects, context, effectHelpers, effectStore)
   }
 
-  const getComputed = (ctx: GetContext<T>): GetComputed<T> => {
-    const fullCtx = computeValues(ctx, config.computed)
-    if (!config.computed) return {} as GetComputed<T>
-    const result = {} as GetComputed<T>
+  const getComputed = (input: Input<T>): Computed<T> => {
+    const context = computeValues(input, config.computed)
+    if (!config.computed) return {} as Computed<T>
+    const result = {} as Computed<T>
     for (const key in config.computed) {
-      result[key] = fullCtx[key]
+      result[key] = context[key]
     }
     return result
   }

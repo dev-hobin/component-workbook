@@ -80,7 +80,7 @@ type TreeActions =
   | 'collapseFocused'
 
 export const treeMachine = createEventMachine<{
-  context: TreeContext
+  input: TreeContext
   events: TreeEvents
   actions: TreeActions
 }>({

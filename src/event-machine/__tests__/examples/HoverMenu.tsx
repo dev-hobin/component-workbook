@@ -38,9 +38,15 @@ const OPEN_DELAY = 300
 const CLOSE_DELAY = 200
 
 const hoverMenuMachine = createEventMachine<{
-  context: Context
+  input: Context
   events: Events
-  actions: 'startHover' | 'open' | 'startClosing' | 'close' | 'cancelClose' | 'noop'
+  actions:
+    | 'startHover'
+    | 'open'
+    | 'startClosing'
+    | 'close'
+    | 'cancelClose'
+    | 'noop'
   state: State
 }>({
   states: {
@@ -198,8 +204,12 @@ export function HoverMenu() {
       >
         <strong>테스트 방법:</strong>
         <ol style={{ margin: '8px 0 0', paddingLeft: 20 }}>
-          <li>버튼 위에 마우스 올리기 → <b>hovering</b> 상태 확인</li>
-          <li>{OPEN_DELAY}ms 대기 → <b>open</b> 상태 + 메뉴 표시</li>
+          <li>
+            버튼 위에 마우스 올리기 → <b>hovering</b> 상태 확인
+          </li>
+          <li>
+            {OPEN_DELAY}ms 대기 → <b>open</b> 상태 + 메뉴 표시
+          </li>
           <li>hovering 중 마우스 떼기 (빠르게) → 타이머 취소, idle로 복귀</li>
           <li>open 상태에서 마우스 떼기 → {CLOSE_DELAY}ms 후 닫힘</li>
           <li>메뉴 위로 마우스 이동 → 닫히지 않음 (유지)</li>

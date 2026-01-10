@@ -53,7 +53,7 @@ type MachineContext = {
 // ============================================
 
 const comboboxMachine = createEventMachine<{
-  context: MachineContext
+  input: MachineContext
   events: Events
   actions: 'handleInput' | 'handleFetchSuccess' | 'handleFetchError' | 'handleSelect' | 'handleClose'
   state: State

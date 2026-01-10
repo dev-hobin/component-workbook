@@ -36,7 +36,7 @@ export type AccordionContext = {
 // ============================================
 
 export const accordionMachine = createEventMachine<{
-  context: AccordionContext
+  input: AccordionContext
   events: AccordionEvents
   actions: 'noop' | 'expand' | 'collapse' | 'focusNext' | 'focusPrev' | 'focusFirst' | 'focusLast'
 }>({

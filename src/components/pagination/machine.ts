@@ -37,7 +37,7 @@ export type PaginationContext = {
 // ============================================
 
 export const paginationMachine = createEventMachine<{
-  context: PaginationContext
+  input: PaginationContext
   events: PaginationEvents
   actions: 'noop' | 'goToPage' | 'goPrev' | 'goNext'
 }>({

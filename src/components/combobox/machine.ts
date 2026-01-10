@@ -113,7 +113,7 @@ type ComboboxActions =
   | 'handleInputBlur'
 
 export const comboboxMachine = createEventMachine<{
-  context: ComboboxContext
+  input: ComboboxContext
   events: ComboboxEvents
   actions: ComboboxActions
 }>({

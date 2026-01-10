@@ -37,7 +37,7 @@ const OPEN_DELAY = 300
 const CLOSE_DELAY = 200
 
 const hoverMenuMachine = createEventMachine<{
-  context: MachineContext
+  input: MachineContext
   events: Events
   actions: 'startHover' | 'open' | 'startClosing' | 'close' | 'cancelClose' | 'noop'
   state: State
