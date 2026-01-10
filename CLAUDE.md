@@ -13,42 +13,68 @@ pnpm format     # Format with Prettier
 
 ## Architecture
 
-This is a React component library that implements accessible UI components following W3C APG patterns. The codebase uses a **Core + Shell** architecture pattern that separates pure state logic from React integration.
+This is a React component library that implements accessible UI components following W3C APG patterns. The codebase uses a **Machine + Shell** architecture pattern that separates pure state logic from React integration.
 
-### Core + Shell Pattern
+### Machine + Shell Pattern
 
 Each component has two main parts:
 
-**Core** (`src/components/*/core.ts`)
-- Pure TypeScript functions with no React dependencies
-- State types, state creation, and state update functions
-- Keyboard action handlers, option filtering, and query functions
-- Side effect types (but not implementations)
+**Machine** (`src/components/*/machine.ts`)
+- Pure TypeScript with no React dependencies
+- Defines event types, context types, and action handlers
+- Uses `createEventMachine` from `src/event-machine`
+- Conditional logic via `on` handlers with `when` guards
+- Side effects via `effects` (watch-based triggers)
 
 **Shell/Index** (`src/components/*/index.tsx`)
 - React compound components (Root, Item, Trigger, Panel, etc.)
-- Integrates core logic with React hooks and context
+- Integrates machine via `useEventMachine` hook which returns `{ send, computed }`
 - Handles DOM interactions and accessibility attributes
 
-### Component Store System
+### Event Machine (`src/event-machine`)
 
-Located in `src/core/` and `src/shell/`, this system tracks component nodes across the tree:
+A stateless declarative event handler pattern:
+- `computed`: Derived values from context
+- `on`: Event → conditional actions (with `when` guards)
+- `effects`: Watch-based side effects with `enter`/`exit`/`change` callbacks
+- `always`: Auto-evaluated rules on context change
+- `actions`: Named action implementations
 
-- **ComponentStore** (`src/core/component-store.ts`): Tracks nodes by `id:role` keys with parent-child relationships
-- **useNode**: Registers DOM elements to the store with role and metadata
-- **useLogicalNode**: Registers logical nodes without DOM elements
-- **useComponentSubscribe**: Subscribe to store changes using `useSyncExternalStore`
-- **ParentProvider/useParentId**: Tracks parent-child relationships via React context
+```ts
+// Example: machine.ts
+export const accordionMachine = createEventMachine<Context, Events, Computed, Actions>({
+  on: {
+    TOGGLE: [
+      { when: (ctx) => ctx.disabled, do: 'noop' },
+      { when: (ctx, { itemId }) => ctx.expandedIds.has(itemId), do: 'collapse' },
+      { do: 'expand' },
+    ],
+  },
+  effects: [{ watch: (ctx) => ctx.focusedId, change: (ctx) => { /* focus element */ } }],
+  actions: { expand: (ctx, payload) => { /* ... */ } },
+})
+```
 
-### Utility Functions
+### Primitives (`src/primitives/`)
 
-- `composeRefs`: Merges multiple refs into one
-- `mergeProps`: Merges props with special handling for event handlers (compose), className (concat), and style (merge)
-- `composeEventHandlers`: Chains event handlers, internal runs first
+Component infrastructure for tracking nodes across the tree:
 
-### Event Machine (src/event-machine)
+- **ComponentStore** (`component-store.ts`): Tracks nodes by `id:role` keys with parent-child relationships
+- **useNode** (`use-node.ts`): Registers DOM elements to the store with role and metadata
+- **useComponentSubscribe** (`use-component-subscribe.ts`): Subscribe to store changes using `useSyncExternalStore`
+- **ParentProvider/useParentId** (`use-parent-context.tsx`): Tracks parent-child relationships via React context
 
-A stateless declarative event handler pattern. Defines `on` (event handlers), `effects` (value watchers), `computed` (derived values), and `actions`. Used via `useEventMachine` hook which returns `{ send, computed }`.
+### Utility Functions (`src/utils/`)
+
+- `compose-refs`: Merges multiple refs into one
+- `merge-props`: Merges props with special handling for event handlers (compose), className (concat), and style (merge)
+- `compose-event-handlers`: Chains event handlers, internal runs first
+
+### Hooks (`src/hooks/`)
+
+- `use-latest-ref`: Ref that always holds the latest value
+- `use-presence`: Animation presence tracking with transition states
+- `use-stable-callback`: Stable callback reference that always calls latest version
 
 ## Key Dependencies
 
@@ -62,5 +88,6 @@ A stateless declarative event handler pattern. Defines `on` (event handlers), `e
 
 - Components export compound component objects (e.g., `Accordion.Root`, `Accordion.Item`)
 - State is lifted to Root via Context, child components access via hooks
+- Context passed to machine includes state, setters, options, and lazy helper functions (e.g., `getEnabledItemIds`)
 - ARIA attributes are managed in Shell components
 - Animation uses CSS grid-template-rows trick for height transitions

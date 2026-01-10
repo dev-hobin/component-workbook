@@ -23,16 +23,16 @@ import {
   type OptionId,
   type AutocompleteMode,
 } from './machine'
-import { composeRefs } from '../../utils/composeRefs'
-import { mergeProps } from '../../utils/mergeProps'
+import { composeRefs } from '../../utils/compose-refs'
+import { mergeProps } from '../../utils/merge-props'
 
 import {
   ComponentStoreProvider,
   useComponentStore,
-} from '../../shell/use-component-store'
-import { useNode } from '../../shell/use-node'
-import { useComponentSubscribe } from '../../shell/use-component-subscribe'
-import type { ComponentStore } from '../../core/component-store'
+} from '../../primitives/use-component-store'
+import { useNode } from '../../primitives/use-node'
+import { useComponentSubscribe } from '../../primitives/use-component-subscribe'
+import type { ComponentStore } from '../../primitives/component-store'
 
 // ============================================
 // Types

@@ -12,18 +12,18 @@ import type * as focusTrapLib from 'focus-trap'
 import { useEventMachine, type Send } from '../../event-machine'
 
 import { modalMachine, type ModalContext, type ModalEvents } from './machine'
-import { usePresence } from '../../hooks/usePresence'
-import { useStableCallback } from '../../hooks/useStableCallback'
-import { composeRefs } from '../../utils/composeRefs'
-import { mergeProps } from '../../utils/mergeProps'
+import { usePresence } from '../../hooks/use-presence'
+import { useStableCallback } from '../../hooks/use-stable-callback'
+import { composeRefs } from '../../utils/compose-refs'
+import { mergeProps } from '../../utils/merge-props'
 
 import {
   ComponentStoreProvider,
   useComponentStore,
-} from '../../shell/use-component-store'
-import { useNode } from '../../shell/use-node'
-import { useComponentSubscribe } from '../../shell/use-component-subscribe'
-import type { ComponentStore } from '../../core/component-store'
+} from '../../primitives/use-component-store'
+import { useNode } from '../../primitives/use-node'
+import { useComponentSubscribe } from '../../primitives/use-component-subscribe'
+import type { ComponentStore } from '../../primitives/component-store'
 
 // ============================================
 // Types

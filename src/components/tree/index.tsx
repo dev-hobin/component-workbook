@@ -13,16 +13,16 @@ import {
   type TreeEvents,
   type NodeId,
 } from './machine'
-import { findNodeFromMouseEvent } from '../../shell/dom'
+import { findNodeFromMouseEvent } from '../../primitives/dom'
 
 import {
   ComponentStoreProvider,
   useComponentStore,
-} from '../../shell/use-component-store'
-import { ParentProvider, useParentId, useLevel } from '../../shell/use-parent-context'
-import { useNode } from '../../shell/use-node'
-import { useComponentSubscribe } from '../../shell/use-component-subscribe'
-import type { ComponentStore } from '../../core/component-store'
+} from '../../primitives/use-component-store'
+import { ParentProvider, useParentId, useLevel } from '../../primitives/use-parent-context'
+import { useNode } from '../../primitives/use-node'
+import { useComponentSubscribe } from '../../primitives/use-component-subscribe'
+import type { ComponentStore } from '../../primitives/component-store'
 
 // ============================================
 // Types

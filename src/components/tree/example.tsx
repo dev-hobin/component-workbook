@@ -1,4 +1,4 @@
-import { TreeView } from './tree-compound'
+import { TreeView } from '.'
 
 // 간단한 아이콘 컴포넌트
 function FolderIcon() {

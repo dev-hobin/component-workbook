@@ -1,8 +1,8 @@
 import { useCallback, useId, useLayoutEffect, useRef } from 'react'
 import { useComponentStore } from './use-component-store'
 import { useParentId } from './use-parent-context'
-import { useLatestRef } from '../hooks/useLatestRef'
-import type { NodeId } from '../core/component-store'
+import { useLatestRef } from '../hooks/use-latest-ref'
+import type { NodeId } from './component-store'
 
 export function useNode<
   Role extends string,

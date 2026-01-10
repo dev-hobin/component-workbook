@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react'
-import type { ComponentStore } from '../core/component-store'
+import type { ComponentStore } from './component-store'
 
 /**
  * store의 파생값을 구독하는 훅

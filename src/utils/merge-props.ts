@@ -1,4 +1,4 @@
-import { composeEventHandlers } from './composeEventHandlers'
+import { composeEventHandlers } from './compose-event-handlers'
 
 type UnknownRecord = Record<string, unknown>
 type AnyEventHandler = ((event: unknown) => void) | undefined

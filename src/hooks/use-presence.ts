@@ -1,5 +1,5 @@
 import { useLayoutEffect, useState } from 'react'
-import { useLatestRef } from '../useLatestRef'
+import { useLatestRef } from './use-latest-ref'
 
 type TransitionState = 'starting' | 'idle' | 'ending' | undefined
 

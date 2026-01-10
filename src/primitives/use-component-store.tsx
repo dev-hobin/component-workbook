@@ -2,7 +2,7 @@ import { createContext, useContext, useRef, type ReactNode } from 'react'
 import {
   createComponentStore,
   type ComponentStore,
-} from '../core/component-store'
+} from './component-store'
 
 type ComponentStoreContextValue<
   Role extends string = string,

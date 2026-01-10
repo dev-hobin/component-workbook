@@ -17,15 +17,15 @@ import {
   type PaginationContext as MachineContext,
   type PaginationEvents,
 } from './machine'
-import { composeRefs } from '../../utils/composeRefs'
-import { mergeProps } from '../../utils/mergeProps'
+import { composeRefs } from '../../utils/compose-refs'
+import { mergeProps } from '../../utils/merge-props'
 
 import {
   ComponentStoreProvider,
   useComponentStore,
-} from '../../shell/use-component-store'
-import { useNode } from '../../shell/use-node'
-import type { ComponentStore } from '../../core/component-store'
+} from '../../primitives/use-component-store'
+import { useNode } from '../../primitives/use-node'
+import type { ComponentStore } from '../../primitives/component-store'
 
 // ============================================
 // Types

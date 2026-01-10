@@ -9,7 +9,7 @@ import MenuPrimitives, {
   type ActionItemProps,
   type LinkItemProps,
   type PortalProps,
-} from './menu'
+} from '.'
 import { cn } from '../../utils/cn'
 
 export function Root(props: RootProps) {
