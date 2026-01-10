@@ -101,14 +101,27 @@ export const treeMachine = createEventMachine<{
 
     ARROW_RIGHT: [
       { when: (ctx) => ctx.focusedId === null, do: 'noop' },
-      { when: (ctx) => ctx.focusedId !== null && ctx.isLeaf(ctx.focusedId), do: 'noop' },
-      { when: (ctx) => ctx.focusedId !== null && !ctx.expandedIds.has(ctx.focusedId), do: 'expandFocused' },
+      {
+        when: (ctx) => ctx.focusedId !== null && ctx.isLeaf(ctx.focusedId),
+        do: 'noop',
+      },
+      {
+        when: (ctx) =>
+          ctx.focusedId !== null && !ctx.expandedIds.has(ctx.focusedId),
+        do: 'expandFocused',
+      },
       { do: 'focusFirstChild' },
     ],
 
     ARROW_LEFT: [
       { when: (ctx) => ctx.focusedId === null, do: 'noop' },
-      { when: (ctx) => ctx.focusedId !== null && !ctx.isLeaf(ctx.focusedId) && ctx.expandedIds.has(ctx.focusedId), do: 'collapseFocused' },
+      {
+        when: (ctx) =>
+          ctx.focusedId !== null &&
+          !ctx.isLeaf(ctx.focusedId) &&
+          ctx.expandedIds.has(ctx.focusedId),
+        do: 'collapseFocused',
+      },
       { do: 'focusParent' },
     ],
   },

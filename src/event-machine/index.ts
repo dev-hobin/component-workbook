@@ -304,7 +304,7 @@ function clearEffectStore(store: EffectStore): void {
 
 export function useEventMachine<T extends MachineTypes>(
   machine: EventMachine<T>,
-  input: Input<T>,
+  input: T['input'],
 ): { send: Send<Events<T>>; computed: Computed<T>; state: State<T> } {
   // refs for stable callbacks
   const inputRef = useRef(input)
