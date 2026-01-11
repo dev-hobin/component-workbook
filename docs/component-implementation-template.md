@@ -11,6 +11,8 @@
 | **stopPropagation 금지** | 라이브러리 코드에서 이벤트 흐름 방해 금지 | 상위 컴포넌트가 이벤트 감지 불가 |
 | **전역 레이어 스택** | 중첩 레이어는 상태 기반으로 topmost 판별 | 중첩 Modal에서 Escape가 모두 닫음 |
 | **NodeStore 실시간 쿼리** | 스냅샷 아닌 이벤트 시점 직접 조회 | 동적 요소 클릭 시 깜빡임/오동작 |
+| **첫 렌더링 데이터는 Context** | depth, parentId 등 첫 렌더링 필요 데이터는 React Context | 첫 렌더링 시 잘못된 값/깜빡임 |
+| **파생 상태는 meta에 저장 금지** | 계산 가능한 값은 헬퍼로 제공 | useEffect 동기화 anti-pattern |
 
 ### 컴포넌트 유형 판별
 
@@ -174,6 +176,111 @@ const handlePointerDownOutside = useCallback((event: PointerEvent) => {
 | DismissableLayer excludeRefs | 실시간 쿼리 | 클릭 시점의 정확한 요소 목록 필요 |
 | ARIA id 연결 | useNode의 domId | 자동 생성, 렌더링과 동기화 |
 | 조건부 렌더링 체크 | 실시간 쿼리 | 마운트/언마운트 타이밍 이슈 방지 |
+
+**React Context vs NodeStore 사용 시점:**
+
+> ⚠️ **중요**: 첫 렌더링에 필요한 데이터와 이벤트 시점에 필요한 데이터를 구분해야 함
+
+```
+렌더링 단계 (Render Phase)
+├── React Context 사용 가능 ✅
+│   ├── useParentId() → 부모 ID
+│   └── useLevel() → 현재 depth
+│
+└── Store 비어있음 ❌
+    └── store.getNode() → null (아직 등록 안됨)
+
+커밋 단계 (Commit Phase)
+├── useNode의 ref callback 실행 → Store에 등록
+└── useLogicalNode의 useLayoutEffect 실행 → Store에 등록
+
+이후 렌더링/이벤트
+└── Store 데이터 사용 가능 ✅
+```
+
+| 필요한 것 | 사용할 도구 | 사용 시점 |
+|----------|------------|----------|
+| 렌더링 중 depth/level | `useLevel()` | 동기적 (첫 렌더링 OK) |
+| 렌더링 중 부모 ID | `useParentId()` | 동기적 (첫 렌더링 OK) |
+| DOM element 등록 | `useNode()` | 비동기 (커밋 후) |
+| DOM 없이 논리적 노드 등록 | `useLogicalNode()` | 비동기 (커밋 후) |
+| Store 데이터 구독 | `useStoreSubscribe()` | 동기적 구독 |
+
+```tsx
+// ❌ Bad: Store 쿼리로 depth 계산 (첫 렌더링 실패)
+function useDepth(): number {
+  const store = useNodeStore()
+  let depth = 0
+  let parent = useParentId()
+  while (parent) {
+    depth++
+    const node = store.getNode(parent, 'item') // 첫 렌더링: null!
+    parent = node?.meta.parentValue
+  }
+  return depth
+}
+
+// ✅ Good: React Context로 depth 계산 (첫 렌더링 OK)
+function useDepth(): number {
+  const level = useLevel()
+  return level - 1
+}
+```
+
+**파생 상태는 meta에 저장하지 않기:**
+
+> ⚠️ **중요**: 다른 노드의 존재 여부로 계산되는 값은 meta에 저장하지 말 것
+
+```tsx
+// ❌ Bad: hasChildren을 meta에 저장 후 useEffect로 동기화
+const { ref } = useNode({
+  role: 'item',
+  meta: { value, hasChildren }, // hasChildren은 group 존재 여부로 결정됨
+})
+
+// 비동기로 결정되므로 동기화 필요 (anti-pattern!)
+useEffect(() => {
+  const node = store.getNode(value, 'item')
+  if (node) node.meta.hasChildren = hasChildren
+}, [hasChildren])
+
+// ✅ Good: meta에서 제거하고 헬퍼로 계산
+const { ref } = useNode({
+  role: 'item',
+  meta: { value, disabled, parentValue, depth, textValue },
+})
+
+// Machine helper로 제공
+const getHasChildren = useCallback((value: ItemValue): boolean => {
+  const groups = store.getNodesByRole('group')
+  return groups.some(
+    node => 'parentValue' in node.meta && node.meta.parentValue === value
+  )
+}, [store])
+```
+
+**Store 구독은 항상 useStoreSubscribe 사용:**
+
+```tsx
+// ❌ Bad: useState + useEffect (깜빡임 발생)
+const [hasChildren, setHasChildren] = useState(false)
+useEffect(() => {
+  const check = () => {
+    const groups = store.getNodesByRole('group')
+    setHasChildren(groups.some(...))
+  }
+  check()
+  return store.subscribe(check)
+}, [store])
+
+// ✅ Good: useStoreSubscribe (동기적 구독, 깜빡임 없음)
+const hasChildren = useStoreSubscribe(store, (s) => {
+  const groups = s.getNodesByRole('group')
+  return groups.some(
+    node => 'parentValue' in node.meta && node.meta.parentValue === value
+  )
+})
+```
 
 ### 라이브러리 3: usePresence
 ```ts
@@ -569,6 +676,8 @@ src/components/[component]/
 | Machine 로직 부족 | Shell에 조건문 과다 | W3C 요구사항 → Machine 이벤트 매핑 검토 |
 | Effect 타이밍 이슈 | Effect가 DOM 렌더링 전에 실행되어 동작 안함 | DOM helpers 패턴 사용 (Shell이 타이밍 책임) |
 | **NodeStore 스냅샷 사용** | 동적 요소 클릭 시 깜빡임/오동작 | **이벤트 핸들러에서 store 실시간 쿼리** |
+| **첫 렌더링 Store 쿼리** | 첫 렌더링 시 잘못된 값 (depth=0 등) | **React Context (useLevel, useParentId) 사용** |
+| **파생 상태 meta 저장** | useEffect 동기화 anti-pattern | **헬퍼 함수로 계산, meta에 저장 안함** |
 
 ### 중간 위험도
 | 위험 | 증상 | 예방 |
@@ -638,6 +747,9 @@ src/components/[component]/
 - [ ] **중첩 케이스 테스트했는가?** (레이어 컴포넌트는 중첩 시 Escape 동작 확인)
 - [ ] **stopPropagation 사용하지 않았는가?** (DismissableLayer로 해결)
 - [ ] **NodeStore 스냅샷 대신 실시간 쿼리 사용했는가?** (이벤트 핸들러에서 직접 조회)
+- [ ] **첫 렌더링 데이터는 React Context 사용했는가?** (depth, parentId 등)
+- [ ] **파생 상태를 meta에 저장하지 않았는가?** (다른 노드 존재 여부로 계산되는 값)
+- [ ] **Store 구독에 useStoreSubscribe 사용했는가?** (useState + useEffect 금지)
 - [ ] 예상 못한 이슈가 있었다면 템플릿에 반영할 것은?
 
 ### 코드 스멜 체크
@@ -677,6 +789,34 @@ useLayoutEffect(() => {
   setExcludeRefs(nodes.map(n => ({ current: n.element })))
 }, [store])
 // 문제: 새 SubTrigger가 마운트되기 전에 스냅샷이 만들어져 클릭 감지 실패
+
+// ❌ 첫 렌더링에 Store 쿼리 사용 (첫 렌더링 시 잘못된 값)
+function useDepth(): number {
+  const store = useNodeStore()
+  let depth = 0
+  let parent = useParentId()
+  while (parent) {
+    const node = store.getNode(parent, 'item') // 첫 렌더링: null!
+    // ...
+  }
+  return depth
+}
+
+// ❌ 파생 상태를 meta에 저장 후 useEffect로 동기화 (anti-pattern)
+const { ref } = useNode({
+  meta: { hasChildren }, // group 존재 여부로 결정되는 값
+})
+useEffect(() => {
+  const node = store.getNode(value, 'item')
+  if (node) node.meta.hasChildren = hasChildren // 동기화 필요 = anti-pattern
+}, [hasChildren])
+
+// ❌ useState + useEffect로 Store 구독 (깜빡임 발생)
+const [items, setItems] = useState([])
+useEffect(() => {
+  setItems(store.getNodesByRole('item'))
+  return store.subscribe(() => setItems(store.getNodesByRole('item')))
+}, [store])
 ```
 
 **올바른 패턴:**
@@ -710,4 +850,26 @@ const handlePointerDownOutside = useCallback((event: PointerEvent) => {
 
   send('CLOSE_ALL')
 }, [send, store])
+
+// ✅ 첫 렌더링 데이터: React Context 사용
+function useDepth(): number {
+  const level = useLevel() // React Context - 첫 렌더링 OK
+  return level - 1
+}
+
+// ✅ 파생 상태: meta에 저장하지 않고 헬퍼로 계산
+const getHasChildren = useCallback((value: ItemValue): boolean => {
+  const groups = store.getNodesByRole('group')
+  return groups.some(
+    node => 'parentValue' in node.meta && node.meta.parentValue === value
+  )
+}, [store])
+
+// ✅ Store 구독: useStoreSubscribe 사용 (동기적, 깜빡임 없음)
+const hasChildren = useStoreSubscribe(store, (s) => {
+  const groups = s.getNodesByRole('group')
+  return groups.some(
+    node => 'parentValue' in node.meta && node.meta.parentValue === value
+  )
+})
 ```
