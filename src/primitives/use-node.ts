@@ -56,6 +56,8 @@ export function useLogicalNode<
   const store = useNodeStore<Role, Meta>()
   const metaRef = useLatestRef(options.meta)
 
+  const domId = `${options.role}::${id}`
+
   useLayoutEffect(() => {
     store.register({
       id,
@@ -68,5 +70,5 @@ export function useLogicalNode<
     return () => store.unregister(id, options.role)
   }, [id, parentId, options.role, store, metaRef])
 
-  return { id }
+  return { id, domId }
 }

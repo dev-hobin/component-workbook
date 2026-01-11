@@ -2,7 +2,7 @@ import { createContext, useContext, type ReactNode } from 'react'
 import type { NodeId } from './node-store'
 
 type ParentContextValue = {
-  id: NodeId
+  id: NodeId | null
   level: number
 }
 
@@ -12,7 +12,7 @@ export function ParentProvider({
   id,
   children,
 }: {
-  id: NodeId
+  id: NodeId | null
   children: ReactNode
 }) {
   const parent = useContext(ParentContext)

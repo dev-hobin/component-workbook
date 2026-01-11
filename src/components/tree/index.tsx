@@ -1,73 +1,78 @@
-import React, { createContext, useContext, useId, useRef } from 'react'
+import React, {
+  createContext,
+  forwardRef,
+  useCallback,
+  useContext,
+  useId,
+  useRef,
+  useState,
+  type ComponentPropsWithoutRef,
+  type ReactNode,
+} from 'react'
 import { useControllableState } from '@radix-ui/react-use-controllable-state'
 import { useMachine, type Send } from 'controlled-machine/react'
 
-import { treeMachine, type TreeEvents, type NodeId } from './machine'
-import { findNodeFromMouseEvent } from '../../primitives/dom'
-
+import {
+  treeMachine,
+  isItemExpanded,
+  isItemSelected,
+  type TreeEvents,
+  type TreeComputed,
+  type ItemValue,
+  type TreeItemMeta,
+} from './machine'
+import { usePresence } from '../../hooks/use-presence'
+import { composeRefs } from '../../utils/compose-refs'
+import { mergeProps } from '../../utils/merge-props'
 import {
   NodeStoreProvider,
   useNodeStore,
 } from '../../primitives/use-node-store'
+import { useNode, useLogicalNode } from '../../primitives/use-node'
+import { useStoreSubscribe } from '../../primitives/use-store-subscribe'
 import {
   ParentProvider,
   useParentId,
   useLevel,
 } from '../../primitives/use-parent-context'
-import { useNode } from '../../primitives/use-node'
-import { useStoreSubscribe } from '../../primitives/use-store-subscribe'
 import type { NodeStore } from '../../primitives/node-store'
 
 // ============================================
 // Types
 // ============================================
 
-type TreeRole = 'item' | 'text'
-type TreeMeta = object
+type TreeRole = 'tree' | 'item' | 'label' | 'group'
 
-type TreeContextValue = {
-  focusedId: NodeId | null
-  selectedId: NodeId | null
-  expandedIds: Set<NodeId>
-  store: NodeStore<TreeRole, TreeMeta>
-  send: Send<TreeEvents>
+type TreeGroupMeta = {
+  parentValue: ItemValue
 }
 
-// ============================================
-// Helpers
-// ============================================
+type TreeMeta = TreeItemMeta | TreeGroupMeta | object
 
-/** visible items를 DOM 순서대로 반환 (expandedIds 기반 필터링) */
-function getVisibleItemIds(
-  store: NodeStore<TreeRole, TreeMeta>,
-  expandedIds: Set<NodeId>,
-): NodeId[] {
-  const result: NodeId[] = []
-  const allItems = store.getNodesByRole('item')
+type TreeContextValue = {
+  // State
+  expandedValues: ItemValue[]
+  selectedValues: ItemValue[]
+  highlightedValue: ItemValue | null
+  send: Send<TreeEvents>
+  computed: TreeComputed
 
-  // root items 찾기 (parent가 없거나 parent가 item이 아닌 것)
-  const rootItems = allItems.filter((node) => {
-    if (!node.parentId) return true
-    return !store.getNode(node.parentId, 'item')
-  })
+  // NodeStore
+  store: NodeStore<TreeRole, TreeMeta>
 
-  function visit(nodeId: NodeId) {
-    result.push(nodeId)
+  // Options
+  selectionMode: 'single' | 'multiple'
+}
 
-    // 펼쳐진 상태면 자식들도 방문
-    if (expandedIds.has(nodeId)) {
-      const children = store.getChildrenByRole(nodeId, 'item')
-      for (const child of children) {
-        visit(child.id)
-      }
-    }
-  }
-
-  for (const root of rootItems) {
-    visit(root.id)
-  }
-
-  return result
+type ItemContextValue = {
+  value: ItemValue
+  depth: number
+  parentValue: ItemValue | null
+  hasChildren: boolean
+  isExpanded: boolean
+  isSelected: boolean
+  isDisabled: boolean
+  isHighlighted: boolean
 }
 
 // ============================================
@@ -75,11 +80,20 @@ function getVisibleItemIds(
 // ============================================
 
 const TreeContext = createContext<TreeContextValue | null>(null)
+const ItemContext = createContext<ItemContextValue | null>(null)
 
 function useTreeContext() {
   const context = useContext(TreeContext)
   if (!context) {
-    throw new Error('TreeView 컴포넌트는 TreeView.Root 안에서 사용해야 합니다.')
+    throw new Error('Tree components must be used within Tree.Root')
+  }
+  return context
+}
+
+function useItemContext() {
+  const context = useContext(ItemContext)
+  if (!context) {
+    throw new Error('Tree.ItemLabel/ItemGroup must be used within Tree.Item')
   }
   return context
 }
@@ -88,300 +102,609 @@ function useTreeContext() {
 // Root
 // ============================================
 
-type RootProps = {
-  children: React.ReactNode
-  className?: string
+export type RootProps = {
+  children: ReactNode
+  defaultExpandedValues?: ItemValue[]
+  expandedValues?: ItemValue[]
+  onExpandedValuesChange?: (values: ItemValue[]) => void
+  defaultSelectedValues?: ItemValue[]
+  selectedValues?: ItemValue[]
+  onSelectedValuesChange?: (values: ItemValue[]) => void
+  selectionMode?: 'single' | 'multiple'
   'aria-label'?: string
+  'aria-labelledby'?: string
+} & Omit<ComponentPropsWithoutRef<'div'>, 'children'>
 
-  // Controlled
-  focusedId?: NodeId | null
-  selectedId?: NodeId | null
-  expandedIds?: Set<NodeId>
-
-  // Defaults
-  defaultFocusedId?: NodeId | null
-  defaultSelectedId?: NodeId | null
-  defaultExpandedIds?: Set<NodeId>
-
-  // Callbacks
-  onFocusChange?: (id: NodeId | null) => void
-  onSelectChange?: (id: NodeId | null) => void
-  onExpandChange?: (ids: Set<NodeId>) => void
-}
-
-function Root(props: RootProps) {
-  return (
-    <NodeStoreProvider<TreeRole, TreeMeta>>
-      <RootInner {...props} />
-    </NodeStoreProvider>
-  )
-}
-
-function RootInner({
-  children,
-  className,
-  'aria-label': ariaLabel,
-  focusedId: focusedIdProp,
-  selectedId: selectedIdProp,
-  expandedIds: expandedIdsProp,
-  defaultFocusedId = null,
-  defaultSelectedId = null,
-  defaultExpandedIds = new Set(),
-  onFocusChange,
-  onSelectChange,
-  onExpandChange,
-}: RootProps) {
-  const store = useNodeStore<TreeRole, TreeMeta>()
-  const treeId = useId()
-
-  const [focusedId, setFocusedId] = useControllableState({
-    prop: focusedIdProp,
-    defaultProp: defaultFocusedId,
-    onChange: onFocusChange,
-  })
-
-  const [selectedId, setSelectedId] = useControllableState({
-    prop: selectedIdProp,
-    defaultProp: defaultSelectedId,
-    onChange: onSelectChange,
-  })
-
-  const [expandedIds, setExpandedIds] = useControllableState({
-    prop: expandedIdsProp,
-    defaultProp: defaultExpandedIds,
-    onChange: onExpandChange,
-  })
-
-  // Refs for lazy getters
-  const storeRef = useRef(store)
-  storeRef.current = store
-  const expandedIdsRef = useRef(expandedIds)
-  expandedIdsRef.current = expandedIds
-
-  // Event machine
-  const { send } = useMachine(treeMachine, {
-    focusedId: focusedId ?? null,
-    selectedId: selectedId ?? null,
-    expandedIds: expandedIds ?? new Set(),
-    onFocusedIdChange: (id: NodeId | null) => setFocusedId(id),
-    onSelectedIdChange: (id: NodeId | null) => setSelectedId(id),
-    onExpandedIdsChange: (ids: Set<NodeId>) => setExpandedIds(ids),
-    getVisibleItemIds: () =>
-      getVisibleItemIds(storeRef.current, expandedIdsRef.current ?? new Set()),
-    getChildrenIds: (nodeId: NodeId) =>
-      storeRef.current.getChildrenByRole(nodeId, 'item').map((n) => n.id),
-    getParentId: (nodeId: NodeId) => {
-      const node = storeRef.current.getNode(nodeId, 'item')
-      if (!node?.parentId) return null
-      const parentNode = storeRef.current.getNode(node.parentId, 'item')
-      return parentNode ? parentNode.id : null
+export const Root = forwardRef<HTMLDivElement, RootProps>(
+  (
+    {
+      children,
+      defaultExpandedValues = [],
+      expandedValues: expandedValuesProp,
+      onExpandedValuesChange,
+      defaultSelectedValues = [],
+      selectedValues: selectedValuesProp,
+      onSelectedValuesChange,
+      selectionMode = 'single',
+      ...rest
     },
-    isLeaf: (nodeId: NodeId) =>
-      storeRef.current.getChildrenByRole(nodeId, 'item').length === 0,
-    getItemElement: (nodeId: NodeId) =>
-      storeRef.current.getElement(nodeId, 'item'),
-  })
-
-  // 키보드 핸들러
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    switch (e.key) {
-      case 'ArrowDown':
-        e.preventDefault()
-        send('FOCUS_NEXT')
-        break
-      case 'ArrowUp':
-        e.preventDefault()
-        send('FOCUS_PREV')
-        break
-      case 'ArrowRight':
-        e.preventDefault()
-        send('ARROW_RIGHT')
-        break
-      case 'ArrowLeft':
-        e.preventDefault()
-        send('ARROW_LEFT')
-        break
-      case 'Home':
-        e.preventDefault()
-        send('FOCUS_FIRST')
-        break
-      case 'End':
-        e.preventDefault()
-        send('FOCUS_LAST')
-        break
-      case 'Enter':
-        e.preventDefault()
-        send('SELECT_FOCUSED')
-        break
-    }
-  }
-
-  const handleClick = (e: React.MouseEvent) => {
-    const itemNodes = store.getNodesByRole('item')
-    const elements = new Map(
-      itemNodes
-        .filter((n) => n.element)
-        .map((n) => [n.id, n.element as HTMLElement]),
-    )
-    const nodeId = findNodeFromMouseEvent(e, elements)
-    if (nodeId) {
-      send('FOCUS', { nodeId })
-      send('SELECT', { nodeId })
-    }
-  }
-
-  const handleDoubleClick = (e: React.MouseEvent) => {
-    const itemNodes = store.getNodesByRole('item')
-    const elements = new Map(
-      itemNodes
-        .filter((n) => n.element)
-        .map((n) => [n.id, n.element as HTMLElement]),
-    )
-    const nodeId = findNodeFromMouseEvent(e, elements)
-    if (nodeId) {
-      const children = store.getChildrenByRole(nodeId, 'item')
-      const isLeaf = children.length === 0
-      if (!isLeaf) {
-        send('TOGGLE_EXPAND', { nodeId })
-      }
-    }
-  }
-
-  const treeContextValue: TreeContextValue = {
-    focusedId: focusedId ?? null,
-    selectedId: selectedId ?? null,
-    expandedIds: expandedIds ?? new Set(),
-    store,
-    send,
-  }
-
-  return (
-    <TreeContext.Provider value={treeContextValue}>
-      <ParentProvider id="__tree_root__">
-        <ul
-          id={`tree-${treeId}`}
-          role="tree"
-          aria-label={ariaLabel}
-          aria-multiselectable={false}
-          className={className}
-          onKeyDown={handleKeyDown}
-          onClick={handleClick}
-          onDoubleClick={handleDoubleClick}
+    forwardedRef,
+  ) => {
+    return (
+      <NodeStoreProvider<TreeRole, TreeMeta>>
+        <RootImpl
+          ref={forwardedRef}
+          defaultExpandedValues={defaultExpandedValues}
+          expandedValues={expandedValuesProp}
+          onExpandedValuesChange={onExpandedValuesChange}
+          defaultSelectedValues={defaultSelectedValues}
+          selectedValues={selectedValuesProp}
+          onSelectedValuesChange={onSelectedValuesChange}
+          selectionMode={selectionMode}
+          {...rest}
         >
           {children}
-        </ul>
-      </ParentProvider>
-    </TreeContext.Provider>
-  )
-}
+        </RootImpl>
+      </NodeStoreProvider>
+    )
+  },
+)
+
+const RootImpl = forwardRef<HTMLDivElement, RootProps>(
+  (
+    {
+      children,
+      defaultExpandedValues = [],
+      expandedValues: expandedValuesProp,
+      onExpandedValuesChange,
+      defaultSelectedValues = [],
+      selectedValues: selectedValuesProp,
+      onSelectedValuesChange,
+      selectionMode = 'single',
+      ...rest
+    },
+    forwardedRef,
+  ) => {
+    const treeId = useId()
+    const store = useNodeStore<TreeRole, TreeMeta>()
+    const treeRef = useRef<HTMLDivElement>(null)
+
+    // Controllable state
+    const [expandedValues, setExpandedValues] = useControllableState({
+      prop: expandedValuesProp,
+      defaultProp: defaultExpandedValues,
+      onChange: onExpandedValuesChange,
+    })
+
+    const [selectedValues, setSelectedValues] = useControllableState({
+      prop: selectedValuesProp,
+      defaultProp: defaultSelectedValues,
+      onChange: onSelectedValuesChange,
+    })
+
+    const [highlightedValue, setHighlightedValue] = useState<ItemValue | null>(
+      null,
+    )
+
+    // Refs for latest values
+    const expandedValuesRef = useRef(expandedValues)
+    expandedValuesRef.current = expandedValues
+
+    // DOM helpers
+    const focusItem = useCallback(
+      (value: ItemValue) => {
+        requestAnimationFrame(() => {
+          const labelElement = store.getElement(value, 'label')
+          labelElement?.focus()
+        })
+      },
+      [store],
+    )
+
+    const focusTree = useCallback(() => {
+      requestAnimationFrame(() => {
+        treeRef.current?.focus()
+      })
+    }, [])
+
+    // Machine helpers using NodeStore - real-time queries
+    const getVisibleItemValues = useCallback(() => {
+      const result: ItemValue[] = []
+      const currentExpanded = expandedValuesRef.current ?? []
+
+      // Get all items and build visible list
+      const allItems = store.getNodesByRole('item')
+
+      // Build hasChildren lookup from groups
+      const groups = store.getNodesByRole('group')
+      const parentsWithChildren = new Set(
+        groups
+          .filter((node) => 'parentValue' in node.meta)
+          .map((node) => (node.meta as { parentValue: ItemValue }).parentValue),
+      )
+
+      // Sort by DOM order using depth-first traversal
+      function collectVisible(parentValue: ItemValue | null) {
+        const children = allItems.filter((node) => {
+          const meta = node.meta as TreeItemMeta
+          return meta.parentValue === parentValue && !meta.disabled
+        })
+
+        // Sort children by their DOM position
+        children.sort((a, b) => {
+          if (!a.element || !b.element) return 0
+          const position = a.element.compareDocumentPosition(b.element)
+          if (position & Node.DOCUMENT_POSITION_FOLLOWING) return -1
+          if (position & Node.DOCUMENT_POSITION_PRECEDING) return 1
+          return 0
+        })
+
+        for (const child of children) {
+          const meta = child.meta as TreeItemMeta
+          result.push(meta.value)
+
+          // If expanded and has children, recurse
+          const hasChildren = parentsWithChildren.has(meta.value)
+          if (hasChildren && currentExpanded.includes(meta.value)) {
+            collectVisible(meta.value)
+          }
+        }
+      }
+
+      collectVisible(null)
+      return result
+    }, [store])
+
+    const getItemMeta = useCallback(
+      (value: ItemValue): TreeItemMeta | null => {
+        const node = store.getNode(value, 'item')
+        return node ? (node.meta as TreeItemMeta) : null
+      },
+      [store],
+    )
+
+    const getParentValue = useCallback(
+      (value: ItemValue): ItemValue | null => {
+        const meta = getItemMeta(value)
+        return meta?.parentValue ?? null
+      },
+      [getItemMeta],
+    )
+
+    const getFirstChildValue = useCallback(
+      (value: ItemValue): ItemValue | null => {
+        const allItems = store.getNodesByRole('item')
+        const children = allItems.filter((node) => {
+          const meta = node.meta as TreeItemMeta
+          return meta.parentValue === value && !meta.disabled
+        })
+
+        if (children.length === 0) return null
+
+        // Sort by DOM order and return first
+        children.sort((a, b) => {
+          if (!a.element || !b.element) return 0
+          const position = a.element.compareDocumentPosition(b.element)
+          if (position & Node.DOCUMENT_POSITION_FOLLOWING) return -1
+          if (position & Node.DOCUMENT_POSITION_PRECEDING) return 1
+          return 0
+        })
+
+        return (children[0].meta as TreeItemMeta).value
+      },
+      [store],
+    )
+
+    const getSiblingValues = useCallback(
+      (value: ItemValue): ItemValue[] => {
+        const meta = getItemMeta(value)
+        if (!meta) return []
+
+        const allItems = store.getNodesByRole('item')
+        return allItems
+          .filter((node) => {
+            const nodeMeta = node.meta as TreeItemMeta
+            return nodeMeta.parentValue === meta.parentValue
+          })
+          .map((node) => (node.meta as TreeItemMeta).value)
+      },
+      [store, getItemMeta],
+    )
+
+    const getItemTextValue = useCallback(
+      (value: ItemValue): string => {
+        const meta = getItemMeta(value)
+        return meta?.textValue ?? ''
+      },
+      [getItemMeta],
+    )
+
+    const getHasChildren = useCallback(
+      (value: ItemValue): boolean => {
+        const groups = store.getNodesByRole('group')
+        return groups.some(
+          (node) =>
+            'parentValue' in node.meta && node.meta.parentValue === value,
+        )
+      },
+      [store],
+    )
+
+    // Machine
+    const { send, computed } = useMachine(treeMachine, {
+      expandedValues: expandedValues ?? [],
+      onExpandedValuesChange: setExpandedValues,
+      selectedValues: selectedValues ?? [],
+      onSelectedValuesChange: setSelectedValues,
+      highlightedValue,
+      onHighlightedValueChange: setHighlightedValue,
+      selectionMode,
+      getVisibleItemValues,
+      getItemMeta,
+      getParentValue,
+      getFirstChildValue,
+      getSiblingValues,
+      getItemTextValue,
+      getHasChildren,
+      dom: {
+        focusItem,
+        focusTree,
+      },
+    })
+
+    // Keyboard handler on tree root
+    const handleKeyDown = (e: React.KeyboardEvent) => {
+      switch (e.key) {
+        case 'ArrowDown':
+          e.preventDefault()
+          send('HIGHLIGHT_NEXT')
+          break
+        case 'ArrowUp':
+          e.preventDefault()
+          send('HIGHLIGHT_PREV')
+          break
+        case 'ArrowRight':
+          e.preventDefault()
+          send('ARROW_RIGHT')
+          break
+        case 'ArrowLeft':
+          e.preventDefault()
+          send('ARROW_LEFT')
+          break
+        case 'Home':
+          e.preventDefault()
+          send('HIGHLIGHT_FIRST')
+          break
+        case 'End':
+          e.preventDefault()
+          send('HIGHLIGHT_LAST')
+          break
+        case 'Enter':
+          e.preventDefault()
+          send('ACTIVATE')
+          break
+        case ' ':
+          e.preventDefault()
+          if (highlightedValue) {
+            send('TOGGLE_SELECT', { value: highlightedValue })
+          }
+          break
+        case '*':
+          e.preventDefault()
+          send('EXPAND_SIBLINGS')
+          break
+        default:
+          // Character search
+          if (e.key.length === 1 && /[a-zA-Z]/.test(e.key)) {
+            send('TYPE_CHARACTER', { character: e.key })
+          }
+          break
+      }
+    }
+
+    const contextValue: TreeContextValue = {
+      expandedValues: expandedValues ?? [],
+      selectedValues: selectedValues ?? [],
+      highlightedValue,
+      send,
+      computed,
+      store,
+      selectionMode,
+    }
+
+    return (
+      <TreeContext.Provider value={contextValue}>
+        <div
+          ref={composeRefs(forwardedRef, treeRef)}
+          {...mergeProps(
+            {
+              role: 'tree',
+              id: treeId,
+              tabIndex: 0,
+              'aria-multiselectable': selectionMode === 'multiple' || undefined,
+              'data-part': 'tree',
+              onKeyDown: handleKeyDown,
+            },
+            rest,
+          )}
+        >
+          <ParentProvider id={null}>{children}</ParentProvider>
+        </div>
+      </TreeContext.Provider>
+    )
+  },
+)
 
 // ============================================
 // Item
 // ============================================
 
-type ItemProps = {
-  nodeId: NodeId
-  children: React.ReactNode
-  className?: string
+export type ItemProps = {
+  value: ItemValue
+  /** 문자 검색에 사용될 텍스트 값 */
+  textValue?: string
+  disabled?: boolean
+  children: ReactNode
+} & Omit<ComponentPropsWithoutRef<'div'>, 'children'>
+
+export const Item = forwardRef<HTMLDivElement, ItemProps>(
+  (
+    { value, textValue = '', disabled = false, children, ...rest },
+    forwardedRef,
+  ) => {
+    const { expandedValues, selectedValues, highlightedValue } =
+      useTreeContext()
+    const parentValue = useParentId() as ItemValue | null
+
+    // Calculate depth from parent chain
+    const depth = useDepth()
+
+    // Check if item has children by querying store for groups with this item as parent
+    const hasChildren = useHasChildren(value)
+
+    const isExpanded = isItemExpanded(expandedValues, value)
+    const isSelected = isItemSelected(selectedValues, value)
+    const isHighlighted = highlightedValue === value
+    const isDisabled = disabled
+
+    // useNode for registration
+    const { ref } = useNode<TreeRole, TreeItemMeta>({
+      role: 'item',
+      id: value,
+      meta: {
+        value,
+        disabled,
+        parentValue,
+        depth,
+        textValue,
+      },
+    })
+
+    const itemContextValue: ItemContextValue = {
+      value,
+      depth,
+      parentValue,
+      hasChildren,
+      isExpanded,
+      isSelected,
+      isDisabled,
+      isHighlighted,
+    }
+
+    return (
+      <ItemContext.Provider value={itemContextValue}>
+        <div
+          ref={composeRefs(forwardedRef, ref)}
+          {...mergeProps(
+            {
+              role: 'treeitem',
+              'aria-expanded': hasChildren ? isExpanded : undefined,
+              'aria-selected': isSelected,
+              'aria-disabled': isDisabled || undefined,
+              'data-part': 'item',
+              'data-state': hasChildren
+                ? isExpanded
+                  ? 'open'
+                  : 'closed'
+                : undefined,
+              'data-selected': isSelected || undefined,
+              'data-disabled': isDisabled || undefined,
+              'data-highlighted': isHighlighted || undefined,
+              'data-depth': depth,
+              style: { '--tree-depth': depth } as React.CSSProperties,
+            },
+            rest,
+          )}
+        >
+          <ParentProvider id={value}>{children}</ParentProvider>
+        </div>
+      </ItemContext.Provider>
+    )
+  },
+)
+
+// Helper to calculate depth - uses React context instead of store queries
+// Store queries fail on first render because items aren't registered yet
+function useDepth(): number {
+  const level = useLevel()
+  // level starts at 1 for items inside Root's ParentProvider
+  // depth should be 0 for root-level items, so depth = level - 1
+  return level - 1
 }
 
-function Item({ nodeId, children, className }: ItemProps) {
-  const { focusedId, selectedId, expandedIds, store } = useTreeContext()
-  const { ref, domId } = useNode<TreeRole>({
-    role: 'item',
-    id: nodeId,
+// Helper to check if an item has children (ItemGroup registered with this value as parent)
+function useHasChildren(value: ItemValue): boolean {
+  const { store } = useTreeContext()
+
+  return useStoreSubscribe(store, (s) => {
+    const groups = s.getNodesByRole('group')
+    return groups.some(
+      (node) => 'parentValue' in node.meta && node.meta.parentValue === value,
+    )
   })
+}
 
-  const level = useLevel()
-  const hasChildren = useStoreSubscribe(
-    store,
-    (s) => s.getChildrenByRole(nodeId, 'item').length > 0,
-  )
+// ============================================
+// ItemLabel
+// ============================================
 
-  const isExpanded = hasChildren && expandedIds.has(nodeId)
-  const isSelected = selectedId === nodeId
-  const isFocused = focusedId === nodeId
+export type ItemLabelProps = {
+  children: ReactNode
+} & ComponentPropsWithoutRef<'div'>
 
-  return (
-    <ParentProvider id={nodeId}>
-      <li
-        ref={ref}
-        id={domId}
-        role="treeitem"
-        aria-selected={isSelected}
-        aria-expanded={hasChildren ? isExpanded : undefined}
-        aria-level={level}
-        tabIndex={isFocused ? 0 : -1}
-        data-selected={isSelected}
-        data-focused={isFocused}
-        className={className}
+export const ItemLabel = forwardRef<HTMLDivElement, ItemLabelProps>(
+  ({ children, ...rest }, forwardedRef) => {
+    const { send } = useTreeContext()
+    const {
+      value,
+      hasChildren,
+      isExpanded,
+      isSelected,
+      isDisabled,
+      isHighlighted,
+    } = useItemContext()
+
+    const { ref } = useNode<TreeRole, object>({
+      role: 'label',
+      id: value,
+    })
+
+    const handleClick = () => {
+      if (isDisabled) return
+      send('HIGHLIGHT', { value })
+      if (hasChildren) {
+        send('TOGGLE_EXPAND', { value })
+      } else {
+        send('TOGGLE_SELECT', { value })
+      }
+    }
+
+    const handleFocus = () => {
+      if (isDisabled) return
+      send('HIGHLIGHT', { value })
+    }
+
+    return (
+      <div
+        ref={composeRefs(forwardedRef, ref)}
+        {...mergeProps(
+          {
+            tabIndex: isHighlighted ? 0 : -1,
+            'data-part': 'label',
+            'data-state': hasChildren
+              ? isExpanded
+                ? 'open'
+                : 'closed'
+              : undefined,
+            'data-selected': isSelected || undefined,
+            'data-disabled': isDisabled || undefined,
+            'data-highlighted': isHighlighted || undefined,
+            onClick: handleClick,
+            onFocus: handleFocus,
+          },
+          rest,
+        )}
       >
         {children}
-      </li>
-    </ParentProvider>
-  )
-}
+      </div>
+    )
+  },
+)
 
 // ============================================
-// SubRoot
+// ItemGroup
 // ============================================
 
-type SubRootProps = {
-  children: React.ReactNode
-  className?: string
-}
+export type ItemGroupProps = {
+  children: ReactNode
+} & ComponentPropsWithoutRef<'div'>
 
-function SubRoot({ children, className }: SubRootProps) {
-  const { expandedIds } = useTreeContext()
-  const parentId = useParentId()
+export const ItemGroup = forwardRef<HTMLDivElement, ItemGroupProps>(
+  ({ children, ...rest }, forwardedRef) => {
+    const { value, isExpanded } = useItemContext()
+    const elementRef = useRef<HTMLDivElement>(null)
 
-  if (parentId === null || parentId === '__tree_root__') {
-    throw new Error('SubRoot는 Item 안에서 사용해야 합니다.')
-  }
+    const { domId } = useLogicalNode<TreeRole, TreeGroupMeta>({
+      role: 'group',
+      id: value,
+      meta: {
+        parentValue: value,
+      },
+    })
 
-  const isExpanded = expandedIds.has(parentId)
+    const { isPresent, transitionState } = usePresence({
+      isVisible: isExpanded,
+      resolveElement: () => elementRef.current,
+    })
 
-  return (
-    <ul
-      role="group"
-      id={`group-${parentId}`}
-      hidden={!isExpanded}
-      data-expanded={isExpanded}
-      className={className}
-    >
-      {children}
-    </ul>
-  )
-}
+    if (!isPresent) return null
+
+    return (
+      <div
+        ref={composeRefs(forwardedRef, elementRef)}
+        {...mergeProps(
+          {
+            role: 'group',
+            id: domId,
+            'aria-labelledby': `label::${value}`,
+            'data-part': 'group',
+            'data-state': isExpanded ? 'open' : 'closed',
+            'data-transition': transitionState,
+          },
+          rest,
+        )}
+      >
+        {children}
+      </div>
+    )
+  },
+)
+ItemGroup.displayName = 'TreeItemGroup'
 
 // ============================================
-// Text
+// ItemIndicator (expand/collapse icon)
 // ============================================
 
-type TextProps = {
-  children: React.ReactNode
-  className?: string
-}
+export type ItemIndicatorProps = {
+  children?: ReactNode
+} & ComponentPropsWithoutRef<'div'>
 
-function Text({ children, className }: TextProps) {
-  const { ref, domId } = useNode<TreeRole>({
-    role: 'text',
-  })
+export const ItemIndicator = forwardRef<HTMLDivElement, ItemIndicatorProps>(
+  ({ children, ...rest }, forwardedRef) => {
+    const { hasChildren, isExpanded } = useItemContext()
 
-  return (
-    <span ref={ref} id={domId} className={className}>
-      {children}
-    </span>
-  )
-}
+    if (!hasChildren) return null
+
+    return (
+      <div
+        ref={forwardedRef}
+        {...mergeProps(
+          {
+            'data-part': 'indicator',
+            'data-state': isExpanded ? 'open' : 'closed',
+            'aria-hidden': true,
+          },
+          rest,
+        )}
+      >
+        {children}
+      </div>
+    )
+  },
+)
 
 // ============================================
 // Export
 // ============================================
 
-export const TreeView = {
+export { useItemContext }
+
+const Tree = {
   Root,
   Item,
-  SubRoot,
-  Text,
+  ItemLabel,
+  ItemGroup,
+  ItemIndicator,
 }
+
+export default Tree

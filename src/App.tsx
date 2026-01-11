@@ -5,6 +5,7 @@ import AccordionPage from './pages/AccordionPage'
 import TabsPage from './pages/TabsPage'
 import ModalPage from './pages/ModalPage'
 import MenuPage from './pages/MenuPage'
+import TreePage from './pages/TreePage'
 
 function App() {
   return (
@@ -16,6 +17,7 @@ function App() {
           <Route path="/tabs" element={<TabsPage />} />
           <Route path="/modal" element={<ModalPage />} />
           <Route path="/menu" element={<MenuPage />} />
+          <Route path="/tree" element={<TreePage />} />
         </Route>
       </Routes>
     </BrowserRouter>

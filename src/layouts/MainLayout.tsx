@@ -6,6 +6,7 @@ const navItems = [
   { name: 'Tabs', path: '/tabs' },
   { name: 'Modal', path: '/modal' },
   { name: 'Menu', path: '/menu' },
+  { name: 'Tree', path: '/tree' },
 ]
 
 export default function MainLayout() {
