@@ -14,7 +14,7 @@ export function usePresence({
   transitionState: TransitionState
 } {
   const [transitionState, setTransitionState] = useState<TransitionState>(
-    isVisible ? 'starting' : undefined,
+    isVisible ? 'idle' : undefined,
   )
 
   const resolveElementRef = useLatestRef(resolveElementFn)
@@ -53,7 +53,10 @@ export function usePresence({
     switch (transitionState) {
       case 'starting': {
         if (isVisible) {
-          waitForAnimations(() => scheduleTransitionUpdate('idle'))
+          // Wait one frame for CSS to apply, then wait for animations
+          rafId = requestAnimationFrame(() => {
+            waitForAnimations(() => scheduleTransitionUpdate('idle'))
+          })
         } else {
           scheduleTransitionUpdate('ending')
         }
@@ -70,7 +73,10 @@ export function usePresence({
         if (isVisible) {
           scheduleTransitionUpdate('idle')
         } else {
-          waitForAnimations(() => scheduleTransitionUpdate(undefined))
+          // Wait one frame for CSS to apply, then wait for animations
+          rafId = requestAnimationFrame(() => {
+            waitForAnimations(() => scheduleTransitionUpdate(undefined))
+          })
         }
         break
       }
