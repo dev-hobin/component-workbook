@@ -17,6 +17,7 @@ export interface ComponentNode<
   id: NodeId // 논리적 ID (사용자가 지정)
   parentId: NodeId | null
   role: Role
+  domId: string // DOM element의 id 속성 값
   meta: Meta
   element: HTMLElement | null
 }

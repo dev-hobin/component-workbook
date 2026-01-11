@@ -12,215 +12,178 @@ export type ComboboxOption = {
   id: OptionId
   value: string
   label: string
-  disabled?: boolean
+  disabled: boolean
 }
 
-// ============================================
-// Events
-// ============================================
-
-export type ComboboxEvents = {
-  // Popup
-  OPEN: undefined
-  CLOSE: undefined
-  TOGGLE: undefined
-
-  // Input
-  INPUT_CHANGE: { value: string }
-  INPUT_FOCUS: undefined
-  INPUT_BLUR: undefined
-
-  // Keyboard
-  KEY_ARROW_DOWN: undefined
-  KEY_ARROW_UP: undefined
-  KEY_ALT_ARROW_DOWN: undefined
-  KEY_ENTER: undefined
-  KEY_ESCAPE: undefined
-  KEY_HOME: undefined
-  KEY_END: undefined
-  KEY_TAB: undefined
-
-  // Option
-  OPTION_CLICK: { optionId: OptionId }
-  OPTION_HOVER: { optionId: OptionId }
-
-  // Outside
-  OUTSIDE_CLICK: undefined
+export type ComboboxDom = {
+  scrollOptionIntoView: (optionId: OptionId) => void
+  focusInput: () => void
 }
 
-// ============================================
-// Context
-// ============================================
-
-export type ComboboxProps = {
+export type ComboboxInput = {
+  // 핵심 상태
   isOpen: boolean
   inputValue: string
   selectedValue: string | null
   highlightedOptionId: OptionId | null
-  autocompleteText: string | null
-}
 
-export type ComboboxHandler = {
+  // 상태 변경 핸들러
   setIsOpen: (open: boolean) => void
   setInputValue: (value: string) => void
   setSelectedValue: (value: string | null) => void
   setHighlightedOptionId: (id: OptionId | null) => void
-  setAutocompleteText: (text: string | null) => void
-  onSelect?: (value: string) => void
-}
 
-export type ComboboxOptions = {
+  // 옵션
   autocomplete: AutocompleteMode
   openOnFocus: boolean
   closeOnSelect: boolean
-  showAllOnEmpty: boolean
   clearOnSelect: boolean
   loop: boolean
-}
 
-export type ComboboxHelpers = {
+  // 콜백
+  onSelect?: (value: string) => void
+
+  // 지연 헬퍼 (NodeStore에서 계산)
   getFilteredOptions: () => ComboboxOption[]
-  getOptionById: (id: OptionId) => ComboboxOption | undefined
-}
+  getOptionById: (id: OptionId) => ComboboxOption | null
 
-export type ComboboxDom = {
-  getOptionElement: (optionId: OptionId) => HTMLElement | null
-  getInputElement: () => HTMLInputElement | null
-  getAllElements: () => Map<string, HTMLElement>
-}
-
-export type ComboboxInput = {
-  props: ComboboxProps
-  handler: ComboboxHandler
-  options: ComboboxOptions
-  helpers: ComboboxHelpers
+  // DOM helpers
   dom: ComboboxDom
 }
+
+export type ComboboxEvents = {
+  // 팝업
+  OPEN: undefined
+  CLOSE: undefined
+  TOGGLE: undefined
+
+  // 입력
+  INPUT_CHANGE: { value: string }
+  INPUT_FOCUS: undefined
+  INPUT_BLUR: undefined
+
+  // 키보드 네비게이션
+  HIGHLIGHT_NEXT: undefined
+  HIGHLIGHT_PREV: undefined
+  HIGHLIGHT_FIRST: undefined
+  HIGHLIGHT_LAST: undefined
+
+  // 선택
+  SELECT_HIGHLIGHTED: undefined
+  SELECT_OPTION: { optionId: OptionId }
+
+  // 하이라이트
+  HIGHLIGHT: { optionId: OptionId }
+  CLEAR_HIGHLIGHT: undefined
+}
+
+export type ComboboxComputed = {
+  isOpen: boolean
+  highlightedOptionId: OptionId | null
+}
+
+export type ComboboxActions =
+  | 'noop'
+  | 'open'
+  | 'close'
+  | 'handleInputChange'
+  | 'handleInputBlur'
+  | 'highlightNext'
+  | 'highlightPrev'
+  | 'highlightFirst'
+  | 'highlightLast'
+  | 'highlightOption'
+  | 'clearHighlight'
+  | 'selectHighlighted'
+  | 'selectOption'
 
 // ============================================
 // Machine
 // ============================================
 
-type ComboboxActions =
-  | 'noop'
-  | 'setOpen'
-  | 'clearOpen'
-  | 'clearHighlight'
-  | 'clearAutocomplete'
-  | 'highlightFirst'
-  | 'highlightLast'
-  | 'highlightNext'
-  | 'highlightPrev'
-  | 'highlightOption'
-  | 'highlightSelected'
-  | 'selectHighlighted'
-  | 'selectOption'
-  | 'restoreSelectedValue'
-  | 'acceptAutocomplete'
-  | 'handleInputChange'
-  | 'handleInputBlur'
-
+/**
+ * Combobox Machine - 선언적 명세
+ *
+ * 이 Machine을 읽으면 Combobox의 동작이 이해됩니다:
+ *
+ * ## 상태
+ * - isOpen: 팝업 열림 여부
+ * - inputValue: 입력 필드 값
+ * - selectedValue: 선택된 옵션의 값
+ * - highlightedOptionId: 현재 하이라이트된 옵션 ID
+ *
+ * ## 이벤트
+ * - OPEN/CLOSE/TOGGLE → 팝업 열기/닫기
+ * - INPUT_CHANGE → 입력 변경 (필터링 + 팝업 열기)
+ * - HIGHLIGHT_NEXT/PREV → 하이라이트 이동
+ * - SELECT_HIGHLIGHTED → 현재 하이라이트된 옵션 선택
+ *
+ * ## 부수효과 (Effects)
+ * - 하이라이트 변경 시 스크롤
+ *
+ * Note: Escape 키와 외부 클릭은 DismissableLayer가 처리 (Shell에서 설정)
+ */
 export const comboboxMachine = createMachine<{
   input: ComboboxInput
   events: ComboboxEvents
+  computed: ComboboxComputed
   actions: ComboboxActions
 }>({
+  computed: {
+    isOpen: (ctx) => ctx.isOpen,
+    highlightedOptionId: (ctx) => ctx.highlightedOptionId,
+  },
+
   on: {
-    OPEN: 'setOpen',
-    CLOSE: ['clearOpen', 'clearHighlight', 'clearAutocomplete'],
+    OPEN: 'open',
+    CLOSE: 'close',
     TOGGLE: [
-      { when: (ctx) => ctx.props.isOpen, do: ['clearOpen', 'clearHighlight', 'clearAutocomplete'] },
-      { do: 'setOpen' },
+      { when: (ctx) => ctx.isOpen, do: 'close' },
+      { do: 'open' },
     ],
 
     INPUT_CHANGE: 'handleInputChange',
     INPUT_FOCUS: [
-      { when: (ctx) => ctx.options.openOnFocus && !ctx.props.isOpen, do: ['setOpen', 'highlightSelected'] },
+      { when: (ctx) => ctx.openOnFocus && !ctx.isOpen, do: 'open' },
       { do: 'noop' },
     ],
     INPUT_BLUR: 'handleInputBlur',
 
-    KEY_ARROW_DOWN: [
-      { when: (ctx) => !ctx.props.isOpen, do: ['setOpen', 'highlightFirst'] },
+    HIGHLIGHT_NEXT: [
+      { when: (ctx) => !ctx.isOpen, do: ['open', 'highlightFirst'] },
       { do: 'highlightNext' },
     ],
-    KEY_ARROW_UP: [
-      { when: (ctx) => !ctx.props.isOpen, do: ['setOpen', 'highlightLast'] },
+    HIGHLIGHT_PREV: [
+      { when: (ctx) => !ctx.isOpen, do: ['open', 'highlightLast'] },
       { do: 'highlightPrev' },
     ],
-    KEY_ALT_ARROW_DOWN: [
-      { when: (ctx) => !ctx.props.isOpen, do: 'setOpen' },
+    HIGHLIGHT_FIRST: [
+      { when: (ctx) => ctx.isOpen, do: 'highlightFirst' },
       { do: 'noop' },
     ],
-    KEY_ENTER: [
-      { when: (ctx) => !ctx.props.isOpen, do: 'noop' },
-      { when: (ctx) => ctx.props.highlightedOptionId === null, do: ['clearOpen', 'clearHighlight', 'clearAutocomplete'] },
+    HIGHLIGHT_LAST: [
+      { when: (ctx) => ctx.isOpen, do: 'highlightLast' },
+      { do: 'noop' },
+    ],
+
+    SELECT_HIGHLIGHTED: [
+      { when: (ctx) => !ctx.isOpen, do: 'noop' },
+      { when: (ctx) => ctx.highlightedOptionId === null, do: 'close' },
       { do: 'selectHighlighted' },
     ],
-    KEY_ESCAPE: [
-      { when: (ctx) => ctx.props.isOpen, do: ['clearOpen', 'clearHighlight', 'clearAutocomplete'] },
-      {
-        when: (ctx) =>
-          ctx.props.selectedValue !== null && ctx.props.inputValue !== ctx.props.selectedValue,
-        do: 'restoreSelectedValue',
-      },
-      { do: 'noop' },
-    ],
-    KEY_HOME: [
-      { when: (ctx) => ctx.props.isOpen, do: 'highlightFirst' },
-      { do: 'noop' },
-    ],
-    KEY_END: [
-      { when: (ctx) => ctx.props.isOpen, do: 'highlightLast' },
-      { do: 'noop' },
-    ],
-    KEY_TAB: [
-      { when: (ctx) => ctx.props.autocompleteText !== null, do: 'acceptAutocomplete' },
-      { when: (ctx) => ctx.props.isOpen, do: ['clearOpen', 'clearHighlight', 'clearAutocomplete'] },
-      { do: 'noop' },
-    ],
+    SELECT_OPTION: 'selectOption',
 
-    OPTION_CLICK: 'selectOption',
-    OPTION_HOVER: 'highlightOption',
-
-    OUTSIDE_CLICK: [
-      { when: (ctx) => ctx.props.isOpen, do: ['clearOpen', 'clearHighlight', 'clearAutocomplete'] },
-      { do: 'noop' },
-    ],
+    HIGHLIGHT: 'highlightOption',
+    CLEAR_HIGHLIGHT: 'clearHighlight',
   },
 
   effects: [
     {
-      // Outside click 리스너
-      watch: (ctx) => ctx.props.isOpen,
-      enter: (ctx) => {
-        const handleClick = (event: PointerEvent) => {
-          const target = event.target as Node | null
-          if (!target) return
-
-          const elements = ctx.dom.getAllElements()
-          for (const element of elements.values()) {
-            if (element.contains(target)) return
-          }
-
-          ctx.handler.setIsOpen(false)
-          ctx.handler.setHighlightedOptionId(null)
-          ctx.handler.setAutocompleteText(null)
-        }
-
-        document.addEventListener('pointerdown', handleClick, true)
-        return () =>
-          document.removeEventListener('pointerdown', handleClick, true)
-      },
-    },
-    {
-      // Highlight 변경 시 스크롤
-      watch: (ctx) => ctx.props.highlightedOptionId,
+      // 하이라이트 변경 시 스크롤
+      watch: (ctx) => ctx.highlightedOptionId,
       change: (ctx) => {
-        if (ctx.props.highlightedOptionId) {
-          ctx.dom
-            .getOptionElement(ctx.props.highlightedOptionId)
-            ?.scrollIntoView({ block: 'nearest' })
+        if (ctx.highlightedOptionId) {
+          ctx.dom.scrollOptionIntoView(ctx.highlightedOptionId)
         }
       },
     },
@@ -229,248 +192,207 @@ export const comboboxMachine = createMachine<{
   actions: {
     noop: () => {},
 
-    setOpen: (ctx) => {
-      ctx.handler.setIsOpen(true)
+    open: (ctx) => {
+      ctx.setIsOpen(true)
     },
 
-    clearOpen: (ctx) => {
-      ctx.handler.setIsOpen(false)
+    close: (ctx) => {
+      ctx.setIsOpen(false)
+      ctx.setHighlightedOptionId(null)
     },
 
-    clearHighlight: (ctx) => {
-      ctx.handler.setHighlightedOptionId(null)
-    },
+    handleInputChange: (ctx, event) => {
+      if (!('value' in event)) return
 
-    clearAutocomplete: (ctx) => {
-      ctx.handler.setAutocompleteText(null)
-    },
+      const { value } = event
+      ctx.setInputValue(value)
 
-    highlightFirst: (ctx) => {
-      const options = ctx.helpers.getFilteredOptions()
-      const enabled = options.filter((o) => !o.disabled)
-      if (enabled.length > 0) {
-        ctx.handler.setHighlightedOptionId(enabled[0].id)
-      }
-    },
-
-    highlightLast: (ctx) => {
-      const options = ctx.helpers.getFilteredOptions()
-      const enabled = options.filter((o) => !o.disabled)
-      if (enabled.length > 0) {
-        ctx.handler.setHighlightedOptionId(enabled[enabled.length - 1].id)
-      }
-    },
-
-    highlightNext: (ctx) => {
-      const options = ctx.helpers.getFilteredOptions()
-      const enabled = options.filter((o) => !o.disabled)
-      if (enabled.length === 0) return
-
-      if (ctx.props.highlightedOptionId === null) {
-        ctx.handler.setHighlightedOptionId(enabled[0].id)
-        return
+      // 입력 시 팝업 열기
+      if (!ctx.isOpen) {
+        ctx.setIsOpen(true)
       }
 
-      const currentIndex = enabled.findIndex(
-        (o) => o.id === ctx.props.highlightedOptionId,
-      )
-      if (currentIndex === -1) {
-        ctx.handler.setHighlightedOptionId(enabled[0].id)
-        return
-      }
-
-      const nextIndex = currentIndex + 1
-      if (nextIndex >= enabled.length) {
-        if (ctx.options.loop) {
-          ctx.handler.setHighlightedOptionId(enabled[0].id)
-        }
-      } else {
-        ctx.handler.setHighlightedOptionId(enabled[nextIndex].id)
-      }
-    },
-
-    highlightPrev: (ctx) => {
-      const options = ctx.helpers.getFilteredOptions()
-      const enabled = options.filter((o) => !o.disabled)
-      if (enabled.length === 0) return
-
-      if (ctx.props.highlightedOptionId === null) {
-        ctx.handler.setHighlightedOptionId(enabled[enabled.length - 1].id)
-        return
-      }
-
-      const currentIndex = enabled.findIndex(
-        (o) => o.id === ctx.props.highlightedOptionId,
-      )
-      if (currentIndex === -1) {
-        ctx.handler.setHighlightedOptionId(enabled[enabled.length - 1].id)
-        return
-      }
-
-      const prevIndex = currentIndex - 1
-      if (prevIndex < 0) {
-        if (ctx.options.loop) {
-          ctx.handler.setHighlightedOptionId(enabled[enabled.length - 1].id)
-        }
-      } else {
-        ctx.handler.setHighlightedOptionId(enabled[prevIndex].id)
-      }
-    },
-
-    highlightOption: (ctx, payload: { optionId: string }) => {
-      const { optionId } = payload
-      const option = ctx.helpers.getOptionById(optionId)
-      if (option && !option.disabled) {
-        ctx.handler.setHighlightedOptionId(optionId)
-      }
-    },
-
-    highlightSelected: (ctx) => {
-      if (ctx.props.selectedValue) {
-        const options = ctx.helpers.getFilteredOptions()
-        const selected = options.find((o) => o.value === ctx.props.selectedValue)
-        if (selected) {
-          ctx.handler.setHighlightedOptionId(selected.id)
-        }
-      }
-    },
-
-    selectHighlighted: (ctx) => {
-      if (ctx.props.highlightedOptionId === null) return
-
-      const option = ctx.helpers.getOptionById(ctx.props.highlightedOptionId)
-      if (!option || option.disabled) return
-
-      const newInputValue = ctx.options.clearOnSelect ? '' : option.label
-      ctx.handler.setSelectedValue(option.value)
-      ctx.handler.setInputValue(newInputValue)
-      ctx.handler.setAutocompleteText(null)
-
-      if (ctx.options.closeOnSelect) {
-        ctx.handler.setIsOpen(false)
-        ctx.handler.setHighlightedOptionId(null)
-      }
-
-      ctx.handler.onSelect?.(option.value)
-    },
-
-    selectOption: (ctx, payload: { optionId: OptionId }) => {
-      const { optionId } = payload
-      const option = ctx.helpers.getOptionById(optionId)
-      if (!option || option.disabled) return
-
-      const newInputValue = ctx.options.clearOnSelect ? '' : option.label
-      ctx.handler.setSelectedValue(option.value)
-      ctx.handler.setInputValue(newInputValue)
-      ctx.handler.setAutocompleteText(null)
-
-      if (ctx.options.closeOnSelect) {
-        ctx.handler.setIsOpen(false)
-        ctx.handler.setHighlightedOptionId(null)
-      }
-
-      ctx.handler.onSelect?.(option.value)
-    },
-
-    restoreSelectedValue: (ctx) => {
-      if (!ctx.props.selectedValue) return
-      const options = ctx.helpers.getFilteredOptions()
-      const selected = options.find((o) => o.value === ctx.props.selectedValue)
-      if (selected) {
-        ctx.handler.setInputValue(selected.label)
-      }
-    },
-
-    acceptAutocomplete: (ctx) => {
-      if (ctx.props.autocompleteText === null) return
-      ctx.handler.setInputValue(ctx.props.inputValue + ctx.props.autocompleteText)
-      ctx.handler.setAutocompleteText(null)
-    },
-
-    handleInputChange: (ctx, payload: { value: string }) => {
-      const { value } = payload
-
-      // 1. 입력값 업데이트 + popup 열기
-      ctx.handler.setInputValue(value)
-      ctx.handler.setIsOpen(true)
-      ctx.handler.setAutocompleteText(null)
-
-      // 2. 필터링된 옵션
-      const options = ctx.helpers.getFilteredOptions()
-
-      // 3. Inline autocomplete 적용
-      if (ctx.options.autocomplete === 'inline' || ctx.options.autocomplete === 'both') {
-        if (value.length > 0) {
-          const valueLower = value.toLowerCase()
-          const matching = options.find(
-            (o) => !o.disabled && o.label.toLowerCase().startsWith(valueLower),
-          )
-          if (matching) {
-            ctx.handler.setHighlightedOptionId(matching.id)
-            ctx.handler.setAutocompleteText(matching.label.slice(value.length))
-            // Selection range 처리
-            const input = ctx.dom.getInputElement()
-            if (input) {
-              requestAnimationFrame(() => {
-                input.setSelectionRange(value.length, matching.label.length)
-              })
-            }
-          } else {
-            ctx.handler.setHighlightedOptionId(null)
-          }
-        } else {
-          ctx.handler.setHighlightedOptionId(null)
-        }
-      } else if (options.length > 0) {
-        // list 모드: 첫 번째 매칭 옵션 하이라이트
+      // 첫 번째 필터된 옵션 하이라이트 (list 모드)
+      if (ctx.autocomplete === 'list' || ctx.autocomplete === 'both') {
+        const options = ctx.getFilteredOptions()
         const enabled = options.filter((o) => !o.disabled)
         if (enabled.length > 0) {
-          ctx.handler.setHighlightedOptionId(enabled[0].id)
+          ctx.setHighlightedOptionId(enabled[0].id)
         } else {
-          ctx.handler.setHighlightedOptionId(null)
+          ctx.setHighlightedOptionId(null)
         }
       } else {
-        ctx.handler.setHighlightedOptionId(null)
+        ctx.setHighlightedOptionId(null)
       }
     },
 
     handleInputBlur: (ctx) => {
-      if (!ctx.props.isOpen) return
+      // Shell에서 relatedTarget 체크 후 호출
+      ctx.setIsOpen(false)
+      ctx.setHighlightedOptionId(null)
+    },
 
-      // Autocomplete가 있으면 수락
-      if (ctx.props.autocompleteText) {
-        ctx.handler.setInputValue(ctx.props.inputValue + ctx.props.autocompleteText)
-        ctx.handler.setAutocompleteText(null)
+    highlightFirst: (ctx) => {
+      const options = ctx.getFilteredOptions()
+      const enabled = options.filter((o) => !o.disabled)
+      if (enabled.length > 0) {
+        ctx.setHighlightedOptionId(enabled[0].id)
+      }
+    },
+
+    highlightLast: (ctx) => {
+      const options = ctx.getFilteredOptions()
+      const enabled = options.filter((o) => !o.disabled)
+      if (enabled.length > 0) {
+        ctx.setHighlightedOptionId(enabled[enabled.length - 1].id)
+      }
+    },
+
+    highlightNext: (ctx) => {
+      const options = ctx.getFilteredOptions()
+      const enabled = options.filter((o) => !o.disabled)
+      if (enabled.length === 0) return
+
+      if (ctx.highlightedOptionId === null) {
+        ctx.setHighlightedOptionId(enabled[0].id)
+        return
       }
 
-      ctx.handler.setIsOpen(false)
-      ctx.handler.setHighlightedOptionId(null)
+      const currentIndex = enabled.findIndex(
+        (o) => o.id === ctx.highlightedOptionId,
+      )
+      if (currentIndex === -1) {
+        ctx.setHighlightedOptionId(enabled[0].id)
+        return
+      }
+
+      const nextIndex = ctx.loop
+        ? (currentIndex + 1) % enabled.length
+        : Math.min(currentIndex + 1, enabled.length - 1)
+
+      if (nextIndex !== currentIndex) {
+        ctx.setHighlightedOptionId(enabled[nextIndex].id)
+      }
+    },
+
+    highlightPrev: (ctx) => {
+      const options = ctx.getFilteredOptions()
+      const enabled = options.filter((o) => !o.disabled)
+      if (enabled.length === 0) return
+
+      if (ctx.highlightedOptionId === null) {
+        ctx.setHighlightedOptionId(enabled[enabled.length - 1].id)
+        return
+      }
+
+      const currentIndex = enabled.findIndex(
+        (o) => o.id === ctx.highlightedOptionId,
+      )
+      if (currentIndex === -1) {
+        ctx.setHighlightedOptionId(enabled[enabled.length - 1].id)
+        return
+      }
+
+      const prevIndex = ctx.loop
+        ? (currentIndex - 1 + enabled.length) % enabled.length
+        : Math.max(currentIndex - 1, 0)
+
+      if (prevIndex !== currentIndex) {
+        ctx.setHighlightedOptionId(enabled[prevIndex].id)
+      }
+    },
+
+    highlightOption: (ctx, event) => {
+      if ('optionId' in event) {
+        const option = ctx.getOptionById(event.optionId)
+        if (option && !option.disabled) {
+          ctx.setHighlightedOptionId(event.optionId)
+        }
+      }
+    },
+
+    clearHighlight: (ctx) => {
+      ctx.setHighlightedOptionId(null)
+    },
+
+    selectHighlighted: (ctx) => {
+      if (!ctx.highlightedOptionId) return
+
+      const option = ctx.getOptionById(ctx.highlightedOptionId)
+      if (!option || option.disabled) return
+
+      ctx.setSelectedValue(option.value)
+      ctx.onSelect?.(option.value)
+
+      if (ctx.clearOnSelect) {
+        ctx.setInputValue('')
+      } else {
+        ctx.setInputValue(option.label)
+      }
+
+      if (ctx.closeOnSelect) {
+        ctx.setIsOpen(false)
+      }
+
+      ctx.setHighlightedOptionId(null)
+    },
+
+    selectOption: (ctx, event) => {
+      if (!('optionId' in event)) return
+
+      const option = ctx.getOptionById(event.optionId)
+      if (!option || option.disabled) return
+
+      ctx.setSelectedValue(option.value)
+      ctx.onSelect?.(option.value)
+
+      if (ctx.clearOnSelect) {
+        ctx.setInputValue('')
+      } else {
+        ctx.setInputValue(option.label)
+      }
+
+      if (ctx.closeOnSelect) {
+        ctx.setIsOpen(false)
+      }
+
+      ctx.setHighlightedOptionId(null)
+      ctx.dom.focusInput()
     },
   },
 })
 
 // ============================================
-// Query Helpers
+// Helper Functions
 // ============================================
 
+/**
+ * 옵션 필터링 헬퍼
+ */
 export function filterOptions(
   options: ComboboxOption[],
   inputValue: string,
   autocomplete: AutocompleteMode,
-  showAllOnEmpty: boolean,
 ): ComboboxOption[] {
+  // autocomplete가 none이면 필터링 없이 모든 옵션 반환
   if (autocomplete === 'none') {
     return options
   }
 
-  if (inputValue.length === 0) {
-    return showAllOnEmpty ? options : []
+  // 입력이 비어있으면 모든 옵션 반환
+  if (!inputValue.trim()) {
+    return options
   }
 
-  const inputLower = inputValue.toLowerCase()
-  return options.filter((opt) => opt.label.toLowerCase().startsWith(inputLower))
+  const lowerInput = inputValue.toLowerCase()
+  return options.filter((option) =>
+    option.label.toLowerCase().includes(lowerInput),
+  )
 }
 
+/**
+ * 옵션이 하이라이트되었는지 확인
+ */
 export function isHighlighted(
   highlightedOptionId: OptionId | null,
   optionId: OptionId,
@@ -478,19 +400,12 @@ export function isHighlighted(
   return highlightedOptionId === optionId
 }
 
+/**
+ * 옵션이 선택되었는지 확인
+ */
 export function isSelected(
   selectedValue: string | null,
-  option: ComboboxOption,
+  optionValue: string,
 ): boolean {
-  return selectedValue === option.value
-}
-
-export function getDisplayValue(
-  inputValue: string,
-  autocompleteText: string | null,
-): string {
-  if (autocompleteText) {
-    return inputValue + autocompleteText
-  }
-  return inputValue
+  return selectedValue === optionValue
 }

@@ -1,8 +1,8 @@
 import React, {
   createContext,
   forwardRef,
+  useCallback,
   useContext,
-  useEffect,
   useId,
   useRef,
   useState,
@@ -16,7 +16,6 @@ import {
   filterOptions,
   isHighlighted,
   isSelected,
-  getDisplayValue,
   type ComboboxEvents,
   type ComboboxOption,
   type OptionId,
@@ -31,6 +30,7 @@ import {
 } from '../../primitives/use-node-store'
 import { useNode } from '../../primitives/use-node'
 import { useStoreSubscribe } from '../../primitives/use-store-subscribe'
+import { DismissableLayer } from '../../primitives/dismissable-layer'
 import type { NodeStore } from '../../primitives/node-store'
 
 // ============================================
@@ -39,11 +39,10 @@ import type { NodeStore } from '../../primitives/node-store'
 
 type ComboboxRole = 'input' | 'trigger' | 'listbox' | 'option' | 'label'
 
-type ComboboxMeta = {
-  optionId?: OptionId
-  value?: string
-  label?: string
-  disabled?: boolean
+type ComboboxOptionMeta = {
+  value: string
+  label: string
+  disabled: boolean
 }
 
 type ComboboxContextValue = {
@@ -52,14 +51,10 @@ type ComboboxContextValue = {
   inputValue: string
   selectedValue: string | null
   highlightedOptionId: OptionId | null
-  autocompleteText: string | null
-  store: NodeStore<ComboboxRole, ComboboxMeta>
-  send: Send<ComboboxEvents>
   autocomplete: AutocompleteMode
-  options: ComboboxOption[]
-  filteredOptions: ComboboxOption[]
-  registerOption: (option: ComboboxOption) => void
-  unregisterOption: (optionId: OptionId) => void
+  store: NodeStore<ComboboxRole, ComboboxOptionMeta>
+  send: Send<ComboboxEvents>
+  getFilteredOptions: () => ComboboxOption[]
 }
 
 // ============================================
@@ -75,11 +70,6 @@ function useComboboxContext() {
   }
   return ctx
 }
-
-// Input ref를 Root에서 관리하기 위한 context
-const InputRefContext = createContext<
-  ((el: HTMLInputElement | null) => void) | null
->(null)
 
 // ============================================
 // Root
@@ -98,20 +88,19 @@ export type RootProps = {
   defaultValue?: string | null
   defaultInputValue?: string
   defaultOpen?: boolean
-  // Context options
+  // Options
   autocomplete?: AutocompleteMode
   openOnFocus?: boolean
   closeOnSelect?: boolean
-  showAllOnEmpty?: boolean
   clearOnSelect?: boolean
   loop?: boolean
-  // 선택 콜백
+  // Callback
   onSelect?: (value: string) => void
 }
 
 export function Root(props: RootProps) {
   return (
-    <NodeStoreProvider<ComboboxRole, ComboboxMeta>>
+    <NodeStoreProvider<ComboboxRole, ComboboxOptionMeta>>
       <RootInner {...props} />
     </NodeStoreProvider>
   )
@@ -131,32 +120,12 @@ function RootInner({
   autocomplete = 'list',
   openOnFocus = false,
   closeOnSelect = true,
-  showAllOnEmpty = true,
   clearOnSelect = false,
   loop = true,
   onSelect,
 }: RootProps) {
-  const store = useNodeStore<ComboboxRole, ComboboxMeta>()
+  const store = useNodeStore<ComboboxRole, ComboboxOptionMeta>()
   const comboboxId = useId()
-
-  // Options 관리
-  const [options, setOptions] = useState<ComboboxOption[]>([])
-  const optionsRef = useRef<ComboboxOption[]>([])
-  optionsRef.current = options
-
-  const registerOption = (option: ComboboxOption) => {
-    setOptions((prev) => {
-      const exists = prev.some((o) => o.id === option.id)
-      if (exists) {
-        return prev.map((o) => (o.id === option.id ? option : o))
-      }
-      return [...prev, option]
-    })
-  }
-
-  const unregisterOption = (optionId: OptionId) => {
-    setOptions((prev) => prev.filter((o) => o.id !== optionId))
-  }
 
   // Controllable state
   const [selectedValue, setSelectedValue] = useControllableState({
@@ -177,73 +146,94 @@ function RootInner({
     defaultProp: defaultOpen,
   })
 
-  // 내부 상태
+  // Internal state
   const [highlightedOptionId, setHighlightedOptionId] =
     useState<OptionId | null>(null)
-  const [autocompleteText, setAutocompleteText] = useState<string | null>(null)
 
-  // Input ref
-  const inputRef = useRef<HTMLInputElement | null>(null)
+  // Helper: Get options from NodeStore meta
+  const getOptionsFromStore = useCallback((): ComboboxOption[] => {
+    const optionNodes = store.getNodesByRole('option')
+    return optionNodes.map((node) => ({
+      id: node.id,
+      value: node.meta.value,
+      label: node.meta.label,
+      disabled: node.meta.disabled,
+    }))
+  }, [store])
 
-  // 필터링된 옵션
-  const filteredOptions = filterOptions(
-    options,
-    inputValue ?? '',
-    autocomplete,
-    showAllOnEmpty,
+  // Helper: Get filtered options
+  const getFilteredOptions = useCallback((): ComboboxOption[] => {
+    const options = getOptionsFromStore()
+    return filterOptions(options, inputValue ?? '', autocomplete)
+  }, [getOptionsFromStore, inputValue, autocomplete])
+
+  // Helper: Get option by ID
+  const getOptionById = useCallback(
+    (id: OptionId): ComboboxOption | null => {
+      const node = store.getNode(id, 'option')
+      if (!node) return null
+      return {
+        id: node.id,
+        value: node.meta.value,
+        label: node.meta.label,
+        disabled: node.meta.disabled,
+      }
+    },
+    [store],
   )
-  const filteredOptionsRef = useRef<ComboboxOption[]>([])
-  filteredOptionsRef.current = filteredOptions
 
-  // Event machine
+  // DOM helpers
+  const scrollOptionIntoView = useCallback(
+    (optionId: OptionId) => {
+      requestAnimationFrame(() => {
+        const element = store.getElement(optionId, 'option')
+        element?.scrollIntoView({ block: 'nearest' })
+      })
+    },
+    [store],
+  )
+
+  const focusInput = useCallback(() => {
+    requestAnimationFrame(() => {
+      const element = store.getElement(comboboxId, 'input')
+      ;(element as HTMLInputElement | null)?.focus()
+    })
+  }, [store, comboboxId])
+
+  // Machine
   const { send } = useMachine(comboboxMachine, {
-    props: {
-      isOpen: isOpen ?? false,
-      inputValue: inputValue ?? '',
-      selectedValue: selectedValue ?? null,
-      highlightedOptionId,
-      autocompleteText,
-    },
-    handler: {
-      setIsOpen: (open: boolean) => setIsOpen(open),
-      setInputValue: (value: string) => setInputValue(value),
-      setSelectedValue: (value: string | null) => setSelectedValue(value),
-      setHighlightedOptionId,
-      setAutocompleteText,
-      onSelect,
-    },
-    options: {
-      autocomplete,
-      openOnFocus,
-      closeOnSelect,
-      showAllOnEmpty,
-      clearOnSelect,
-      loop,
-    },
-    helpers: {
-      getFilteredOptions: () => filteredOptionsRef.current,
-      getOptionById: (id: OptionId) => optionsRef.current.find((o) => o.id === id),
-    },
+    // State
+    isOpen: isOpen ?? false,
+    inputValue: inputValue ?? '',
+    selectedValue: selectedValue ?? null,
+    highlightedOptionId,
+
+    // Handlers
+    setIsOpen: (open: boolean) => setIsOpen(open),
+    setInputValue: (value: string) => setInputValue(value),
+    setSelectedValue: (value: string | null) => setSelectedValue(value),
+    setHighlightedOptionId,
+
+    // Options
+    autocomplete,
+    openOnFocus,
+    closeOnSelect,
+    clearOnSelect,
+    loop,
+
+    // Callback
+    onSelect,
+
+    // Helpers
+    getFilteredOptions,
+    getOptionById,
+
+    // DOM
     dom: {
-      getOptionElement: (optionId: OptionId) => store.getElement(optionId, 'option'),
-      getInputElement: () => inputRef.current,
-      getAllElements: () => {
-        const elements = new Map<string, HTMLElement>()
-        const inputEl = store.getElement(comboboxId, 'input')
-        const listbox = store.getElement(comboboxId, 'listbox')
-        const trigger = store.getElement(comboboxId, 'trigger')
-        if (inputEl) elements.set('input', inputEl)
-        if (listbox) elements.set('listbox', listbox)
-        if (trigger) elements.set('trigger', trigger)
-        return elements
-      },
+      scrollOptionIntoView,
+      focusInput,
     },
   })
-
-  // Input ref setter
-  const setInputRef = (el: HTMLInputElement | null) => {
-    inputRef.current = el
-  }
 
   const contextValue: ComboboxContextValue = {
     comboboxId,
@@ -251,21 +241,15 @@ function RootInner({
     inputValue: inputValue ?? '',
     selectedValue: selectedValue ?? null,
     highlightedOptionId,
-    autocompleteText,
+    autocomplete,
     store,
     send,
-    autocomplete,
-    options,
-    filteredOptions,
-    registerOption,
-    unregisterOption,
+    getFilteredOptions,
   }
 
   return (
     <ComboboxContext.Provider value={contextValue}>
-      <InputRefContext.Provider value={setInputRef}>
-        {children}
-      </InputRefContext.Provider>
+      {children}
     </ComboboxContext.Provider>
   )
 }
@@ -278,14 +262,18 @@ export type LabelProps = ComponentPropsWithoutRef<'label'>
 
 export const Label = forwardRef<HTMLLabelElement, LabelProps>(
   ({ children, ...rest }, forwardedRef) => {
-    const { comboboxId } = useComboboxContext()
+    const { comboboxId, store } = useComboboxContext()
 
     const { ref, domId } = useNode<ComboboxRole>({
       role: 'label',
       id: comboboxId,
     })
 
-    const inputDomId = `input::${comboboxId}`
+    // Input의 domId 구독
+    const inputDomId = useStoreSubscribe(
+      store,
+      (s) => s.getNode(comboboxId, 'input')?.domId ?? null,
+    )
 
     return (
       <label
@@ -293,13 +281,38 @@ export const Label = forwardRef<HTMLLabelElement, LabelProps>(
         {...mergeProps(
           {
             id: domId,
-            htmlFor: inputDomId,
+            htmlFor: inputDomId ?? undefined,
+            'data-part': 'label',
           },
           rest,
         )}
       >
         {children}
       </label>
+    )
+  },
+)
+
+// ============================================
+// Control (Wrapper for Input + Trigger)
+// ============================================
+
+export type ControlProps = ComponentPropsWithoutRef<'div'>
+
+export const Control = forwardRef<HTMLDivElement, ControlProps>(
+  ({ children, ...rest }, forwardedRef) => {
+    return (
+      <div
+        ref={forwardedRef}
+        {...mergeProps(
+          {
+            'data-part': 'control',
+          },
+          rest,
+        )}
+      >
+        {children}
+      </div>
     )
   },
 )
@@ -320,109 +333,81 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
       isOpen,
       inputValue,
       highlightedOptionId,
-      autocompleteText,
+      autocomplete,
       store,
       send,
-      autocomplete,
     } = useComboboxContext()
-
-    const setInputRef = useContext(InputRefContext)
 
     const { ref, domId } = useNode<ComboboxRole>({
       role: 'input',
       id: comboboxId,
     })
 
-    // Listbox ID 구독
+    // Listbox의 domId 구독
     const listboxDomId = useStoreSubscribe(
       store,
-      (s) => s.getElement(comboboxId, 'listbox')?.id || null,
+      (s) => s.getNode(comboboxId, 'listbox')?.domId ?? null,
     )
 
-    // 하이라이트된 옵션의 DOM ID
-    const activeDescendantId = highlightedOptionId
-      ? `option::${highlightedOptionId}`
-      : undefined
+    // Highlighted option의 domId 구독
+    const activeDescendantId = useStoreSubscribe(store, (s) => {
+      if (!highlightedOptionId) return null
+      return s.getNode(highlightedOptionId, 'option')?.domId ?? null
+    })
 
-    // 키보드 핸들러
+    // Keyboard handler
     const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
       switch (event.key) {
         case 'ArrowDown':
           event.preventDefault()
-          if (event.altKey) {
-            send('KEY_ALT_ARROW_DOWN')
-          } else {
-            send('KEY_ARROW_DOWN')
-          }
+          send('HIGHLIGHT_NEXT')
           break
         case 'ArrowUp':
           event.preventDefault()
-          send('KEY_ARROW_UP')
+          send('HIGHLIGHT_PREV')
           break
         case 'Enter':
           if (isOpen) {
             event.preventDefault()
           }
-          send('KEY_ENTER')
+          send('SELECT_HIGHLIGHTED')
           break
         case 'Escape':
-          if (isOpen) {
-            event.preventDefault()
-          }
-          send('KEY_ESCAPE')
+          // DismissableLayer에서 처리
           break
         case 'Home':
           if (isOpen) {
             event.preventDefault()
-            send('KEY_HOME')
+            send('HIGHLIGHT_FIRST')
           }
           break
         case 'End':
           if (isOpen) {
             event.preventDefault()
-            send('KEY_END')
+            send('HIGHLIGHT_LAST')
           }
           break
         case 'Tab':
-          send('KEY_TAB')
+          if (isOpen) {
+            send('CLOSE')
+          }
           break
       }
     }
 
-    // 입력 핸들러
+    // Input handler
     const handleChange = (event: React.ChangeEvent<HTMLInputElement>) => {
       send('INPUT_CHANGE', { value: event.target.value })
     }
 
-    // 포커스 핸들러
+    // Focus handler
     const handleFocus = () => {
       send('INPUT_FOCUS')
     }
 
-    // 블러 핸들러
-    const handleBlur = (event: React.FocusEvent<HTMLInputElement>) => {
-      // listbox나 trigger로 포커스 이동 시 닫지 않음
-      const relatedTarget = event.relatedTarget as HTMLElement | null
-      const listboxEl = store.getElement(comboboxId, 'listbox')
-      const triggerEl = store.getElement(comboboxId, 'trigger')
-
-      if (
-        relatedTarget &&
-        (listboxEl?.contains(relatedTarget) ||
-          triggerEl?.contains(relatedTarget))
-      ) {
-        return
-      }
-
-      send('INPUT_BLUR')
-    }
-
-    // 표시할 값
-    const displayValue = getDisplayValue(inputValue, autocompleteText)
-
     return (
       <input
-        ref={composeRefs(forwardedRef, ref, setInputRef)}
+        ref={composeRefs(forwardedRef, ref)}
         {...mergeProps(
           {
             type: 'text',
@@ -431,13 +416,14 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
             'aria-autocomplete': autocomplete === 'none' ? 'none' : 'list',
             'aria-expanded': isOpen,
             'aria-controls': listboxDomId ?? undefined,
-            'aria-activedescendant': activeDescendantId,
+            'aria-activedescendant': activeDescendantId ?? undefined,
             'aria-haspopup': 'listbox',
-            value: displayValue,
+            'data-part': 'input',
+            'data-state': isOpen ? 'open' : 'closed',
+            value: inputValue,
             onChange: handleChange,
             onKeyDown: handleKeyDown,
             onFocus: handleFocus,
-            onBlur: handleBlur,
           },
           rest,
         )}
@@ -463,9 +449,9 @@ export const Trigger = forwardRef<HTMLButtonElement, TriggerProps>(
 
     const handleClick = () => {
       send('TOGGLE')
-      // 토글 후 input으로 포커스
+      // Toggle 후 input으로 포커스
       const inputEl = store.getElement(comboboxId, 'input')
-      inputEl?.focus()
+      ;(inputEl as HTMLInputElement | null)?.focus()
     }
 
     return (
@@ -478,6 +464,8 @@ export const Trigger = forwardRef<HTMLButtonElement, TriggerProps>(
             tabIndex: -1,
             'aria-label': isOpen ? 'Close suggestions' : 'Show suggestions',
             'aria-expanded': isOpen,
+            'data-part': 'trigger',
+            'data-state': isOpen ? 'open' : 'closed',
             onClick: handleClick,
           },
           rest,
@@ -490,6 +478,36 @@ export const Trigger = forwardRef<HTMLButtonElement, TriggerProps>(
 )
 
 // ============================================
+// Positioner (For floating-ui positioning)
+// ============================================
+
+export type PositionerProps = ComponentPropsWithoutRef<'div'>
+
+export const Positioner = forwardRef<HTMLDivElement, PositionerProps>(
+  ({ children, ...rest }, forwardedRef) => {
+    const { isOpen } = useComboboxContext()
+
+    if (!isOpen) {
+      return null
+    }
+
+    return (
+      <div
+        ref={forwardedRef}
+        {...mergeProps(
+          {
+            'data-part': 'positioner',
+          },
+          rest,
+        )}
+      >
+        {children}
+      </div>
+    )
+  },
+)
+
+// ============================================
 // Listbox (Popup)
 // ============================================
 
@@ -497,37 +515,82 @@ export type ListboxProps = ComponentPropsWithoutRef<'ul'>
 
 export const Listbox = forwardRef<HTMLUListElement, ListboxProps>(
   ({ children, ...rest }, forwardedRef) => {
-    const { comboboxId, isOpen, store } = useComboboxContext()
+    const { comboboxId, isOpen, store, send } = useComboboxContext()
 
-    const { ref, domId } = useNode<ComboboxRole>({
+    const { ref, domId, elementRef } = useNode<ComboboxRole>({
       role: 'listbox',
       id: comboboxId,
     })
 
-    // Label ID 구독
-    const labelId = useStoreSubscribe(
+    // Label의 domId 구독
+    const labelDomId = useStoreSubscribe(
       store,
-      (s) => s.getElement(comboboxId, 'label')?.id || null,
+      (s) => s.getNode(comboboxId, 'label')?.domId ?? null,
     )
 
+    // For DismissableLayer excludeRefs
+    const inputRef = useRef<HTMLElement | null>(null)
+    const triggerRef = useRef<HTMLElement | null>(null)
+
+    // Get refs for exclude (실시간 쿼리)
+    const getExcludeRefs = useCallback(() => {
+      inputRef.current = store.getElement(comboboxId, 'input')
+      triggerRef.current = store.getElement(comboboxId, 'trigger')
+      return [inputRef, triggerRef]
+    }, [store, comboboxId])
+
+    const handleEscapeKeyDown = useCallback(() => {
+      send('CLOSE')
+    }, [send])
+
+    const handlePointerDownOutside = useCallback(
+      (event: PointerEvent) => {
+        const target = event.target as Node | null
+        if (!target) return
+
+        // Input이나 Trigger 클릭은 무시
+        const inputEl = store.getElement(comboboxId, 'input')
+        const triggerEl = store.getElement(comboboxId, 'trigger')
+
+        if (inputEl?.contains(target) || triggerEl?.contains(target)) {
+          return
+        }
+
+        send('CLOSE')
+      },
+      [send, store, comboboxId],
+    )
+
+    // isOpen이 false면 렌더링하지 않음
     if (!isOpen) {
       return null
     }
 
     return (
-      <ul
-        ref={composeRefs(forwardedRef, ref)}
-        {...mergeProps(
-          {
-            role: 'listbox',
-            id: domId,
-            'aria-labelledby': labelId ?? undefined,
-          },
-          rest,
-        )}
+      <DismissableLayer
+        isActive={isOpen}
+        dismissOnEscape={true}
+        onEscapeKeyDown={handleEscapeKeyDown}
+        onPointerDownOutside={handlePointerDownOutside}
+        contentRef={elementRef}
+        excludeRefs={getExcludeRefs()}
       >
-        {children}
-      </ul>
+        <ul
+          ref={composeRefs(forwardedRef, ref)}
+          {...mergeProps(
+            {
+              role: 'listbox',
+              id: domId,
+              'aria-labelledby': labelDomId ?? undefined,
+              'data-part': 'listbox',
+              'data-state': isOpen ? 'open' : 'closed',
+            },
+            rest,
+          )}
+        >
+          {children}
+        </ul>
+      </DismissableLayer>
     )
   },
 )
@@ -544,61 +607,30 @@ export type OptionProps = {
 
 export const Option = forwardRef<HTMLLIElement, OptionProps>(
   ({ children, value, label, disabled = false, ...rest }, forwardedRef) => {
-    const {
-      selectedValue,
-      highlightedOptionId,
-      send,
-      registerOption,
-      unregisterOption,
-    } = useComboboxContext()
+    const { selectedValue, highlightedOptionId, send } = useComboboxContext()
 
     const optionId = useId()
     const displayLabel =
       label ?? (typeof children === 'string' ? children : value)
 
-    const { ref, domId } = useNode<ComboboxRole, ComboboxMeta>({
+    // NodeStore에 meta로 등록 (useNode 내부에서 자동 등록/해제)
+    const { ref, domId } = useNode<ComboboxRole, ComboboxOptionMeta>({
       role: 'option',
       id: optionId,
-      meta: { optionId, value, label: displayLabel, disabled },
+      meta: { value, label: displayLabel, disabled },
     })
 
-    // 옵션 등록/해제
-    useEffect(() => {
-      const option: ComboboxOption = {
-        id: optionId,
-        value,
-        label: displayLabel,
-        disabled,
-      }
-      registerOption(option)
-      return () => unregisterOption(optionId)
-    }, [
-      optionId,
-      value,
-      displayLabel,
-      disabled,
-      registerOption,
-      unregisterOption,
-    ])
-
-    const option: ComboboxOption = {
-      id: optionId,
-      value,
-      label: displayLabel,
-      disabled,
-    }
-
     const highlighted = isHighlighted(highlightedOptionId, optionId)
-    const selected = isSelected(selectedValue, option)
+    const selected = isSelected(selectedValue, value)
 
     const handleClick = () => {
       if (disabled) return
-      send('OPTION_CLICK', { optionId })
+      send('SELECT_OPTION', { optionId })
     }
 
     const handleMouseEnter = () => {
       if (disabled) return
-      send('OPTION_HOVER', { optionId })
+      send('HIGHLIGHT', { optionId })
     }
 
     // mousedown에서 preventDefault로 input blur 방지
@@ -615,6 +647,7 @@ export const Option = forwardRef<HTMLLIElement, OptionProps>(
             id: domId,
             'aria-selected': selected,
             'aria-disabled': disabled || undefined,
+            'data-part': 'option',
             'data-highlighted': highlighted || undefined,
             'data-disabled': disabled || undefined,
             onMouseDown: handleMouseDown,
@@ -639,7 +672,9 @@ export type NoResultsProps = {
 }
 
 export function NoResults({ children }: NoResultsProps) {
-  const { isOpen, filteredOptions } = useComboboxContext()
+  const { isOpen, getFilteredOptions } = useComboboxContext()
+
+  const filteredOptions = getFilteredOptions()
 
   if (!isOpen || filteredOptions.length > 0) {
     return null
@@ -655,8 +690,10 @@ export function NoResults({ children }: NoResultsProps) {
 const Combobox = {
   Root,
   Label,
+  Control,
   Input,
   Trigger,
+  Positioner,
   Listbox,
   Option,
   NoResults,

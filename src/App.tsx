@@ -6,6 +6,7 @@ import TabsPage from './pages/TabsPage'
 import ModalPage from './pages/ModalPage'
 import MenuPage from './pages/MenuPage'
 import TreePage from './pages/TreePage'
+import ComboboxPage from './pages/ComboboxPage'
 
 function App() {
   return (
@@ -18,6 +19,7 @@ function App() {
           <Route path="/modal" element={<ModalPage />} />
           <Route path="/menu" element={<MenuPage />} />
           <Route path="/tree" element={<TreePage />} />
+          <Route path="/combobox" element={<ComboboxPage />} />
         </Route>
       </Routes>
     </BrowserRouter>

@@ -35,12 +35,13 @@ export function useNode<
           id,
           parentId,
           role: options.role,
+          domId,
           meta: metaRef.current ?? ({} as Meta),
           element,
         })
       }
     },
-    [id, parentId, options.role, store, metaRef],
+    [store, id, options.role, parentId, domId, metaRef],
   )
 
   return { id, domId, ref, elementRef }
@@ -63,12 +64,13 @@ export function useLogicalNode<
       id,
       parentId,
       role: options.role,
+      domId,
       meta: metaRef.current ?? ({} as Meta),
       element: null,
     })
 
     return () => store.unregister(id, options.role)
-  }, [id, parentId, options.role, store, metaRef])
+  }, [id, parentId, options.role, domId, store, metaRef])
 
   return { id, domId }
 }
