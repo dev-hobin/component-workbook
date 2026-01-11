@@ -1,4 +1,4 @@
-import React, {
+import {
   createContext,
   forwardRef,
   useContext,
@@ -10,9 +10,11 @@ import { useMachine, type Send } from 'controlled-machine/react'
 
 import {
   accordionMachine,
-  isExpanded,
   type AccordionEvents,
+  type AccordionComputed,
+  type ItemId,
 } from './machine'
+import { usePresence } from '../../hooks/use-presence'
 import { composeRefs } from '../../utils/compose-refs'
 import { mergeProps } from '../../utils/merge-props'
 
@@ -20,7 +22,6 @@ import {
   NodeStoreProvider,
   useNodeStore,
 } from '../../primitives/use-node-store'
-import { ParentProvider } from '../../primitives/use-parent-context'
 import { useNode } from '../../primitives/use-node'
 import { useStoreSubscribe } from '../../primitives/use-store-subscribe'
 import type { NodeStore } from '../../primitives/node-store'
@@ -29,24 +30,26 @@ import type { NodeStore } from '../../primitives/node-store'
 // Types
 // ============================================
 
-type AccordionRole = 'item' | 'trigger' | 'panel'
-
+type AccordionRole = 'root' | 'item' | 'trigger' | 'content' | 'indicator'
 type AccordionMeta = {
   disabled?: boolean
 }
 
 type AccordionContextValue = {
-  expandedIds: Set<string>
-  focusedId: string | null
+  value: ItemId[]
+  computed: AccordionComputed
   store: NodeStore<AccordionRole, AccordionMeta>
   send: Send<AccordionEvents>
   disabled: boolean
-  animationDuration: string
+  orientation: 'vertical' | 'horizontal'
+  getEnabledTriggerIds: () => ItemId[]
+  getTriggerElement: (itemId: ItemId) => HTMLElement | null
 }
 
 type ItemContextValue = {
-  itemId: string
+  itemId: ItemId
   isDisabled: boolean
+  isExpanded: boolean
 }
 
 // ============================================
@@ -59,7 +62,7 @@ const ItemContext = createContext<ItemContextValue | null>(null)
 function useAccordionContext() {
   const context = useContext(AccordionContext)
   if (!context) {
-    throw new Error('Accordion 컴포넌트는 Accordion.Root 안에서 사용해야 합니다.')
+    throw new Error('Accordion components must be used within Accordion.Root')
   }
   return context
 }
@@ -68,7 +71,7 @@ function useItemContext() {
   const context = useContext(ItemContext)
   if (!context) {
     throw new Error(
-      'Accordion.Trigger/Panel은 Accordion.Item 안에서 사용해야 합니다.',
+      'Accordion.ItemTrigger/ItemContent/ItemIndicator must be used within Accordion.Item',
     )
   }
   return context
@@ -80,13 +83,13 @@ function useItemContext() {
 
 export type RootProps = {
   children: React.ReactNode
-  value?: string[]
-  onValueChange?: (value: string[]) => void
-  defaultValue?: string[]
+  value?: ItemId[]
+  defaultValue?: ItemId[]
+  onValueChange?: (value: ItemId[]) => void
   multiple?: boolean
   collapsible?: boolean
   disabled?: boolean
-  animationDuration?: `${number}ms`
+  orientation?: 'vertical' | 'horizontal'
 } & ComponentPropsWithoutRef<'div'>
 
 export function Root(props: RootProps) {
@@ -102,90 +105,114 @@ const RootInner = forwardRef<HTMLDivElement, RootProps>(
     {
       children,
       value: valueProp,
+      defaultValue = [],
       onValueChange,
-      defaultValue,
       multiple = false,
       collapsible = true,
       disabled = false,
-      animationDuration = '300ms',
+      orientation = 'vertical',
       ...rest
     },
     forwardedRef,
   ) => {
     const store = useNodeStore<AccordionRole, AccordionMeta>()
 
-    // Controllable expanded state
-    const [expandedArray, setExpandedArray] = useControllableState({
-      prop: valueProp,
-      onChange: onValueChange,
-      defaultProp: defaultValue ?? [],
+    const { ref } = useNode<AccordionRole>({
+      role: 'root',
     })
 
-    const expandedIds = new Set(expandedArray)
-    const setExpandedIds = (ids: Set<string>) => {
-      setExpandedArray(Array.from(ids))
-    }
+    // Controllable value state
+    const [value = [], setValue] = useControllableState({
+      prop: valueProp,
+      defaultProp: defaultValue,
+      onChange: onValueChange,
+    })
 
-    // Internal focused state
-    const [focusedId, setFocusedId] = useState<string | null>(null)
-
-    // Event machine
-    const { send } = useMachine(accordionMachine, {
-      expandedIds,
-      focusedId,
-      onExpandedIdsChange: setExpandedIds,
-      onFocusedIdChange: setFocusedId,
+    // Machine
+    const { send, computed } = useMachine(accordionMachine, {
+      value,
       multiple,
       collapsible,
-      disabled,
-      getEnabledItemIds: () => {
-        const items = store.getNodesByRole('item')
-        return items
-          .filter((item) => !item.meta.disabled)
-          .map((item) => item.id)
-      },
-      getTriggerElement: (itemId: string) => store.getElement(itemId, 'trigger'),
+      onValueChange: setValue,
     })
+
+    // Helpers
+    const getEnabledTriggerIds = () => {
+      const items = store.getNodesByRole('item')
+      return items
+        .filter((node) => !node.meta.disabled && !disabled)
+        .map((node) => node.id)
+    }
+
+    const getTriggerElement = (itemId: ItemId) => {
+      return store.getElement(itemId, 'trigger')
+    }
 
     // Keyboard handler
     const handleKeyDown = (e: React.KeyboardEvent) => {
+      const enabledIds = getEnabledTriggerIds()
+      if (enabledIds.length === 0) return
+
+      const isVertical = orientation === 'vertical'
+      const nextKey = isVertical ? 'ArrowDown' : 'ArrowRight'
+      const prevKey = isVertical ? 'ArrowUp' : 'ArrowLeft'
+
+      const currentElement = document.activeElement
+      const currentIndex = enabledIds.findIndex(
+        (id) => getTriggerElement(id) === currentElement,
+      )
+
+      let targetIndex: number | null = null
+
       switch (e.key) {
-        case 'ArrowDown':
+        case nextKey:
           e.preventDefault()
-          send('FOCUS_NEXT')
+          targetIndex =
+            currentIndex === -1 ? 0 : (currentIndex + 1) % enabledIds.length
           break
-        case 'ArrowUp':
+        case prevKey:
           e.preventDefault()
-          send('FOCUS_PREV')
+          targetIndex =
+            currentIndex === -1
+              ? enabledIds.length - 1
+              : (currentIndex - 1 + enabledIds.length) % enabledIds.length
           break
         case 'Home':
           e.preventDefault()
-          send('FOCUS_FIRST')
+          targetIndex = 0
           break
         case 'End':
           e.preventDefault()
-          send('FOCUS_LAST')
+          targetIndex = enabledIds.length - 1
           break
+      }
+
+      if (targetIndex !== null) {
+        getTriggerElement(enabledIds[targetIndex])?.focus()
       }
     }
 
     const contextValue: AccordionContextValue = {
-      expandedIds,
-      focusedId,
+      value,
+      computed,
       store,
       send,
       disabled,
-      animationDuration,
+      orientation,
+      getEnabledTriggerIds,
+      getTriggerElement,
     }
 
     return (
       <AccordionContext.Provider value={contextValue}>
         <div
-          ref={forwardedRef}
+          ref={composeRefs(forwardedRef, ref)}
           {...mergeProps(
             {
-              onKeyDown: handleKeyDown,
+              'data-part': 'root',
+              'data-orientation': orientation,
               'data-disabled': disabled || undefined,
+              onKeyDown: handleKeyDown,
             },
             rest,
           )}
@@ -202,84 +229,79 @@ const RootInner = forwardRef<HTMLDivElement, RootProps>(
 // ============================================
 
 export type ItemProps = {
-  value: string
+  value: ItemId
   disabled?: boolean
-} & ComponentPropsWithoutRef<'section'>
+} & ComponentPropsWithoutRef<'div'>
 
-export const Item = forwardRef<HTMLElement, ItemProps>(
+export const Item = forwardRef<HTMLDivElement, ItemProps>(
   ({ children, value: itemId, disabled = false, ...rest }, forwardedRef) => {
-    const { expandedIds, disabled: rootDisabled } = useAccordionContext()
+    const { computed, disabled: rootDisabled } = useAccordionContext()
+
+    const isDisabled = rootDisabled || disabled
 
     const { ref } = useNode<AccordionRole, AccordionMeta>({
       role: 'item',
       id: itemId,
-      meta: { disabled: rootDisabled || disabled },
+      meta: { disabled: isDisabled },
     })
-
-    const isItemDisabled = rootDisabled || disabled
-    const isItemExpanded = isExpanded(expandedIds, itemId)
+    const isExpanded = computed.expandedSet.has(itemId)
 
     const itemContextValue: ItemContextValue = {
       itemId,
-      isDisabled: isItemDisabled,
+      isDisabled,
+      isExpanded,
     }
 
     return (
       <ItemContext.Provider value={itemContextValue}>
-        <ParentProvider id={itemId}>
-          <section
-            ref={composeRefs(forwardedRef, ref)}
-            {...mergeProps(
-              {
-                'data-disabled': isItemDisabled || undefined,
-                'data-expanded': isItemExpanded || undefined,
-              },
-              rest,
-            )}
-          >
-            {children}
-          </section>
-        </ParentProvider>
+        <div
+          ref={composeRefs(forwardedRef, ref)}
+          {...mergeProps(
+            {
+              'data-part': 'item',
+              'data-state': isExpanded ? 'open' : 'closed',
+              'data-disabled': isDisabled || undefined,
+            },
+            rest,
+          )}
+        >
+          {children}
+        </div>
       </ItemContext.Provider>
     )
   },
 )
 
 // ============================================
-// Trigger
+// ItemTrigger
 // ============================================
 
-export type TriggerProps = ComponentPropsWithoutRef<'button'>
+export type ItemTriggerProps = ComponentPropsWithoutRef<'button'>
 
-export const Trigger = forwardRef<HTMLButtonElement, TriggerProps>(
+export const ItemTrigger = forwardRef<HTMLButtonElement, ItemTriggerProps>(
   ({ children, ...rest }, forwardedRef) => {
-    const { expandedIds, focusedId, store, send, animationDuration } =
-      useAccordionContext()
-    const { itemId, isDisabled } = useItemContext()
+    const { store, send } = useAccordionContext()
+    const { itemId, isDisabled, isExpanded } = useItemContext()
 
-    const { ref, domId } = useNode<AccordionRole, AccordionMeta>({
+    const { ref, domId } = useNode<AccordionRole>({
       role: 'trigger',
       id: itemId,
     })
 
-    // store에서 panel element의 id 구독
-    const panelId = useStoreSubscribe(
+    // Subscribe to content element id
+    const contentId = useStoreSubscribe(
       store,
-      (s) => s.getElement(itemId, 'panel')?.id || null,
+      (s) => s.getElement(itemId, 'content')?.id ?? null,
     )
 
-    const isItemExpanded = isExpanded(expandedIds, itemId)
-    const isFocused = focusedId === itemId
-
     const handleClick = () => {
-      send('TOGGLE', { itemId })
+      if (!isDisabled) {
+        send('TOGGLE', { itemId })
+      }
     }
 
     return (
-      <h3
-        data-expanded={isItemExpanded || undefined}
-        data-disabled={isDisabled || undefined}
-      >
+      <h3>
         <button
           ref={composeRefs(forwardedRef, ref)}
           {...mergeProps(
@@ -287,15 +309,13 @@ export const Trigger = forwardRef<HTMLButtonElement, TriggerProps>(
               type: 'button',
               id: domId,
               disabled: isDisabled,
-              onClick: handleClick,
-              tabIndex: isFocused ? 0 : -1,
-              'aria-expanded': isItemExpanded,
-              'aria-controls': panelId ?? undefined,
-              'data-expanded': isItemExpanded || undefined,
+              'aria-expanded': isExpanded,
+              'aria-controls': contentId ?? undefined,
+              'aria-disabled': isDisabled || undefined,
+              'data-part': 'trigger',
+              'data-state': isExpanded ? 'open' : 'closed',
               'data-disabled': isDisabled || undefined,
-              style: {
-                '--tw-duration': animationDuration,
-              } as React.CSSProperties,
+              onClick: handleClick,
             },
             rest,
           )}
@@ -308,55 +328,113 @@ export const Trigger = forwardRef<HTMLButtonElement, TriggerProps>(
 )
 
 // ============================================
-// Panel
+// ItemContent
 // ============================================
 
-export type PanelProps = ComponentPropsWithoutRef<'div'>
+export type ItemContentProps = {
+  lazyMount?: boolean
+  unmountOnExit?: boolean
+} & ComponentPropsWithoutRef<'div'>
 
-export const Panel = forwardRef<HTMLDivElement, PanelProps>(
-  ({ children, ...rest }, forwardedRef) => {
-    const { expandedIds, store, animationDuration } = useAccordionContext()
-    const { itemId, isDisabled } = useItemContext()
+export const ItemContent = forwardRef<HTMLDivElement, ItemContentProps>(
+  (
+    { children, lazyMount = false, unmountOnExit = false, ...rest },
+    forwardedRef,
+  ) => {
+    const { store } = useAccordionContext()
+    const { itemId, isDisabled, isExpanded } = useItemContext()
 
-    const { ref, domId } = useNode<AccordionRole, AccordionMeta>({
-      role: 'panel',
+    const { ref, domId, elementRef } = useNode<AccordionRole>({
+      role: 'content',
       id: itemId,
     })
 
-    // store에서 trigger element의 id 구독
+    // Track if content was ever expanded (for lazyMount)
+    const [wasEverExpanded, setWasEverExpanded] = useState(isExpanded)
+    if (isExpanded && !wasEverExpanded) {
+      setWasEverExpanded(true)
+    }
+
+    // Animation state
+    const { isPresent, transitionState } = usePresence({
+      isVisible: isExpanded,
+      resolveElement: () => elementRef.current,
+    })
+
+    // Subscribe to trigger element id
     const triggerId = useStoreSubscribe(
       store,
-      (s) => s.getElement(itemId, 'trigger')?.id || null,
+      (s) => s.getElement(itemId, 'trigger')?.id ?? null,
     )
 
-    const isItemExpanded = isExpanded(expandedIds, itemId)
+    // Determine if we should render
+    const shouldRender = (() => {
+      if (lazyMount && !wasEverExpanded) {
+        return false
+      }
+      if (unmountOnExit && !isPresent) {
+        return false
+      }
+      return true
+    })()
+
+    if (!shouldRender) {
+      return null
+    }
 
     return (
       <div
-        className="grid overflow-hidden transition-[grid-template-rows] ease-in-out"
-        style={{
-          gridTemplateRows: isItemExpanded ? '1fr' : '0fr',
-          '--tw-duration': animationDuration,
-        } as React.CSSProperties}
+        ref={composeRefs(forwardedRef, ref)}
+        {...mergeProps(
+          {
+            id: domId,
+            role: 'region',
+            'aria-labelledby': triggerId ?? undefined,
+            'data-part': 'content',
+            'data-state': isExpanded ? 'open' : 'closed',
+            'data-disabled': isDisabled || undefined,
+            'data-transition': transitionState,
+            hidden: !isExpanded && !isPresent,
+          },
+          rest,
+        )}
       >
-        <div className="overflow-hidden">
-          <div
-            ref={composeRefs(forwardedRef, ref)}
-            {...mergeProps(
-              {
-                id: domId,
-                role: 'region',
-                'aria-labelledby': triggerId ?? undefined,
-                'data-expanded': isItemExpanded || undefined,
-                'data-disabled': isDisabled || undefined,
-              },
-              rest,
-            )}
-          >
-            {children}
-          </div>
-        </div>
+        {children}
       </div>
+    )
+  },
+)
+
+// ============================================
+// ItemIndicator
+// ============================================
+
+export type ItemIndicatorProps = ComponentPropsWithoutRef<'span'>
+
+export const ItemIndicator = forwardRef<HTMLSpanElement, ItemIndicatorProps>(
+  ({ children, ...rest }, forwardedRef) => {
+    const { itemId, isExpanded, isDisabled } = useItemContext()
+
+    const { ref } = useNode<AccordionRole>({
+      role: 'indicator',
+      id: itemId,
+    })
+
+    return (
+      <span
+        ref={composeRefs(forwardedRef, ref)}
+        {...mergeProps(
+          {
+            'aria-hidden': true,
+            'data-part': 'indicator',
+            'data-state': isExpanded ? 'open' : 'closed',
+            'data-disabled': isDisabled || undefined,
+          },
+          rest,
+        )}
+      >
+        {children}
+      </span>
     )
   },
 )
@@ -368,8 +446,9 @@ export const Panel = forwardRef<HTMLDivElement, PanelProps>(
 const Accordion = {
   Root,
   Item,
-  Trigger,
-  Panel,
+  ItemTrigger,
+  ItemContent,
+  ItemIndicator,
 }
 
 export default Accordion

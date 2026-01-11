@@ -4,32 +4,26 @@ import { createMachine } from 'controlled-machine'
 // Types
 // ============================================
 
-export type AccordionEvents = {
-  TOGGLE: { itemId: string }
-  FOCUS_NEXT: undefined
-  FOCUS_PREV: undefined
-  FOCUS_FIRST: undefined
-  FOCUS_LAST: undefined
-}
+export type ItemId = string
 
 export type AccordionInput = {
-  // State
-  expandedIds: Set<string>
-  focusedId: string | null
-
-  // Callbacks
-  onExpandedIdsChange: (ids: Set<string>) => void
-  onFocusedIdChange: (id: string | null) => void
-
-  // Options
+  value: ItemId[]
   multiple: boolean
   collapsible: boolean
-  disabled: boolean
-
-  // Helpers (lazy evaluation)
-  getEnabledItemIds: () => string[]
-  getTriggerElement: (itemId: string) => HTMLElement | null
+  onValueChange: (value: ItemId[]) => void
 }
+
+export type AccordionEvents = {
+  TOGGLE: { itemId: ItemId }
+  EXPAND: { itemId: ItemId }
+  COLLAPSE: { itemId: ItemId }
+}
+
+export type AccordionComputed = {
+  expandedSet: Set<ItemId>
+}
+
+export type AccordionActions = 'toggle' | 'expand' | 'collapse'
 
 // ============================================
 // Machine
@@ -38,90 +32,61 @@ export type AccordionInput = {
 export const accordionMachine = createMachine<{
   input: AccordionInput
   events: AccordionEvents
-  actions: 'noop' | 'expand' | 'collapse' | 'focusNext' | 'focusPrev' | 'focusFirst' | 'focusLast'
+  computed: AccordionComputed
+  actions: AccordionActions
 }>({
-  on: {
-    TOGGLE: [
-      { when: (context) => context.disabled, do: 'noop' },
-      {
-        when: (context, { itemId }) =>
-          context.expandedIds.has(itemId) && !context.collapsible && !context.multiple,
-        do: 'noop',
-      },
-      { when: (context, { itemId }) => context.expandedIds.has(itemId), do: 'collapse' },
-      { do: 'expand' },
-    ],
-    FOCUS_NEXT: 'focusNext',
-    FOCUS_PREV: 'focusPrev',
-    FOCUS_FIRST: 'focusFirst',
-    FOCUS_LAST: 'focusLast',
+  computed: {
+    expandedSet: (input) => new Set(input.value),
   },
 
-  effects: [
-    {
-      watch: (context) => context.focusedId,
-      change: (context) => {
-        if (context.focusedId) {
-          context.getTriggerElement(context.focusedId)?.focus()
-        }
-      },
-    },
-  ],
+  on: {
+    TOGGLE: 'toggle',
+    EXPAND: 'expand',
+    COLLAPSE: 'collapse',
+  },
 
   actions: {
-    noop: () => {},
-
-    expand: (context, payload: { itemId: string }) => {
+    toggle: (context, payload: { itemId: ItemId }) => {
       const { itemId } = payload
-      if (context.multiple) {
-        context.onExpandedIdsChange(new Set([...context.expandedIds, itemId]))
+      const isExpanded = context.value.includes(itemId)
+
+      if (isExpanded) {
+        // Collapse
+        if (!context.collapsible && context.value.length === 1) {
+          return // Cannot collapse the only expanded item
+        }
+        const next = context.value.filter((id) => id !== itemId)
+        context.onValueChange(next)
       } else {
-        context.onExpandedIdsChange(new Set([itemId]))
+        // Expand
+        if (context.multiple) {
+          context.onValueChange([...context.value, itemId])
+        } else {
+          context.onValueChange([itemId])
+        }
       }
     },
 
-    collapse: (context, payload: { itemId: string }) => {
+    expand: (context, payload: { itemId: ItemId }) => {
       const { itemId } = payload
-      const next = new Set(context.expandedIds)
-      next.delete(itemId)
-      context.onExpandedIdsChange(next)
+      if (context.value.includes(itemId)) return
+
+      if (context.multiple) {
+        context.onValueChange([...context.value, itemId])
+      } else {
+        context.onValueChange([itemId])
+      }
     },
 
-    focusNext: (context) => {
-      const items = context.getEnabledItemIds()
-      if (items.length === 0) return
-      const currentIdx = context.focusedId ? items.indexOf(context.focusedId) : -1
-      const nextIdx = currentIdx === -1 ? 0 : (currentIdx + 1) % items.length
-      context.onFocusedIdChange(items[nextIdx])
-    },
+    collapse: (context, payload: { itemId: ItemId }) => {
+      const { itemId } = payload
+      if (!context.value.includes(itemId)) return
 
-    focusPrev: (context) => {
-      const items = context.getEnabledItemIds()
-      if (items.length === 0) return
-      const currentIdx = context.focusedId ? items.indexOf(context.focusedId) : -1
-      const prevIdx =
-        currentIdx === -1
-          ? items.length - 1
-          : (currentIdx - 1 + items.length) % items.length
-      context.onFocusedIdChange(items[prevIdx])
-    },
-
-    focusFirst: (context) => {
-      const items = context.getEnabledItemIds()
-      if (items.length > 0) context.onFocusedIdChange(items[0])
-    },
-
-    focusLast: (context) => {
-      const items = context.getEnabledItemIds()
-      if (items.length > 0) context.onFocusedIdChange(items[items.length - 1])
+      if (!context.collapsible && context.value.length === 1) {
+        return // Cannot collapse the only expanded item
+      }
+      const next = context.value.filter((id) => id !== itemId)
+      context.onValueChange(next)
     },
   },
 })
-
-// ============================================
-// Query Helpers
-// ============================================
-
-export function isExpanded(expandedIds: Set<string>, itemId: string): boolean {
-  return expandedIds.has(itemId)
-}

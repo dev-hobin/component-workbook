@@ -7,25 +7,25 @@ export function UncontrolledExample() {
       <div className="max-w-2xl w-full">
         <Accordion.Root defaultValue={['item-1']}>
           <Accordion.Item value="item-1">
-            <Accordion.Trigger>Accordion Item 1</Accordion.Trigger>
-            <Accordion.Panel>
+            <Accordion.ItemTrigger>Accordion Item 1</Accordion.ItemTrigger>
+            <Accordion.ItemContent>
               This is the content for the first accordion item. You can put any
               content here, including other components or rich text.
-            </Accordion.Panel>
+            </Accordion.ItemContent>
           </Accordion.Item>
           <Accordion.Item value="item-2">
-            <Accordion.Trigger>Accordion Item 2</Accordion.Trigger>
-            <Accordion.Panel>
+            <Accordion.ItemTrigger>Accordion Item 2</Accordion.ItemTrigger>
+            <Accordion.ItemContent>
               This is the content for the second accordion item. The accordion
               allows you to organize content in a collapsible format.
-            </Accordion.Panel>
+            </Accordion.ItemContent>
           </Accordion.Item>
           <Accordion.Item value="item-3">
-            <Accordion.Trigger>Accordion Item 3</Accordion.Trigger>
-            <Accordion.Panel>
+            <Accordion.ItemTrigger>Accordion Item 3</Accordion.ItemTrigger>
+            <Accordion.ItemContent>
               This is the content for the third accordion item. Users can expand
               or collapse these sections as needed.
-            </Accordion.Panel>
+            </Accordion.ItemContent>
           </Accordion.Item>
         </Accordion.Root>
       </div>
@@ -41,25 +41,25 @@ export function ControlledExample() {
       <div className="max-w-2xl w-full">
         <Accordion.Root value={expandedItems} onValueChange={setExpandedItems}>
           <Accordion.Item value="item-1">
-            <Accordion.Trigger>Accordion Item 1</Accordion.Trigger>
-            <Accordion.Panel>
+            <Accordion.ItemTrigger>Accordion Item 1</Accordion.ItemTrigger>
+            <Accordion.ItemContent>
               This is the content for the first accordion item. You can put any
               content here, including other components or rich text.
-            </Accordion.Panel>
+            </Accordion.ItemContent>
           </Accordion.Item>
           <Accordion.Item value="item-2">
-            <Accordion.Trigger>Accordion Item 2</Accordion.Trigger>
-            <Accordion.Panel>
+            <Accordion.ItemTrigger>Accordion Item 2</Accordion.ItemTrigger>
+            <Accordion.ItemContent>
               This is the content for the second accordion item. The accordion
               allows you to organize content in a collapsible format.
-            </Accordion.Panel>
+            </Accordion.ItemContent>
           </Accordion.Item>
           <Accordion.Item value="item-3">
-            <Accordion.Trigger>Accordion Item 3</Accordion.Trigger>
-            <Accordion.Panel>
+            <Accordion.ItemTrigger>Accordion Item 3</Accordion.ItemTrigger>
+            <Accordion.ItemContent>
               This is the content for the third accordion item. Users can expand
               or collapse these sections as needed.
-            </Accordion.Panel>
+            </Accordion.ItemContent>
           </Accordion.Item>
         </Accordion.Root>
       </div>
