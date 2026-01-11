@@ -13,6 +13,8 @@
 | **NodeStore 실시간 쿼리** | 스냅샷 아닌 이벤트 시점 직접 조회 | 동적 요소 클릭 시 깜빡임/오동작 |
 | **첫 렌더링 데이터는 Context** | depth, parentId 등 첫 렌더링 필요 데이터는 React Context | 첫 렌더링 시 잘못된 값/깜빡임 |
 | **파생 상태는 meta에 저장 금지** | 계산 가능한 값은 헬퍼로 제공 | useEffect 동기화 anti-pattern |
+| **옵션/아이템 등록은 meta로** | Context 함수 전달 대신 useNode meta 사용 | 무한 렌더링 (함수 참조 불안정) |
+| **ARIA domId는 useStoreSubscribe로** | 하드코딩 대신 store에서 동적 구독 | 커스텀 domId 사용 시 연결 실패 |
 
 ### 컴포넌트 유형 판별
 
@@ -280,6 +282,83 @@ const hasChildren = useStoreSubscribe(store, (s) => {
     node => 'parentValue' in node.meta && node.meta.parentValue === value
   )
 })
+```
+
+**옵션/아이템 등록은 Context 함수 대신 meta 사용:**
+
+> ⚠️ **중요**: Context로 등록 함수를 전달하면 무한 렌더링 발생 가능
+
+```tsx
+// ❌ Bad: Context로 등록 함수 전달 (무한 렌더링 위험)
+// Root에서:
+const [options, setOptions] = useState<Option[]>([])
+const registerOption = (option) => setOptions(prev => [...prev, option])
+const unregisterOption = (id) => setOptions(prev => prev.filter(o => o.id !== id))
+// 문제: 함수가 매 렌더마다 새로 생성 → Option의 useEffect 재실행 → 무한 루프
+
+// Option에서:
+useEffect(() => {
+  registerOption({ id, value, label, disabled })
+  return () => unregisterOption(id)
+}, [registerOption, unregisterOption, ...]) // 함수 참조 변경 → 재실행
+
+// ✅ Good: NodeStore meta로 등록
+// Option에서:
+type OptionMeta = { value: string; label: string; disabled: boolean }
+
+const { ref, domId } = useNode<ComponentRole, OptionMeta>({
+  role: 'option',
+  id: optionId,
+  meta: { value, label, disabled }, // useNode 내부에서 안정적으로 등록/해제
+})
+
+// Root에서 필요할 때 store에서 조회:
+const getOptions = useCallback(() => {
+  const optionNodes = store.getNodesByRole('option')
+  return optionNodes.map(node => ({
+    id: node.id,
+    value: node.meta.value,
+    label: node.meta.label,
+    disabled: node.meta.disabled,
+  }))
+}, [store])
+```
+
+**ARIA 속성에 필요한 다른 컴포넌트의 domId 구독:**
+
+> ⚠️ **중요**: domId를 하드코딩하면 커스텀 domId 사용 시 연결 실패
+
+```tsx
+// ❌ Bad: domId 패턴 하드코딩
+const Input = () => {
+  const listboxDomId = `listbox::${comboboxId}` // 가정에 의존
+  return <input aria-controls={listboxDomId} />
+}
+
+// ✅ Good: useStoreSubscribe로 동적 구독
+const Input = () => {
+  const { comboboxId, store } = useComboboxContext()
+
+  // Listbox의 domId 구독 (Listbox가 마운트되면 자동 업데이트)
+  const listboxDomId = useStoreSubscribe(
+    store,
+    (s) => s.getNode(comboboxId, 'listbox')?.domId ?? null,
+  )
+
+  return <input aria-controls={listboxDomId ?? undefined} />
+}
+```
+
+**ComponentNode에 domId가 저장되어 있음:**
+```ts
+interface ComponentNode<Role, Meta> {
+  id: NodeId
+  parentId: NodeId | null
+  role: Role
+  domId: string  // DOM element의 id 속성 값 (useNode에서 자동 설정)
+  meta: Meta
+  element: HTMLElement | null
+}
 ```
 
 ### 라이브러리 3: usePresence
@@ -678,6 +757,8 @@ src/components/[component]/
 | **NodeStore 스냅샷 사용** | 동적 요소 클릭 시 깜빡임/오동작 | **이벤트 핸들러에서 store 실시간 쿼리** |
 | **첫 렌더링 Store 쿼리** | 첫 렌더링 시 잘못된 값 (depth=0 등) | **React Context (useLevel, useParentId) 사용** |
 | **파생 상태 meta 저장** | useEffect 동기화 anti-pattern | **헬퍼 함수로 계산, meta에 저장 안함** |
+| **Context로 등록 함수 전달** | `Maximum update depth exceeded` 무한 렌더링 | **NodeStore meta 사용** |
+| **domId 하드코딩** | 커스텀 domId 사용 시 ARIA 연결 실패 | **useStoreSubscribe로 동적 구독** |
 
 ### 중간 위험도
 | 위험 | 증상 | 예방 |
@@ -750,6 +831,8 @@ src/components/[component]/
 - [ ] **첫 렌더링 데이터는 React Context 사용했는가?** (depth, parentId 등)
 - [ ] **파생 상태를 meta에 저장하지 않았는가?** (다른 노드 존재 여부로 계산되는 값)
 - [ ] **Store 구독에 useStoreSubscribe 사용했는가?** (useState + useEffect 금지)
+- [ ] **옵션/아이템 등록에 NodeStore meta 사용했는가?** (Context 함수 전달 금지 → 무한 렌더링)
+- [ ] **ARIA domId에 useStoreSubscribe 사용했는가?** (하드코딩 금지 → 커스텀 domId 지원)
 - [ ] 예상 못한 이슈가 있었다면 템플릿에 반영할 것은?
 
 ### 코드 스멜 체크
@@ -817,6 +900,19 @@ useEffect(() => {
   setItems(store.getNodesByRole('item'))
   return store.subscribe(() => setItems(store.getNodesByRole('item')))
 }, [store])
+
+// ❌ Context로 등록/해제 함수 전달 (무한 렌더링)
+// Root:
+const registerOption = (option) => setOptions(prev => [...prev, option])
+// Option:
+useEffect(() => {
+  registerOption({ id, value })
+  return () => unregisterOption(id)
+}, [registerOption, unregisterOption]) // 함수 참조 매번 변경 → 무한 루프
+
+// ❌ ARIA domId 하드코딩 (커스텀 domId 사용 시 연결 실패)
+const listboxDomId = `listbox::${comboboxId}`
+return <input aria-controls={listboxDomId} />
 ```
 
 **올바른 패턴:**
@@ -872,4 +968,18 @@ const hasChildren = useStoreSubscribe(store, (s) => {
     node => 'parentValue' in node.meta && node.meta.parentValue === value
   )
 })
+
+// ✅ 옵션/아이템 등록: NodeStore meta 사용 (무한 렌더링 방지)
+const { ref, domId } = useNode<ComponentRole, OptionMeta>({
+  role: 'option',
+  id: optionId,
+  meta: { value, label, disabled }, // useNode 내부에서 안정적 등록/해제
+})
+
+// ✅ ARIA domId: useStoreSubscribe로 동적 구독
+const listboxDomId = useStoreSubscribe(
+  store,
+  (s) => s.getNode(comboboxId, 'listbox')?.domId ?? null,
+)
+return <input aria-controls={listboxDomId ?? undefined} />
 ```
