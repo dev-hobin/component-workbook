@@ -67,7 +67,8 @@ type MenuActions =
   | 'noop'
   | 'openMenu'
   | 'closeMenu'
-  | 'closeAll'
+  | 'clearPath'
+  | 'clearFocus'
   | 'closeAndFocusTrigger'
   | 'setFocus'
   | 'focusNext'
@@ -93,7 +94,7 @@ export const menuMachine = createEventMachine<{
   on: {
     OPEN_MENU: 'openMenu',
     CLOSE_MENU: 'closeMenu',
-    CLOSE_ALL: 'closeAll',
+    CLOSE_ALL: ['clearPath', 'clearFocus'],  // 경로 + 포커스 초기화
     CLOSE_AND_FOCUS_TRIGGER: 'closeAndFocusTrigger',
 
     FOCUS_NEXT: 'focusNext',
@@ -181,8 +182,11 @@ export const menuMachine = createEventMachine<{
       }
     },
 
-    closeAll: (context) => {
+    clearPath: (context) => {
       context.onOpenedPathChange([])
+    },
+
+    clearFocus: (context) => {
       context.onFocusedItemIdChange(null)
     },
 

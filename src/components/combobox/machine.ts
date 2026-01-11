@@ -94,17 +94,16 @@ export type ComboboxInput = {
 
 type ComboboxActions =
   | 'noop'
-  | 'open'
-  | 'close'
-  | 'toggle'
-  | 'openAndHighlightFirst'
-  | 'openAndHighlightLast'
-  | 'openAndHighlightSelected'
+  | 'setOpen'
+  | 'clearOpen'
+  | 'clearHighlight'
+  | 'clearAutocomplete'
   | 'highlightFirst'
   | 'highlightLast'
   | 'highlightNext'
   | 'highlightPrev'
   | 'highlightOption'
+  | 'highlightSelected'
   | 'selectHighlighted'
   | 'selectOption'
   | 'restoreSelectedValue'
@@ -118,39 +117,39 @@ export const comboboxMachine = createEventMachine<{
   actions: ComboboxActions
 }>({
   on: {
-    OPEN: 'open',
-    CLOSE: 'close',
-    TOGGLE: 'toggle',
+    OPEN: 'setOpen',
+    CLOSE: ['clearOpen', 'clearHighlight', 'clearAutocomplete'],
+    TOGGLE: [
+      { when: (context) => context.isOpen, do: ['clearOpen', 'clearHighlight', 'clearAutocomplete'] },
+      { do: 'setOpen' },
+    ],
 
     INPUT_CHANGE: 'handleInputChange',
     INPUT_FOCUS: [
-      {
-        when: (context) => context.openOnFocus && !context.isOpen,
-        do: 'openAndHighlightSelected',
-      },
+      { when: (context) => context.openOnFocus && !context.isOpen, do: ['setOpen', 'highlightSelected'] },
       { do: 'noop' },
     ],
     INPUT_BLUR: 'handleInputBlur',
 
     KEY_ARROW_DOWN: [
-      { when: (context) => !context.isOpen, do: 'openAndHighlightFirst' },
+      { when: (context) => !context.isOpen, do: ['setOpen', 'highlightFirst'] },
       { do: 'highlightNext' },
     ],
     KEY_ARROW_UP: [
-      { when: (context) => !context.isOpen, do: 'openAndHighlightLast' },
+      { when: (context) => !context.isOpen, do: ['setOpen', 'highlightLast'] },
       { do: 'highlightPrev' },
     ],
     KEY_ALT_ARROW_DOWN: [
-      { when: (context) => !context.isOpen, do: 'open' },
+      { when: (context) => !context.isOpen, do: 'setOpen' },
       { do: 'noop' },
     ],
     KEY_ENTER: [
       { when: (context) => !context.isOpen, do: 'noop' },
-      { when: (context) => context.highlightedOptionId === null, do: 'close' },
+      { when: (context) => context.highlightedOptionId === null, do: ['clearOpen', 'clearHighlight', 'clearAutocomplete'] },
       { do: 'selectHighlighted' },
     ],
     KEY_ESCAPE: [
-      { when: (context) => context.isOpen, do: 'close' },
+      { when: (context) => context.isOpen, do: ['clearOpen', 'clearHighlight', 'clearAutocomplete'] },
       {
         when: (context) =>
           context.selectedValue !== null && context.inputValue !== context.selectedValue,
@@ -167,18 +166,18 @@ export const comboboxMachine = createEventMachine<{
       { do: 'noop' },
     ],
     KEY_TAB: [
-      {
-        when: (context) => context.autocompleteText !== null,
-        do: 'acceptAutocomplete',
-      },
-      { when: (context) => context.isOpen, do: 'close' },
+      { when: (context) => context.autocompleteText !== null, do: 'acceptAutocomplete' },
+      { when: (context) => context.isOpen, do: ['clearOpen', 'clearHighlight', 'clearAutocomplete'] },
       { do: 'noop' },
     ],
 
     OPTION_CLICK: 'selectOption',
     OPTION_HOVER: 'highlightOption',
 
-    OUTSIDE_CLICK: [{ when: (context) => context.isOpen, do: 'close' }, { do: 'noop' }],
+    OUTSIDE_CLICK: [
+      { when: (context) => context.isOpen, do: ['clearOpen', 'clearHighlight', 'clearAutocomplete'] },
+      { do: 'noop' },
+    ],
   },
 
   effects: [
@@ -221,53 +220,20 @@ export const comboboxMachine = createEventMachine<{
   actions: {
     noop: () => {},
 
-    open: (context) => {
+    setOpen: (context) => {
       context.onOpenChange(true)
     },
 
-    close: (context) => {
+    clearOpen: (context) => {
       context.onOpenChange(false)
+    },
+
+    clearHighlight: (context) => {
       context.onHighlightedOptionIdChange(null)
+    },
+
+    clearAutocomplete: (context) => {
       context.onAutocompleteTextChange(null)
-    },
-
-    toggle: (context) => {
-      if (context.isOpen) {
-        context.onOpenChange(false)
-        context.onHighlightedOptionIdChange(null)
-        context.onAutocompleteTextChange(null)
-      } else {
-        context.onOpenChange(true)
-      }
-    },
-
-    openAndHighlightFirst: (context) => {
-      context.onOpenChange(true)
-      const options = context.getFilteredOptions()
-      const enabled = options.filter((o) => !o.disabled)
-      if (enabled.length > 0) {
-        context.onHighlightedOptionIdChange(enabled[0].id)
-      }
-    },
-
-    openAndHighlightLast: (context) => {
-      context.onOpenChange(true)
-      const options = context.getFilteredOptions()
-      const enabled = options.filter((o) => !o.disabled)
-      if (enabled.length > 0) {
-        context.onHighlightedOptionIdChange(enabled[enabled.length - 1].id)
-      }
-    },
-
-    openAndHighlightSelected: (context) => {
-      context.onOpenChange(true)
-      if (context.selectedValue) {
-        const options = context.getFilteredOptions()
-        const selected = options.find((o) => o.value === context.selectedValue)
-        if (selected) {
-          context.onHighlightedOptionIdChange(selected.id)
-        }
-      }
     },
 
     highlightFirst: (context) => {
@@ -347,6 +313,16 @@ export const comboboxMachine = createEventMachine<{
       const option = context.getOptionById(optionId)
       if (option && !option.disabled) {
         context.onHighlightedOptionIdChange(optionId)
+      }
+    },
+
+    highlightSelected: (context) => {
+      if (context.selectedValue) {
+        const options = context.getFilteredOptions()
+        const selected = options.find((o) => o.value === context.selectedValue)
+        if (selected) {
+          context.onHighlightedOptionIdChange(selected.id)
+        }
       }
     },
 

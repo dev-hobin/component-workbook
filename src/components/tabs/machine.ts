@@ -49,12 +49,12 @@ export type TabsInput = {
 export const tabsMachine = createEventMachine<{
   input: TabsInput
   events: TabsEvents
-  actions: 'select' | 'focus' | 'blur' | 'focusNext' | 'focusPrev' | 'focusFirst' | 'focusLast'
+  actions: 'setActive' | 'setFocus' | 'clearFocus' | 'focusNext' | 'focusPrev' | 'focusFirst' | 'focusLast'
 }>({
   on: {
-    SELECT: 'select',
-    FOCUS: 'focus',
-    BLUR: 'blur',
+    SELECT: ['setActive', 'setFocus'],  // 선택 시 활성화 + 포커스
+    FOCUS: 'setFocus',
+    BLUR: 'clearFocus',
     FOCUS_NEXT: 'focusNext',
     FOCUS_PREV: 'focusPrev',
     FOCUS_FIRST: 'focusFirst',
@@ -74,18 +74,15 @@ export const tabsMachine = createEventMachine<{
   ],
 
   actions: {
-    select: (context, payload: { value: TabValue }) => {
-      const { value } = payload
-      context.onActiveValueChange(value)
-      context.onFocusedValueChange(value)
+    setActive: (context, payload: { value: TabValue }) => {
+      context.onActiveValueChange(payload.value)
     },
 
-    focus: (context, payload: { value: TabValue }) => {
-      const { value } = payload
-      context.onFocusedValueChange(value)
+    setFocus: (context, payload: { value: TabValue }) => {
+      context.onFocusedValueChange(payload.value)
     },
 
-    blur: (context) => {
+    clearFocus: (context) => {
       context.onFocusedValueChange(null)
     },
 

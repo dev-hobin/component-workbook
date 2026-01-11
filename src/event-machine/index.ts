@@ -23,14 +23,14 @@ export type Rule<
   TActions extends string = string,
 > = {
   when?: (context: TContext, payload: TPayload) => boolean
-  do: TActions
+  do: TActions | TActions[]
 }
 
 export type Handler<
   TContext,
   TPayload = undefined,
   TActions extends string = string,
-> = TActions | Rule<TContext, TPayload, TActions>[]
+> = TActions | TActions[] | Rule<TContext, TPayload, TActions>[]
 
 // Effect helpers - effects 콜백에서 사용할 수 있는 유틸리티
 export type EffectHelpers<TEvents extends EventsConfig> = {
@@ -163,20 +163,49 @@ export type MachineInstance<T extends MachineTypes> = EventMachine<T> & {
 // Core Logic (Pure)
 // ============================================
 
+function executeActions<TContext, TPayload>(
+  actionNames: string | string[],
+  actions: Record<string, (context: TContext, payload?: TPayload) => void>,
+  context: TContext,
+  payload: TPayload,
+): void {
+  if (typeof actionNames === 'string') {
+    actions[actionNames]?.(context, payload)
+  } else {
+    for (const name of actionNames) {
+      actions[name]?.(context, payload)
+    }
+  }
+}
+
+function isRuleArray<TContext, TPayload, TActions extends string>(
+  handler: Handler<TContext, TPayload, TActions>,
+): handler is Rule<TContext, TPayload, TActions>[] {
+  return (
+    Array.isArray(handler) &&
+    handler.length > 0 &&
+    typeof handler[0] === 'object' &&
+    'do' in handler[0]
+  )
+}
+
 function executeHandler<TContext, TPayload>(
   handler: Handler<TContext, TPayload>,
   actions: Record<string, (context: TContext, payload?: TPayload) => void>,
   context: TContext,
   payload: TPayload,
 ): void {
-  if (typeof handler === 'string') {
-    actions[handler]?.(context, payload)
-  } else {
-    for (const rule of handler) {
-      if (!rule.when || rule.when(context, payload)) {
-        actions[rule.do]?.(context, payload)
-        break
-      }
+  // 단일 액션 또는 액션 배열
+  if (typeof handler === 'string' || (Array.isArray(handler) && !isRuleArray(handler))) {
+    executeActions(handler as string | string[], actions, context, payload)
+    return
+  }
+
+  // Rule 배열
+  for (const rule of handler as Rule<TContext, TPayload>[]) {
+    if (!rule.when || rule.when(context, payload)) {
+      executeActions(rule.do, actions, context, payload)
+      break
     }
   }
 }
@@ -348,7 +377,7 @@ export function useEventMachine<T extends MachineTypes>(
     const actionsMap = actions as Record<string, (context: Context<T>) => void>
     for (const rule of always) {
       if (!rule.when || rule.when(context, undefined)) {
-        actionsMap[rule.do]?.(context)
+        executeActions(rule.do, actionsMap, context, undefined)
         break
       }
     }
@@ -491,13 +520,13 @@ export function createEventMachine<T extends MachineTypes>(
 
     // always
     if (config.always && config.actions) {
-      const actions = config.actions as Record<
+      const actionsMap = config.actions as Record<
         string,
         (context: Context<T>) => void
       >
       for (const rule of config.always) {
         if (!rule.when || rule.when(context, undefined)) {
-          actions[rule.do]?.(context)
+          executeActions(rule.do, actionsMap, context, undefined)
           break
         }
       }
