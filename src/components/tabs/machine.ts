@@ -1,4 +1,4 @@
-import { createEventMachine } from '../../event-machine'
+import { createMachine } from 'controlled-machine'
 
 // ============================================
 // Types
@@ -46,7 +46,7 @@ export type TabsInput = {
 // Machine
 // ============================================
 
-export const tabsMachine = createEventMachine<{
+export const tabsMachine = createMachine<{
   input: TabsInput
   events: TabsEvents
   actions: 'setActive' | 'setFocus' | 'clearFocus' | 'focusNext' | 'focusPrev' | 'focusFirst' | 'focusLast'

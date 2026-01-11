@@ -6,7 +6,7 @@ import React, {
   type ComponentPropsWithoutRef,
 } from 'react'
 import { useControllableState } from '@radix-ui/react-use-controllable-state'
-import { useEventMachine, type Send } from '../../event-machine'
+import { useMachine, type Send } from 'controlled-machine/react'
 
 import {
   accordionMachine,
@@ -130,7 +130,7 @@ const RootInner = forwardRef<HTMLDivElement, RootProps>(
     const [focusedId, setFocusedId] = useState<string | null>(null)
 
     // Event machine
-    const { send } = useEventMachine(accordionMachine, {
+    const { send } = useMachine(accordionMachine, {
       expandedIds,
       focusedId,
       onExpandedIdsChange: setExpandedIds,
@@ -144,7 +144,7 @@ const RootInner = forwardRef<HTMLDivElement, RootProps>(
           .filter((item) => !item.meta.disabled)
           .map((item) => item.id)
       },
-      getTriggerElement: (itemId) => store.getElement(itemId, 'trigger'),
+      getTriggerElement: (itemId: string) => store.getElement(itemId, 'trigger'),
     })
 
     // Keyboard handler

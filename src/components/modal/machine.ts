@@ -1,5 +1,5 @@
 import * as focusTrapLib from 'focus-trap'
-import { createEventMachine } from '../../event-machine'
+import { createMachine } from 'controlled-machine'
 
 // ============================================
 // Types
@@ -37,7 +37,7 @@ export type ModalInput = {
 // Machine
 // ============================================
 
-export const modalMachine = createEventMachine<{
+export const modalMachine = createMachine<{
   input: ModalInput
   events: ModalEvents
   state: ModalState

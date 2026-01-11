@@ -1,7 +1,10 @@
-import { Phase4Examples } from './event-machine/__tests__/examples'
-
 function App() {
-  return <Phase4Examples />
+  return (
+    <div style={{ padding: 20 }}>
+      <h1>Component Workbook</h1>
+      <p>Migrated to controlled-machine library</p>
+    </div>
+  )
 }
 
 export default App

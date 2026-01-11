@@ -7,7 +7,7 @@ import React, {
   type ReactNode,
 } from 'react'
 import { useControllableState } from '@radix-ui/react-use-controllable-state'
-import { useEventMachine, type Send } from '../../event-machine'
+import { useMachine, type Send } from 'controlled-machine/react'
 
 import {
   paginationMachine,
@@ -105,7 +105,7 @@ const RootInner = forwardRef<HTMLElement, RootProps>(
     const page = currentPage ?? 1
 
     // Event machine
-    const { send, computed } = useEventMachine(paginationMachine, {
+    const { send, computed } = useMachine(paginationMachine, {
       page,
       pageSize,
       totalCount,

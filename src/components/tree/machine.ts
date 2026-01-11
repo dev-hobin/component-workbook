@@ -1,4 +1,4 @@
-import { createEventMachine } from '../../event-machine'
+import { createMachine } from 'controlled-machine'
 
 // ============================================
 // Types
@@ -79,7 +79,7 @@ type TreeActions =
   | 'expandFocused'
   | 'collapseFocused'
 
-export const treeMachine = createEventMachine<{
+export const treeMachine = createMachine<{
   input: TreeInput
   events: TreeEvents
   actions: TreeActions
@@ -102,12 +102,14 @@ export const treeMachine = createEventMachine<{
     ARROW_RIGHT: [
       { when: (context) => context.focusedId === null, do: 'noop' },
       {
-        when: (context) => context.focusedId !== null && context.isLeaf(context.focusedId),
+        when: (context) =>
+          context.focusedId !== null && context.isLeaf(context.focusedId),
         do: 'noop',
       },
       {
         when: (context) =>
-          context.focusedId !== null && !context.expandedIds.has(context.focusedId),
+          context.focusedId !== null &&
+          !context.expandedIds.has(context.focusedId),
         do: 'expandFocused',
       },
       { do: 'focusFirstChild' },

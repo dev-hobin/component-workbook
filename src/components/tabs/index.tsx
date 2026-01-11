@@ -8,7 +8,7 @@ import React, {
   type ComponentPropsWithoutRef,
 } from 'react'
 import { useControllableState } from '@radix-ui/react-use-controllable-state'
-import { useEventMachine, type Send } from '../../event-machine'
+import { useMachine, type Send } from 'controlled-machine/react'
 
 import {
   tabsMachine,
@@ -110,10 +110,10 @@ const RootInner = forwardRef<HTMLDivElement, RootProps>(
     storeRef.current = store
 
     // Event machine
-    const { send } = useEventMachine(tabsMachine, {
+    const { send } = useMachine(tabsMachine, {
       activeValue: activeValue ?? null,
       focusedValue,
-      onActiveValueChange: (value) => setActiveValue(value ?? undefined),
+      onActiveValueChange: (value: TabValue | null) => setActiveValue(value ?? undefined),
       onFocusedValueChange: setFocusedValue,
       getEnabledTabs: () => {
         const tabs = storeRef.current.getNodesByRole('tab')
@@ -121,7 +121,7 @@ const RootInner = forwardRef<HTMLDivElement, RootProps>(
           .filter((tab) => !tab.meta.disabled)
           .map((tab) => ({ value: tab.meta.value! }))
       },
-      getTabElement: (value) =>
+      getTabElement: (value: TabValue) =>
         storeRef.current.getElement(String(value), 'tab'),
     })
 

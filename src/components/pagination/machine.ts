@@ -1,4 +1,4 @@
-import { createEventMachine } from '../../event-machine'
+import { createMachine } from 'controlled-machine'
 
 // ============================================
 // Types
@@ -46,7 +46,7 @@ export type PaginationComputed = {
 // Machine
 // ============================================
 
-export const paginationMachine = createEventMachine<{
+export const paginationMachine = createMachine<{
   input: PaginationInput
   events: PaginationEvents
   computed: PaginationComputed

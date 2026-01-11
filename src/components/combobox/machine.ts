@@ -1,4 +1,4 @@
-import { createEventMachine } from '../../event-machine'
+import { createMachine } from 'controlled-machine'
 
 // ============================================
 // Types
@@ -120,7 +120,7 @@ type ComboboxActions =
   | 'handleInputChange'
   | 'handleInputBlur'
 
-export const comboboxMachine = createEventMachine<{
+export const comboboxMachine = createMachine<{
   input: ComboboxInput
   events: ComboboxEvents
   actions: ComboboxActions

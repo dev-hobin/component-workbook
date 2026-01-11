@@ -9,7 +9,7 @@ import React, {
   type ComponentPropsWithoutRef,
 } from 'react'
 import { useControllableState } from '@radix-ui/react-use-controllable-state'
-import { useEventMachine, type Send } from '../../event-machine'
+import { useMachine, type Send } from 'controlled-machine/react'
 
 import {
   comboboxMachine,
@@ -196,7 +196,7 @@ function RootInner({
   filteredOptionsRef.current = filteredOptions
 
   // Event machine
-  const { send } = useEventMachine(comboboxMachine, {
+  const { send } = useMachine(comboboxMachine, {
     props: {
       isOpen: isOpen ?? false,
       inputValue: inputValue ?? '',
@@ -205,9 +205,9 @@ function RootInner({
       autocompleteText,
     },
     handler: {
-      setIsOpen: (open) => setIsOpen(open),
-      setInputValue: (value) => setInputValue(value),
-      setSelectedValue: (value) => setSelectedValue(value),
+      setIsOpen: (open: boolean) => setIsOpen(open),
+      setInputValue: (value: string) => setInputValue(value),
+      setSelectedValue: (value: string | null) => setSelectedValue(value),
       setHighlightedOptionId,
       setAutocompleteText,
       onSelect,
@@ -222,10 +222,10 @@ function RootInner({
     },
     helpers: {
       getFilteredOptions: () => filteredOptionsRef.current,
-      getOptionById: (id) => optionsRef.current.find((o) => o.id === id),
+      getOptionById: (id: OptionId) => optionsRef.current.find((o) => o.id === id),
     },
     dom: {
-      getOptionElement: (optionId) => store.getElement(optionId, 'option'),
+      getOptionElement: (optionId: OptionId) => store.getElement(optionId, 'option'),
       getInputElement: () => inputRef.current,
       getAllElements: () => {
         const elements = new Map<string, HTMLElement>()

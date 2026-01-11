@@ -1,4 +1,4 @@
-import { createEventMachine } from '../../event-machine'
+import { createMachine } from 'controlled-machine'
 
 // ============================================
 // Types
@@ -78,7 +78,7 @@ type MenuActions =
   | 'openFocusedSubmenu'
   | 'closeActiveSubmenu'
 
-export const menuMachine = createEventMachine<{
+export const menuMachine = createMachine<{
   input: MenuInput
   events: MenuEvents
   computed: MenuComputed

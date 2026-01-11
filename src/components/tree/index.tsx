@@ -1,11 +1,6 @@
-import React, {
-  createContext,
-  useContext,
-  useId,
-  useRef,
-} from 'react'
+import React, { createContext, useContext, useId, useRef } from 'react'
 import { useControllableState } from '@radix-ui/react-use-controllable-state'
-import { useEventMachine, type Send } from '../../event-machine'
+import { useMachine, type Send } from 'controlled-machine/react'
 
 import { treeMachine, type TreeEvents, type NodeId } from './machine'
 import { findNodeFromMouseEvent } from '../../primitives/dom'
@@ -14,7 +9,11 @@ import {
   NodeStoreProvider,
   useNodeStore,
 } from '../../primitives/use-node-store'
-import { ParentProvider, useParentId, useLevel } from '../../primitives/use-parent-context'
+import {
+  ParentProvider,
+  useParentId,
+  useLevel,
+} from '../../primitives/use-parent-context'
 import { useNode } from '../../primitives/use-node'
 import { useStoreSubscribe } from '../../primitives/use-store-subscribe'
 import type { NodeStore } from '../../primitives/node-store'
@@ -84,7 +83,6 @@ function useTreeContext() {
   }
   return context
 }
-
 
 // ============================================
 // Root
@@ -161,23 +159,27 @@ function RootInner({
   expandedIdsRef.current = expandedIds
 
   // Event machine
-  const { send } = useEventMachine(treeMachine, {
+  const { send } = useMachine(treeMachine, {
     focusedId: focusedId ?? null,
     selectedId: selectedId ?? null,
     expandedIds: expandedIds ?? new Set(),
-    onFocusedIdChange: (id) => setFocusedId(id),
-    onSelectedIdChange: (id) => setSelectedId(id),
-    onExpandedIdsChange: (ids) => setExpandedIds(ids),
-    getVisibleItemIds: () => getVisibleItemIds(storeRef.current, expandedIdsRef.current ?? new Set()),
-    getChildrenIds: (nodeId) => storeRef.current.getChildrenByRole(nodeId, 'item').map((n) => n.id),
-    getParentId: (nodeId) => {
+    onFocusedIdChange: (id: NodeId | null) => setFocusedId(id),
+    onSelectedIdChange: (id: NodeId | null) => setSelectedId(id),
+    onExpandedIdsChange: (ids: Set<NodeId>) => setExpandedIds(ids),
+    getVisibleItemIds: () =>
+      getVisibleItemIds(storeRef.current, expandedIdsRef.current ?? new Set()),
+    getChildrenIds: (nodeId: NodeId) =>
+      storeRef.current.getChildrenByRole(nodeId, 'item').map((n) => n.id),
+    getParentId: (nodeId: NodeId) => {
       const node = storeRef.current.getNode(nodeId, 'item')
       if (!node?.parentId) return null
       const parentNode = storeRef.current.getNode(node.parentId, 'item')
       return parentNode ? parentNode.id : null
     },
-    isLeaf: (nodeId) => storeRef.current.getChildrenByRole(nodeId, 'item').length === 0,
-    getItemElement: (nodeId) => storeRef.current.getElement(nodeId, 'item'),
+    isLeaf: (nodeId: NodeId) =>
+      storeRef.current.getChildrenByRole(nodeId, 'item').length === 0,
+    getItemElement: (nodeId: NodeId) =>
+      storeRef.current.getElement(nodeId, 'item'),
   })
 
   // 키보드 핸들러

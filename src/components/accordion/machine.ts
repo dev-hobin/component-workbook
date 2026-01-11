@@ -1,4 +1,4 @@
-import { createEventMachine } from '../../event-machine'
+import { createMachine } from 'controlled-machine'
 
 // ============================================
 // Types
@@ -35,7 +35,7 @@ export type AccordionInput = {
 // Machine
 // ============================================
 
-export const accordionMachine = createEventMachine<{
+export const accordionMachine = createMachine<{
   input: AccordionInput
   events: AccordionEvents
   actions: 'noop' | 'expand' | 'collapse' | 'focusNext' | 'focusPrev' | 'focusFirst' | 'focusLast'

@@ -20,7 +20,7 @@ import {
   autoUpdate,
   type Placement,
 } from '@floating-ui/dom'
-import { useEventMachine, type Send } from '../../event-machine'
+import { useMachine, type Send } from 'controlled-machine/react'
 
 import {
   menuMachine,
@@ -138,7 +138,7 @@ function RootInner({
   const [focusedItemId, setFocusedItemId] = useState<ItemId | null>(null)
 
   // Event machine
-  const { send, computed } = useEventMachine(menuMachine, {
+  const { send, computed } = useMachine(menuMachine, {
     openedPath,
     focusedItemId,
     onOpenedPathChange: setOpenedPath,

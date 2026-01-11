@@ -9,7 +9,7 @@ import {
 import { createPortal } from 'react-dom'
 import { useControllableState } from '@radix-ui/react-use-controllable-state'
 import type * as focusTrapLib from 'focus-trap'
-import { useEventMachine, type Send } from '../../event-machine'
+import { useMachine, type Send } from 'controlled-machine/react'
 
 import { modalMachine, type ModalEvents } from './machine'
 import { usePresence } from '../../hooks/use-presence'
@@ -113,7 +113,7 @@ function RootInner({
   })
 
   // Event machine (state 기능 활용)
-  const { send } = useEventMachine(modalMachine, {
+  const { send } = useMachine(modalMachine, {
     state: isOpen ? 'open' : 'closed',
     onOpenChange: setOpen,
     closeOnEscape,
