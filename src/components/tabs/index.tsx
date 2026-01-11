@@ -13,7 +13,6 @@ import { useEventMachine, type Send } from '../../event-machine'
 import {
   tabsMachine,
   isActive,
-  type TabsContext as MachineContext,
   type TabsEvents,
   type TabValue,
   type TabsOrientation,
@@ -110,12 +109,12 @@ const RootInner = forwardRef<HTMLDivElement, RootProps>(
     const storeRef = useRef(store)
     storeRef.current = store
 
-    // Machine context
-    const machineCtx: MachineContext = {
+    // Event machine
+    const { send } = useEventMachine(tabsMachine, {
       activeValue: activeValue ?? null,
       focusedValue,
-      setActiveValue: (value) => setActiveValue(value ?? undefined),
-      setFocusedValue,
+      onActiveValueChange: (value) => setActiveValue(value ?? undefined),
+      onFocusedValueChange: setFocusedValue,
       getEnabledTabs: () => {
         const tabs = storeRef.current.getNodesByRole('tab')
         return tabs
@@ -124,10 +123,7 @@ const RootInner = forwardRef<HTMLDivElement, RootProps>(
       },
       getTabElement: (value) =>
         storeRef.current.getElement(String(value), 'tab'),
-    }
-
-    // Event machine
-    const { send } = useEventMachine(tabsMachine, machineCtx)
+    })
 
     // 키보드 네비게이션
     const handleKeyDown = (event: React.KeyboardEvent) => {

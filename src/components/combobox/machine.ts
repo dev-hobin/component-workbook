@@ -52,7 +52,7 @@ export type ComboboxEvents = {
 // Context
 // ============================================
 
-export type ComboboxContext = {
+export type ComboboxInput = {
   // State
   isOpen: boolean
   inputValue: string
@@ -60,12 +60,12 @@ export type ComboboxContext = {
   highlightedOptionId: OptionId | null
   autocompleteText: string | null
 
-  // Setters
-  setOpen: (open: boolean) => void
-  setInputValue: (value: string) => void
-  setSelectedValue: (value: string | null) => void
-  setHighlightedOptionId: (id: OptionId | null) => void
-  setAutocompleteText: (text: string | null) => void
+  // Callbacks
+  onOpenChange: (open: boolean) => void
+  onInputValueChange: (value: string) => void
+  onSelectedValueChange: (value: string | null) => void
+  onHighlightedOptionIdChange: (id: OptionId | null) => void
+  onAutocompleteTextChange: (text: string | null) => void
 
   // Options
   autocomplete: AutocompleteMode
@@ -84,7 +84,7 @@ export type ComboboxContext = {
   getInputElement: () => HTMLInputElement | null
   getAllElements: () => Map<string, HTMLElement>
 
-  // Callbacks
+  // Selection callback
   notifySelect: (value: string) => void
 }
 
@@ -113,7 +113,7 @@ type ComboboxActions =
   | 'handleInputBlur'
 
 export const comboboxMachine = createEventMachine<{
-  input: ComboboxContext
+  input: ComboboxInput
   events: ComboboxEvents
   actions: ComboboxActions
 }>({
@@ -125,7 +125,7 @@ export const comboboxMachine = createEventMachine<{
     INPUT_CHANGE: 'handleInputChange',
     INPUT_FOCUS: [
       {
-        when: (ctx) => ctx.openOnFocus && !ctx.isOpen,
+        when: (context) => context.openOnFocus && !context.isOpen,
         do: 'openAndHighlightSelected',
       },
       { do: 'noop' },
@@ -133,71 +133,71 @@ export const comboboxMachine = createEventMachine<{
     INPUT_BLUR: 'handleInputBlur',
 
     KEY_ARROW_DOWN: [
-      { when: (ctx) => !ctx.isOpen, do: 'openAndHighlightFirst' },
+      { when: (context) => !context.isOpen, do: 'openAndHighlightFirst' },
       { do: 'highlightNext' },
     ],
     KEY_ARROW_UP: [
-      { when: (ctx) => !ctx.isOpen, do: 'openAndHighlightLast' },
+      { when: (context) => !context.isOpen, do: 'openAndHighlightLast' },
       { do: 'highlightPrev' },
     ],
     KEY_ALT_ARROW_DOWN: [
-      { when: (ctx) => !ctx.isOpen, do: 'open' },
+      { when: (context) => !context.isOpen, do: 'open' },
       { do: 'noop' },
     ],
     KEY_ENTER: [
-      { when: (ctx) => !ctx.isOpen, do: 'noop' },
-      { when: (ctx) => ctx.highlightedOptionId === null, do: 'close' },
+      { when: (context) => !context.isOpen, do: 'noop' },
+      { when: (context) => context.highlightedOptionId === null, do: 'close' },
       { do: 'selectHighlighted' },
     ],
     KEY_ESCAPE: [
-      { when: (ctx) => ctx.isOpen, do: 'close' },
+      { when: (context) => context.isOpen, do: 'close' },
       {
-        when: (ctx) =>
-          ctx.selectedValue !== null && ctx.inputValue !== ctx.selectedValue,
+        when: (context) =>
+          context.selectedValue !== null && context.inputValue !== context.selectedValue,
         do: 'restoreSelectedValue',
       },
       { do: 'noop' },
     ],
     KEY_HOME: [
-      { when: (ctx) => ctx.isOpen, do: 'highlightFirst' },
+      { when: (context) => context.isOpen, do: 'highlightFirst' },
       { do: 'noop' },
     ],
     KEY_END: [
-      { when: (ctx) => ctx.isOpen, do: 'highlightLast' },
+      { when: (context) => context.isOpen, do: 'highlightLast' },
       { do: 'noop' },
     ],
     KEY_TAB: [
       {
-        when: (ctx) => ctx.autocompleteText !== null,
+        when: (context) => context.autocompleteText !== null,
         do: 'acceptAutocomplete',
       },
-      { when: (ctx) => ctx.isOpen, do: 'close' },
+      { when: (context) => context.isOpen, do: 'close' },
       { do: 'noop' },
     ],
 
     OPTION_CLICK: 'selectOption',
     OPTION_HOVER: 'highlightOption',
 
-    OUTSIDE_CLICK: [{ when: (ctx) => ctx.isOpen, do: 'close' }, { do: 'noop' }],
+    OUTSIDE_CLICK: [{ when: (context) => context.isOpen, do: 'close' }, { do: 'noop' }],
   },
 
   effects: [
     {
       // Outside click 리스너
-      watch: (ctx) => ctx.isOpen,
-      enter: (ctx) => {
+      watch: (context) => context.isOpen,
+      enter: (context) => {
         const handleClick = (event: PointerEvent) => {
           const target = event.target as Node | null
           if (!target) return
 
-          const elements = ctx.getAllElements()
+          const elements = context.getAllElements()
           for (const element of elements.values()) {
             if (element.contains(target)) return
           }
 
-          ctx.setOpen(false)
-          ctx.setHighlightedOptionId(null)
-          ctx.setAutocompleteText(null)
+          context.onOpenChange(false)
+          context.onHighlightedOptionIdChange(null)
+          context.onAutocompleteTextChange(null)
         }
 
         document.addEventListener('pointerdown', handleClick, true)
@@ -207,11 +207,11 @@ export const comboboxMachine = createEventMachine<{
     },
     {
       // Highlight 변경 시 스크롤
-      watch: (ctx) => ctx.highlightedOptionId,
-      change: (ctx) => {
-        if (ctx.highlightedOptionId) {
-          ctx
-            .getOptionElement(ctx.highlightedOptionId)
+      watch: (context) => context.highlightedOptionId,
+      change: (context) => {
+        if (context.highlightedOptionId) {
+          context
+            .getOptionElement(context.highlightedOptionId)
             ?.scrollIntoView({ block: 'nearest' })
         }
       },
@@ -221,247 +221,247 @@ export const comboboxMachine = createEventMachine<{
   actions: {
     noop: () => {},
 
-    open: (ctx) => {
-      ctx.setOpen(true)
+    open: (context) => {
+      context.onOpenChange(true)
     },
 
-    close: (ctx) => {
-      ctx.setOpen(false)
-      ctx.setHighlightedOptionId(null)
-      ctx.setAutocompleteText(null)
+    close: (context) => {
+      context.onOpenChange(false)
+      context.onHighlightedOptionIdChange(null)
+      context.onAutocompleteTextChange(null)
     },
 
-    toggle: (ctx) => {
-      if (ctx.isOpen) {
-        ctx.setOpen(false)
-        ctx.setHighlightedOptionId(null)
-        ctx.setAutocompleteText(null)
+    toggle: (context) => {
+      if (context.isOpen) {
+        context.onOpenChange(false)
+        context.onHighlightedOptionIdChange(null)
+        context.onAutocompleteTextChange(null)
       } else {
-        ctx.setOpen(true)
+        context.onOpenChange(true)
       }
     },
 
-    openAndHighlightFirst: (ctx) => {
-      ctx.setOpen(true)
-      const options = ctx.getFilteredOptions()
+    openAndHighlightFirst: (context) => {
+      context.onOpenChange(true)
+      const options = context.getFilteredOptions()
       const enabled = options.filter((o) => !o.disabled)
       if (enabled.length > 0) {
-        ctx.setHighlightedOptionId(enabled[0].id)
+        context.onHighlightedOptionIdChange(enabled[0].id)
       }
     },
 
-    openAndHighlightLast: (ctx) => {
-      ctx.setOpen(true)
-      const options = ctx.getFilteredOptions()
+    openAndHighlightLast: (context) => {
+      context.onOpenChange(true)
+      const options = context.getFilteredOptions()
       const enabled = options.filter((o) => !o.disabled)
       if (enabled.length > 0) {
-        ctx.setHighlightedOptionId(enabled[enabled.length - 1].id)
+        context.onHighlightedOptionIdChange(enabled[enabled.length - 1].id)
       }
     },
 
-    openAndHighlightSelected: (ctx) => {
-      ctx.setOpen(true)
-      if (ctx.selectedValue) {
-        const options = ctx.getFilteredOptions()
-        const selected = options.find((o) => o.value === ctx.selectedValue)
+    openAndHighlightSelected: (context) => {
+      context.onOpenChange(true)
+      if (context.selectedValue) {
+        const options = context.getFilteredOptions()
+        const selected = options.find((o) => o.value === context.selectedValue)
         if (selected) {
-          ctx.setHighlightedOptionId(selected.id)
+          context.onHighlightedOptionIdChange(selected.id)
         }
       }
     },
 
-    highlightFirst: (ctx) => {
-      const options = ctx.getFilteredOptions()
+    highlightFirst: (context) => {
+      const options = context.getFilteredOptions()
       const enabled = options.filter((o) => !o.disabled)
       if (enabled.length > 0) {
-        ctx.setHighlightedOptionId(enabled[0].id)
+        context.onHighlightedOptionIdChange(enabled[0].id)
       }
     },
 
-    highlightLast: (ctx) => {
-      const options = ctx.getFilteredOptions()
+    highlightLast: (context) => {
+      const options = context.getFilteredOptions()
       const enabled = options.filter((o) => !o.disabled)
       if (enabled.length > 0) {
-        ctx.setHighlightedOptionId(enabled[enabled.length - 1].id)
+        context.onHighlightedOptionIdChange(enabled[enabled.length - 1].id)
       }
     },
 
-    highlightNext: (ctx) => {
-      const options = ctx.getFilteredOptions()
+    highlightNext: (context) => {
+      const options = context.getFilteredOptions()
       const enabled = options.filter((o) => !o.disabled)
       if (enabled.length === 0) return
 
-      if (ctx.highlightedOptionId === null) {
-        ctx.setHighlightedOptionId(enabled[0].id)
+      if (context.highlightedOptionId === null) {
+        context.onHighlightedOptionIdChange(enabled[0].id)
         return
       }
 
       const currentIndex = enabled.findIndex(
-        (o) => o.id === ctx.highlightedOptionId,
+        (o) => o.id === context.highlightedOptionId,
       )
       if (currentIndex === -1) {
-        ctx.setHighlightedOptionId(enabled[0].id)
+        context.onHighlightedOptionIdChange(enabled[0].id)
         return
       }
 
       const nextIndex = currentIndex + 1
       if (nextIndex >= enabled.length) {
-        if (ctx.loop) {
-          ctx.setHighlightedOptionId(enabled[0].id)
+        if (context.loop) {
+          context.onHighlightedOptionIdChange(enabled[0].id)
         }
       } else {
-        ctx.setHighlightedOptionId(enabled[nextIndex].id)
+        context.onHighlightedOptionIdChange(enabled[nextIndex].id)
       }
     },
 
-    highlightPrev: (ctx) => {
-      const options = ctx.getFilteredOptions()
+    highlightPrev: (context) => {
+      const options = context.getFilteredOptions()
       const enabled = options.filter((o) => !o.disabled)
       if (enabled.length === 0) return
 
-      if (ctx.highlightedOptionId === null) {
-        ctx.setHighlightedOptionId(enabled[enabled.length - 1].id)
+      if (context.highlightedOptionId === null) {
+        context.onHighlightedOptionIdChange(enabled[enabled.length - 1].id)
         return
       }
 
       const currentIndex = enabled.findIndex(
-        (o) => o.id === ctx.highlightedOptionId,
+        (o) => o.id === context.highlightedOptionId,
       )
       if (currentIndex === -1) {
-        ctx.setHighlightedOptionId(enabled[enabled.length - 1].id)
+        context.onHighlightedOptionIdChange(enabled[enabled.length - 1].id)
         return
       }
 
       const prevIndex = currentIndex - 1
       if (prevIndex < 0) {
-        if (ctx.loop) {
-          ctx.setHighlightedOptionId(enabled[enabled.length - 1].id)
+        if (context.loop) {
+          context.onHighlightedOptionIdChange(enabled[enabled.length - 1].id)
         }
       } else {
-        ctx.setHighlightedOptionId(enabled[prevIndex].id)
+        context.onHighlightedOptionIdChange(enabled[prevIndex].id)
       }
     },
 
-    highlightOption: (ctx, payload: { optionId: string }) => {
+    highlightOption: (context, payload: { optionId: string }) => {
       const { optionId } = payload
-      const option = ctx.getOptionById(optionId)
+      const option = context.getOptionById(optionId)
       if (option && !option.disabled) {
-        ctx.setHighlightedOptionId(optionId)
+        context.onHighlightedOptionIdChange(optionId)
       }
     },
 
-    selectHighlighted: (ctx) => {
-      if (ctx.highlightedOptionId === null) return
+    selectHighlighted: (context) => {
+      if (context.highlightedOptionId === null) return
 
-      const option = ctx.getOptionById(ctx.highlightedOptionId)
+      const option = context.getOptionById(context.highlightedOptionId)
       if (!option || option.disabled) return
 
-      const newInputValue = ctx.clearOnSelect ? '' : option.label
-      ctx.setSelectedValue(option.value)
-      ctx.setInputValue(newInputValue)
-      ctx.setAutocompleteText(null)
+      const newInputValue = context.clearOnSelect ? '' : option.label
+      context.onSelectedValueChange(option.value)
+      context.onInputValueChange(newInputValue)
+      context.onAutocompleteTextChange(null)
 
-      if (ctx.closeOnSelect) {
-        ctx.setOpen(false)
-        ctx.setHighlightedOptionId(null)
+      if (context.closeOnSelect) {
+        context.onOpenChange(false)
+        context.onHighlightedOptionIdChange(null)
       }
 
-      ctx.notifySelect(option.value)
+      context.notifySelect(option.value)
     },
 
-    selectOption: (ctx, payload: { optionId: OptionId }) => {
+    selectOption: (context, payload: { optionId: OptionId }) => {
       const { optionId } = payload
-      const option = ctx.getOptionById(optionId)
+      const option = context.getOptionById(optionId)
       if (!option || option.disabled) return
 
-      const newInputValue = ctx.clearOnSelect ? '' : option.label
-      ctx.setSelectedValue(option.value)
-      ctx.setInputValue(newInputValue)
-      ctx.setAutocompleteText(null)
+      const newInputValue = context.clearOnSelect ? '' : option.label
+      context.onSelectedValueChange(option.value)
+      context.onInputValueChange(newInputValue)
+      context.onAutocompleteTextChange(null)
 
-      if (ctx.closeOnSelect) {
-        ctx.setOpen(false)
-        ctx.setHighlightedOptionId(null)
+      if (context.closeOnSelect) {
+        context.onOpenChange(false)
+        context.onHighlightedOptionIdChange(null)
       }
 
-      ctx.notifySelect(option.value)
+      context.notifySelect(option.value)
     },
 
-    restoreSelectedValue: (ctx) => {
-      if (!ctx.selectedValue) return
-      const options = ctx.getFilteredOptions()
-      const selected = options.find((o) => o.value === ctx.selectedValue)
+    restoreSelectedValue: (context) => {
+      if (!context.selectedValue) return
+      const options = context.getFilteredOptions()
+      const selected = options.find((o) => o.value === context.selectedValue)
       if (selected) {
-        ctx.setInputValue(selected.label)
+        context.onInputValueChange(selected.label)
       }
     },
 
-    acceptAutocomplete: (ctx) => {
-      if (ctx.autocompleteText === null) return
-      ctx.setInputValue(ctx.inputValue + ctx.autocompleteText)
-      ctx.setAutocompleteText(null)
+    acceptAutocomplete: (context) => {
+      if (context.autocompleteText === null) return
+      context.onInputValueChange(context.inputValue + context.autocompleteText)
+      context.onAutocompleteTextChange(null)
     },
 
-    handleInputChange: (ctx, payload: { value: string }) => {
+    handleInputChange: (context, payload: { value: string }) => {
       const { value } = payload
 
       // 1. 입력값 업데이트 + popup 열기
-      ctx.setInputValue(value)
-      ctx.setOpen(true)
-      ctx.setAutocompleteText(null)
+      context.onInputValueChange(value)
+      context.onOpenChange(true)
+      context.onAutocompleteTextChange(null)
 
       // 2. 필터링된 옵션 (새 입력값 기준으로 다시 계산 필요)
-      // Note: getFilteredOptions는 ctx.inputValue를 사용하므로
+      // Note: getFilteredOptions는 context.inputValue를 사용하므로
       // 여기서는 직접 필터링 로직 사용
-      const options = ctx.getFilteredOptions()
+      const options = context.getFilteredOptions()
 
       // 3. Inline autocomplete 적용
-      if (ctx.autocomplete === 'inline' || ctx.autocomplete === 'both') {
+      if (context.autocomplete === 'inline' || context.autocomplete === 'both') {
         if (value.length > 0) {
           const valueLower = value.toLowerCase()
           const matching = options.find(
             (o) => !o.disabled && o.label.toLowerCase().startsWith(valueLower),
           )
           if (matching) {
-            ctx.setHighlightedOptionId(matching.id)
-            ctx.setAutocompleteText(matching.label.slice(value.length))
+            context.onHighlightedOptionIdChange(matching.id)
+            context.onAutocompleteTextChange(matching.label.slice(value.length))
             // Selection range는 Shell에서 처리
-            const input = ctx.getInputElement()
+            const input = context.getInputElement()
             if (input) {
               requestAnimationFrame(() => {
                 input.setSelectionRange(value.length, matching.label.length)
               })
             }
           } else {
-            ctx.setHighlightedOptionId(null)
+            context.onHighlightedOptionIdChange(null)
           }
         } else {
-          ctx.setHighlightedOptionId(null)
+          context.onHighlightedOptionIdChange(null)
         }
       } else if (options.length > 0) {
         // list 모드: 첫 번째 매칭 옵션 하이라이트
         const enabled = options.filter((o) => !o.disabled)
         if (enabled.length > 0) {
-          ctx.setHighlightedOptionId(enabled[0].id)
+          context.onHighlightedOptionIdChange(enabled[0].id)
         } else {
-          ctx.setHighlightedOptionId(null)
+          context.onHighlightedOptionIdChange(null)
         }
       } else {
-        ctx.setHighlightedOptionId(null)
+        context.onHighlightedOptionIdChange(null)
       }
     },
 
-    handleInputBlur: (ctx) => {
-      if (!ctx.isOpen) return
+    handleInputBlur: (context) => {
+      if (!context.isOpen) return
 
       // Autocomplete가 있으면 수락
-      if (ctx.autocompleteText) {
-        ctx.setInputValue(ctx.inputValue + ctx.autocompleteText)
-        ctx.setAutocompleteText(null)
+      if (context.autocompleteText) {
+        context.onInputValueChange(context.inputValue + context.autocompleteText)
+        context.onAutocompleteTextChange(null)
       }
 
-      ctx.setOpen(false)
-      ctx.setHighlightedOptionId(null)
+      context.onOpenChange(false)
+      context.onHighlightedOptionIdChange(null)
     },
   },
 })

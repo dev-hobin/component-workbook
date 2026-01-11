@@ -17,7 +17,6 @@ import {
   isHighlighted,
   isSelected,
   getDisplayValue,
-  type ComboboxContext as MachineContext,
   type ComboboxEvents,
   type ComboboxOption,
   type OptionId,
@@ -196,54 +195,40 @@ function RootInner({
   const filteredOptionsRef = useRef<ComboboxOption[]>([])
   filteredOptionsRef.current = filteredOptions
 
-  // Machine context
-  const machineCtx: MachineContext = {
-    // State
+  // Event machine
+  const { send } = useEventMachine(comboboxMachine, {
     isOpen: isOpen ?? false,
     inputValue: inputValue ?? '',
     selectedValue: selectedValue ?? null,
     highlightedOptionId,
     autocompleteText,
-
-    // Setters
-    setOpen: (open) => setIsOpen(open),
-    setInputValue: (value) => setInputValue(value),
-    setSelectedValue: (value) => setSelectedValue(value),
-    setHighlightedOptionId,
-    setAutocompleteText,
-
-    // Options
+    onOpenChange: (open) => setIsOpen(open),
+    onInputValueChange: (value) => setInputValue(value),
+    onSelectedValueChange: (value) => setSelectedValue(value),
+    onHighlightedOptionIdChange: setHighlightedOptionId,
+    onAutocompleteTextChange: setAutocompleteText,
     autocomplete,
     openOnFocus,
     closeOnSelect,
     showAllOnEmpty,
     clearOnSelect,
     loop,
-
-    // Lazy getters
     getFilteredOptions: () => filteredOptionsRef.current,
     getOptionById: (id) => optionsRef.current.find((o) => o.id === id),
-
-    // DOM helpers
     getOptionElement: (optionId) => store.getElement(optionId, 'option'),
     getInputElement: () => inputRef.current,
     getAllElements: () => {
       const elements = new Map<string, HTMLElement>()
-      const input = store.getElement(comboboxId, 'input')
+      const inputEl = store.getElement(comboboxId, 'input')
       const listbox = store.getElement(comboboxId, 'listbox')
       const trigger = store.getElement(comboboxId, 'trigger')
-      if (input) elements.set('input', input)
+      if (inputEl) elements.set('input', inputEl)
       if (listbox) elements.set('listbox', listbox)
       if (trigger) elements.set('trigger', trigger)
       return elements
     },
-
-    // Callbacks
     notifySelect: (value) => onSelect?.(value),
-  }
-
-  // Event machine
-  const { send } = useEventMachine(comboboxMachine, machineCtx)
+  })
 
   // Input ref setter
   const setInputRef = (el: HTMLInputElement | null) => {

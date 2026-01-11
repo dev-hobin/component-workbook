@@ -37,16 +37,16 @@ export type TreeEvents = {
 // Context
 // ============================================
 
-export type TreeContext = {
+export type TreeInput = {
   // State
   focusedId: NodeId | null
   selectedId: NodeId | null
   expandedIds: Set<NodeId>
 
-  // Setters
-  setFocusedId: (id: NodeId | null) => void
-  setSelectedId: (id: NodeId | null) => void
-  setExpandedIds: (ids: Set<NodeId>) => void
+  // Callbacks
+  onFocusedIdChange: (id: NodeId | null) => void
+  onSelectedIdChange: (id: NodeId | null) => void
+  onExpandedIdsChange: (ids: Set<NodeId>) => void
 
   // Lazy getters
   getVisibleItemIds: () => NodeId[]
@@ -80,7 +80,7 @@ type TreeActions =
   | 'collapseFocused'
 
 export const treeMachine = createEventMachine<{
-  input: TreeContext
+  input: TreeInput
   events: TreeEvents
   actions: TreeActions
 }>({
@@ -100,26 +100,26 @@ export const treeMachine = createEventMachine<{
     TOGGLE_EXPAND: 'toggleExpand',
 
     ARROW_RIGHT: [
-      { when: (ctx) => ctx.focusedId === null, do: 'noop' },
+      { when: (context) => context.focusedId === null, do: 'noop' },
       {
-        when: (ctx) => ctx.focusedId !== null && ctx.isLeaf(ctx.focusedId),
+        when: (context) => context.focusedId !== null && context.isLeaf(context.focusedId),
         do: 'noop',
       },
       {
-        when: (ctx) =>
-          ctx.focusedId !== null && !ctx.expandedIds.has(ctx.focusedId),
+        when: (context) =>
+          context.focusedId !== null && !context.expandedIds.has(context.focusedId),
         do: 'expandFocused',
       },
       { do: 'focusFirstChild' },
     ],
 
     ARROW_LEFT: [
-      { when: (ctx) => ctx.focusedId === null, do: 'noop' },
+      { when: (context) => context.focusedId === null, do: 'noop' },
       {
-        when: (ctx) =>
-          ctx.focusedId !== null &&
-          !ctx.isLeaf(ctx.focusedId) &&
-          ctx.expandedIds.has(ctx.focusedId),
+        when: (context) =>
+          context.focusedId !== null &&
+          !context.isLeaf(context.focusedId) &&
+          context.expandedIds.has(context.focusedId),
         do: 'collapseFocused',
       },
       { do: 'focusParent' },
@@ -129,10 +129,10 @@ export const treeMachine = createEventMachine<{
   effects: [
     {
       // 포커스 변경 시 DOM 동기화
-      watch: (ctx) => ctx.focusedId,
-      change: (ctx) => {
-        if (ctx.focusedId) {
-          ctx.getItemElement(ctx.focusedId)?.focus()
+      watch: (context) => context.focusedId,
+      change: (context) => {
+        if (context.focusedId) {
+          context.getItemElement(context.focusedId)?.focus()
         }
       },
     },
@@ -141,113 +141,113 @@ export const treeMachine = createEventMachine<{
   actions: {
     noop: () => {},
 
-    focus: (ctx, payload: { nodeId: NodeId }) => {
-      ctx.setFocusedId(payload.nodeId)
+    focus: (context, payload: { nodeId: NodeId }) => {
+      context.onFocusedIdChange(payload.nodeId)
     },
 
-    focusNext: (ctx) => {
-      const visibleIds = ctx.getVisibleItemIds()
+    focusNext: (context) => {
+      const visibleIds = context.getVisibleItemIds()
       if (visibleIds.length === 0) return
 
-      if (ctx.focusedId === null) {
-        ctx.setFocusedId(visibleIds[0])
+      if (context.focusedId === null) {
+        context.onFocusedIdChange(visibleIds[0])
         return
       }
 
-      const currentIndex = visibleIds.indexOf(ctx.focusedId)
+      const currentIndex = visibleIds.indexOf(context.focusedId)
       if (currentIndex === -1 || currentIndex >= visibleIds.length - 1) return
 
-      ctx.setFocusedId(visibleIds[currentIndex + 1])
+      context.onFocusedIdChange(visibleIds[currentIndex + 1])
     },
 
-    focusPrev: (ctx) => {
-      const visibleIds = ctx.getVisibleItemIds()
+    focusPrev: (context) => {
+      const visibleIds = context.getVisibleItemIds()
       if (visibleIds.length === 0) return
 
-      if (ctx.focusedId === null) {
-        ctx.setFocusedId(visibleIds[0])
+      if (context.focusedId === null) {
+        context.onFocusedIdChange(visibleIds[0])
         return
       }
 
-      const currentIndex = visibleIds.indexOf(ctx.focusedId)
+      const currentIndex = visibleIds.indexOf(context.focusedId)
       if (currentIndex <= 0) return
 
-      ctx.setFocusedId(visibleIds[currentIndex - 1])
+      context.onFocusedIdChange(visibleIds[currentIndex - 1])
     },
 
-    focusFirst: (ctx) => {
-      const visibleIds = ctx.getVisibleItemIds()
+    focusFirst: (context) => {
+      const visibleIds = context.getVisibleItemIds()
       if (visibleIds.length > 0) {
-        ctx.setFocusedId(visibleIds[0])
+        context.onFocusedIdChange(visibleIds[0])
       }
     },
 
-    focusLast: (ctx) => {
-      const visibleIds = ctx.getVisibleItemIds()
+    focusLast: (context) => {
+      const visibleIds = context.getVisibleItemIds()
       if (visibleIds.length > 0) {
-        ctx.setFocusedId(visibleIds[visibleIds.length - 1])
+        context.onFocusedIdChange(visibleIds[visibleIds.length - 1])
       }
     },
 
-    focusParent: (ctx) => {
-      if (ctx.focusedId === null) return
-      const parentId = ctx.getParentId(ctx.focusedId)
+    focusParent: (context) => {
+      if (context.focusedId === null) return
+      const parentId = context.getParentId(context.focusedId)
       if (parentId) {
-        ctx.setFocusedId(parentId)
+        context.onFocusedIdChange(parentId)
       }
     },
 
-    focusFirstChild: (ctx) => {
-      if (ctx.focusedId === null) return
-      const childrenIds = ctx.getChildrenIds(ctx.focusedId)
+    focusFirstChild: (context) => {
+      if (context.focusedId === null) return
+      const childrenIds = context.getChildrenIds(context.focusedId)
       if (childrenIds.length > 0) {
-        ctx.setFocusedId(childrenIds[0])
+        context.onFocusedIdChange(childrenIds[0])
       }
     },
 
-    select: (ctx, payload: { nodeId: NodeId | null }) => {
-      ctx.setSelectedId(payload.nodeId)
+    select: (context, payload: { nodeId: NodeId | null }) => {
+      context.onSelectedIdChange(payload.nodeId)
     },
 
-    selectFocused: (ctx) => {
-      ctx.setSelectedId(ctx.focusedId)
+    selectFocused: (context) => {
+      context.onSelectedIdChange(context.focusedId)
     },
 
-    expand: (ctx, payload: { nodeId: NodeId }) => {
-      const newExpanded = new Set(ctx.expandedIds)
+    expand: (context, payload: { nodeId: NodeId }) => {
+      const newExpanded = new Set(context.expandedIds)
       newExpanded.add(payload.nodeId)
-      ctx.setExpandedIds(newExpanded)
+      context.onExpandedIdsChange(newExpanded)
     },
 
-    collapse: (ctx, payload: { nodeId: NodeId }) => {
-      const newExpanded = new Set(ctx.expandedIds)
+    collapse: (context, payload: { nodeId: NodeId }) => {
+      const newExpanded = new Set(context.expandedIds)
       newExpanded.delete(payload.nodeId)
-      ctx.setExpandedIds(newExpanded)
+      context.onExpandedIdsChange(newExpanded)
     },
 
-    toggleExpand: (ctx, payload: { nodeId: NodeId }) => {
+    toggleExpand: (context, payload: { nodeId: NodeId }) => {
       const { nodeId } = payload
-      const newExpanded = new Set(ctx.expandedIds)
+      const newExpanded = new Set(context.expandedIds)
       if (newExpanded.has(nodeId)) {
         newExpanded.delete(nodeId)
       } else {
         newExpanded.add(nodeId)
       }
-      ctx.setExpandedIds(newExpanded)
+      context.onExpandedIdsChange(newExpanded)
     },
 
-    expandFocused: (ctx) => {
-      if (ctx.focusedId === null) return
-      const newExpanded = new Set(ctx.expandedIds)
-      newExpanded.add(ctx.focusedId)
-      ctx.setExpandedIds(newExpanded)
+    expandFocused: (context) => {
+      if (context.focusedId === null) return
+      const newExpanded = new Set(context.expandedIds)
+      newExpanded.add(context.focusedId)
+      context.onExpandedIdsChange(newExpanded)
     },
 
-    collapseFocused: (ctx) => {
-      if (ctx.focusedId === null) return
-      const newExpanded = new Set(ctx.expandedIds)
-      newExpanded.delete(ctx.focusedId)
-      ctx.setExpandedIds(newExpanded)
+    collapseFocused: (context) => {
+      if (context.focusedId === null) return
+      const newExpanded = new Set(context.expandedIds)
+      newExpanded.delete(context.focusedId)
+      context.onExpandedIdsChange(newExpanded)
     },
   },
 })

@@ -11,7 +11,7 @@ import { useControllableState } from '@radix-ui/react-use-controllable-state'
 import type * as focusTrapLib from 'focus-trap'
 import { useEventMachine, type Send } from '../../event-machine'
 
-import { modalMachine, type ModalContext, type ModalEvents } from './machine'
+import { modalMachine, type ModalEvents } from './machine'
 import { usePresence } from '../../hooks/use-presence'
 import { useStableCallback } from '../../hooks/use-stable-callback'
 import { composeRefs } from '../../utils/compose-refs'
@@ -112,27 +112,23 @@ function RootInner({
     return initialFocus
   })
 
-  // Build context for machine
-  const machineCtx: ModalContext = {
-    isOpen,
-    setOpen,
+  // Event machine (state 기능 활용)
+  const { send } = useEventMachine(modalMachine, {
+    state: isOpen ? 'open' : 'closed',
+    onOpenChange: setOpen,
     closeOnEscape,
     closeOnOutsideClick,
     getContentElement: () => store.getElement(modalId, 'content'),
     getInitialFocusElement,
-    // React-agnostic getter/setter for effect state
     getTrap: () => trapRef.current,
-    setTrap: (trap: focusTrapLib.FocusTrap | null) => {
+    onTrapChange: (trap: focusTrapLib.FocusTrap | null) => {
       trapRef.current = trap
     },
     getPrevOverflow: () => prevOverflowRef.current,
-    setPrevOverflow: (overflow: string) => {
+    onPrevOverflowChange: (overflow: string) => {
       prevOverflowRef.current = overflow
     },
-  }
-
-  // Event machine
-  const { send } = useEventMachine(modalMachine, machineCtx)
+  })
 
   const contextValue: ModalContextValue = {
     modalId,

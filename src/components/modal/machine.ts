@@ -11,10 +11,12 @@ export type ModalEvents = {
   OUTSIDE_CLICK: undefined
 }
 
-export type ModalContext = {
-  // State
-  isOpen: boolean
-  setOpen: (open: boolean) => void
+export type ModalState = 'open' | 'closed'
+
+export type ModalInput = {
+  // State (state 기능 활용을 위해 'state' 프로퍼티 필요)
+  state: ModalState
+  onOpenChange: (open: boolean) => void
 
   // Options
   closeOnEscape: boolean
@@ -26,9 +28,9 @@ export type ModalContext = {
 
   // Effect state (React-agnostic)
   getTrap: () => focusTrapLib.FocusTrap | null
-  setTrap: (trap: focusTrapLib.FocusTrap | null) => void
+  onTrapChange: (trap: focusTrapLib.FocusTrap | null) => void
   getPrevOverflow: () => string
-  setPrevOverflow: (overflow: string) => void
+  onPrevOverflowChange: (overflow: string) => void
 }
 
 // ============================================
@@ -36,52 +38,64 @@ export type ModalContext = {
 // ============================================
 
 export const modalMachine = createEventMachine<{
-  input: ModalContext
+  input: ModalInput
   events: ModalEvents
+  state: ModalState
   actions: 'noop' | 'open' | 'close'
 }>({
-  on: {
-    OPEN: 'open',
-    CLOSE: 'close',
-    OUTSIDE_CLICK: [
-      { when: (ctx) => ctx.closeOnOutsideClick, do: 'close' },
-      { do: 'noop' },
-    ],
+  // 상태별 핸들러: 각 상태에서 유효한 이벤트만 처리
+  states: {
+    closed: {
+      on: {
+        OPEN: 'open',
+        // closed 상태에서 CLOSE, OUTSIDE_CLICK은 무시됨
+      },
+    },
+    open: {
+      on: {
+        CLOSE: 'close',
+        OUTSIDE_CLICK: [
+          { when: (context) => context.closeOnOutsideClick, do: 'close' },
+          { do: 'noop' },
+        ],
+        // open 상태에서 OPEN은 무시됨
+      },
+    },
   },
 
   effects: [
     {
-      watch: (ctx) => ctx.isOpen,
-      enter: (ctx) => {
+      watch: (context) => context.state === 'open',
+      enter: (context) => {
         // 1. Body scroll lock
-        ctx.setPrevOverflow(getComputedStyle(document.body).overflow)
+        context.onPrevOverflowChange(getComputedStyle(document.body).overflow)
         document.body.style.overflow = 'hidden'
 
         // 2. Focus trap 활성화 (다음 프레임에서 실행)
         requestAnimationFrame(() => {
-          const contentEl = ctx.getContentElement()
-          if (contentEl && !ctx.getTrap()) {
+          const contentEl = context.getContentElement()
+          if (contentEl && !context.getTrap()) {
             const trap = focusTrapLib
               .createFocusTrap(contentEl, {
-                initialFocus: ctx.getInitialFocusElement() ?? undefined,
+                initialFocus: context.getInitialFocusElement() ?? undefined,
                 fallbackFocus: contentEl,
-                allowOutsideClick: ctx.closeOnOutsideClick,
-                escapeDeactivates: ctx.closeOnEscape,
-                onDeactivate: () => ctx.setOpen(false),
+                allowOutsideClick: context.closeOnOutsideClick,
+                escapeDeactivates: context.closeOnEscape,
+                onDeactivate: () => context.onOpenChange(false),
               })
               .activate()
-            ctx.setTrap(trap)
+            context.onTrapChange(trap)
           }
         })
 
         // 3. Cleanup 반환
         return () => {
-          const trap = ctx.getTrap()
+          const trap = context.getTrap()
           if (trap) {
             trap.deactivate()
-            ctx.setTrap(null)
+            context.onTrapChange(null)
           }
-          document.body.style.overflow = ctx.getPrevOverflow()
+          document.body.style.overflow = context.getPrevOverflow()
         }
       },
     },
@@ -89,7 +103,7 @@ export const modalMachine = createEventMachine<{
 
   actions: {
     noop: () => {},
-    open: (ctx) => ctx.setOpen(true),
-    close: (ctx) => ctx.setOpen(false),
+    open: (context) => context.onOpenChange(true),
+    close: (context) => context.onOpenChange(false),
   },
 })

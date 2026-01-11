@@ -25,10 +25,8 @@ import { useEventMachine, type Send } from '../../event-machine'
 import {
   menuMachine,
   isMenuOpen,
-  getRootMenuId,
-  getActiveMenuId,
-  type MenuContext,
   type MenuEvents,
+  type MenuComputed,
   type MenuId,
   type ItemId,
 } from './machine'
@@ -64,6 +62,7 @@ type MenuMeta = {
 type MenuContextValue = {
   openedPath: MenuId[]
   focusedItemId: ItemId | null
+  computed: MenuComputed
   send: Send<MenuEvents>
   store: ComponentStore<MenuRole, MenuMeta>
 }
@@ -138,16 +137,14 @@ function RootInner({
 
   const [focusedItemId, setFocusedItemId] = useState<ItemId | null>(null)
 
-  // Build context for machine
-  const machineCtx: MenuContext = {
+  // Event machine
+  const { send, computed } = useEventMachine(menuMachine, {
     openedPath,
     focusedItemId,
-    setOpenedPath,
-    setFocusedItemId,
-
-    getActiveMenuId: () => getActiveMenuId(openedPath),
+    onOpenedPathChange: setOpenedPath,
+    onFocusedItemIdChange: setFocusedItemId,
     getActiveMenuItems: () => {
-      const activeId = getActiveMenuId(openedPath)
+      const activeId = openedPath[openedPath.length - 1]
       if (!activeId) return []
       const nodes = store.filterNodesByRolesAndMeta(
         ['item', 'subtrigger'],
@@ -158,27 +155,19 @@ function RootInner({
         menuId: node.meta.menuId,
       }))
     },
-    isActiveMenuSub: () => {
-      const activeId = getActiveMenuId(openedPath)
-      if (!activeId) return false
-      return openedPath.indexOf(activeId) > 0
-    },
     isItemSubTrigger: (itemId: ItemId) => openedPath.includes(itemId),
-
     getItemElement: (itemId: ItemId) =>
       store.getElement(itemId, 'item') ??
       store.getElement(itemId, 'subtrigger'),
     getTriggerElement: (targetMenuId: MenuId) =>
       store.getElement(targetMenuId, 'trigger'),
     getAllElements: () => store.getAllElements(),
-  }
-
-  // Event machine
-  const { send } = useEventMachine(menuMachine, machineCtx)
+  })
 
   const menuContextValue: MenuContextValue = {
     openedPath,
     focusedItemId,
+    computed,
     send,
     store,
   }
@@ -481,7 +470,7 @@ export type ActionItemProps = Omit<
 
 export const ActionItem = forwardRef<HTMLButtonElement, ActionItemProps>(
   ({ children, value: itemId, ...rest }, forwardedRef) => {
-    const { openedPath, focusedItemId, send, store } = useMenuContext()
+    const { focusedItemId, computed, send, store } = useMenuContext()
     const { menuId } = useMenuIdContext()
 
     const { ref, domId } = useNode<MenuRole, MenuMeta>({
@@ -493,11 +482,10 @@ export const ActionItem = forwardRef<HTMLButtonElement, ActionItemProps>(
     const isActive = focusedItemId === itemId
 
     const handleClick = () => {
-      const rootMenuId = getRootMenuId(openedPath)
       send('CLOSE_ALL')
 
-      if (rootMenuId) {
-        const rootTrigger = store.getElement(rootMenuId, 'trigger')
+      if (computed.rootMenuId) {
+        const rootTrigger = store.getElement(computed.rootMenuId, 'trigger')
         rootTrigger?.focus()
       }
     }
@@ -540,7 +528,7 @@ export type LinkItemProps = Omit<ComponentPropsWithoutRef<'a'>, 'value'> & {
 
 export const LinkItem = forwardRef<HTMLAnchorElement, LinkItemProps>(
   ({ children, value: itemId, ...rest }, forwardedRef) => {
-    const { openedPath, focusedItemId, send, store } = useMenuContext()
+    const { focusedItemId, computed, send, store } = useMenuContext()
     const { menuId } = useMenuIdContext()
 
     const { ref, domId } = useNode<MenuRole, MenuMeta>({
@@ -552,11 +540,10 @@ export const LinkItem = forwardRef<HTMLAnchorElement, LinkItemProps>(
     const isActive = focusedItemId === itemId
 
     const handleClick = () => {
-      const rootMenuId = getRootMenuId(openedPath)
       send('CLOSE_ALL')
 
-      if (rootMenuId) {
-        const rootTrigger = store.getElement(rootMenuId, 'trigger')
+      if (computed.rootMenuId) {
+        const rootTrigger = store.getElement(computed.rootMenuId, 'trigger')
         rootTrigger?.focus()
       }
     }

@@ -12,14 +12,14 @@ export type AccordionEvents = {
   FOCUS_LAST: undefined
 }
 
-export type AccordionContext = {
+export type AccordionInput = {
   // State
   expandedIds: Set<string>
   focusedId: string | null
 
-  // Setters
-  setExpandedIds: (ids: Set<string>) => void
-  setFocusedId: (id: string | null) => void
+  // Callbacks
+  onExpandedIdsChange: (ids: Set<string>) => void
+  onFocusedIdChange: (id: string | null) => void
 
   // Options
   multiple: boolean
@@ -36,19 +36,19 @@ export type AccordionContext = {
 // ============================================
 
 export const accordionMachine = createEventMachine<{
-  input: AccordionContext
+  input: AccordionInput
   events: AccordionEvents
   actions: 'noop' | 'expand' | 'collapse' | 'focusNext' | 'focusPrev' | 'focusFirst' | 'focusLast'
 }>({
   on: {
     TOGGLE: [
-      { when: (ctx) => ctx.disabled, do: 'noop' },
+      { when: (context) => context.disabled, do: 'noop' },
       {
-        when: (ctx, { itemId }) =>
-          ctx.expandedIds.has(itemId) && !ctx.collapsible && !ctx.multiple,
+        when: (context, { itemId }) =>
+          context.expandedIds.has(itemId) && !context.collapsible && !context.multiple,
         do: 'noop',
       },
-      { when: (ctx, { itemId }) => ctx.expandedIds.has(itemId), do: 'collapse' },
+      { when: (context, { itemId }) => context.expandedIds.has(itemId), do: 'collapse' },
       { do: 'expand' },
     ],
     FOCUS_NEXT: 'focusNext',
@@ -59,10 +59,10 @@ export const accordionMachine = createEventMachine<{
 
   effects: [
     {
-      watch: (ctx) => ctx.focusedId,
-      change: (ctx) => {
-        if (ctx.focusedId) {
-          ctx.getTriggerElement(ctx.focusedId)?.focus()
+      watch: (context) => context.focusedId,
+      change: (context) => {
+        if (context.focusedId) {
+          context.getTriggerElement(context.focusedId)?.focus()
         }
       },
     },
@@ -71,49 +71,49 @@ export const accordionMachine = createEventMachine<{
   actions: {
     noop: () => {},
 
-    expand: (ctx, payload: { itemId: string }) => {
+    expand: (context, payload: { itemId: string }) => {
       const { itemId } = payload
-      if (ctx.multiple) {
-        ctx.setExpandedIds(new Set([...ctx.expandedIds, itemId]))
+      if (context.multiple) {
+        context.onExpandedIdsChange(new Set([...context.expandedIds, itemId]))
       } else {
-        ctx.setExpandedIds(new Set([itemId]))
+        context.onExpandedIdsChange(new Set([itemId]))
       }
     },
 
-    collapse: (ctx, payload: { itemId: string }) => {
+    collapse: (context, payload: { itemId: string }) => {
       const { itemId } = payload
-      const next = new Set(ctx.expandedIds)
+      const next = new Set(context.expandedIds)
       next.delete(itemId)
-      ctx.setExpandedIds(next)
+      context.onExpandedIdsChange(next)
     },
 
-    focusNext: (ctx) => {
-      const items = ctx.getEnabledItemIds()
+    focusNext: (context) => {
+      const items = context.getEnabledItemIds()
       if (items.length === 0) return
-      const currentIdx = ctx.focusedId ? items.indexOf(ctx.focusedId) : -1
+      const currentIdx = context.focusedId ? items.indexOf(context.focusedId) : -1
       const nextIdx = currentIdx === -1 ? 0 : (currentIdx + 1) % items.length
-      ctx.setFocusedId(items[nextIdx])
+      context.onFocusedIdChange(items[nextIdx])
     },
 
-    focusPrev: (ctx) => {
-      const items = ctx.getEnabledItemIds()
+    focusPrev: (context) => {
+      const items = context.getEnabledItemIds()
       if (items.length === 0) return
-      const currentIdx = ctx.focusedId ? items.indexOf(ctx.focusedId) : -1
+      const currentIdx = context.focusedId ? items.indexOf(context.focusedId) : -1
       const prevIdx =
         currentIdx === -1
           ? items.length - 1
           : (currentIdx - 1 + items.length) % items.length
-      ctx.setFocusedId(items[prevIdx])
+      context.onFocusedIdChange(items[prevIdx])
     },
 
-    focusFirst: (ctx) => {
-      const items = ctx.getEnabledItemIds()
-      if (items.length > 0) ctx.setFocusedId(items[0])
+    focusFirst: (context) => {
+      const items = context.getEnabledItemIds()
+      if (items.length > 0) context.onFocusedIdChange(items[0])
     },
 
-    focusLast: (ctx) => {
-      const items = ctx.getEnabledItemIds()
-      if (items.length > 0) ctx.setFocusedId(items[items.length - 1])
+    focusLast: (context) => {
+      const items = context.getEnabledItemIds()
+      if (items.length > 0) context.onFocusedIdChange(items[items.length - 1])
     },
   },
 })

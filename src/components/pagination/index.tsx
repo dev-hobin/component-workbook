@@ -11,11 +11,9 @@ import { useEventMachine, type Send } from '../../event-machine'
 
 import {
   paginationMachine,
-  hasPreviousPage,
-  hasNextPage,
   getPageItems,
-  type PaginationContext as MachineContext,
   type PaginationEvents,
+  type PaginationComputed,
 } from './machine'
 import { composeRefs } from '../../utils/compose-refs'
 import { mergeProps } from '../../utils/merge-props'
@@ -42,6 +40,7 @@ type PaginationContextValue = {
   page: number
   pageSize: number
   totalCount: number
+  computed: PaginationComputed
   store: ComponentStore<PaginationRole, PaginationMeta>
   send: Send<PaginationEvents>
 }
@@ -105,16 +104,13 @@ const RootInner = forwardRef<HTMLElement, RootProps>(
 
     const page = currentPage ?? 1
 
-    // Machine context
-    const machineCtx: MachineContext = {
+    // Event machine
+    const { send, computed } = useEventMachine(paginationMachine, {
       page,
       pageSize,
       totalCount,
-      setPage: setCurrentPage,
-    }
-
-    // Event machine
-    const { send } = useEventMachine(paginationMachine, machineCtx)
+      onPageChange: setCurrentPage,
+    })
 
     const { ref, domId } = useNode<PaginationRole>({
       role: 'root',
@@ -126,6 +122,7 @@ const RootInner = forwardRef<HTMLElement, RootProps>(
       page,
       pageSize,
       totalCount,
+      computed,
       store,
       send,
     }
@@ -157,14 +154,12 @@ export type PreviousTriggerProps = ComponentPropsWithoutRef<'button'>
 
 export const PreviousTrigger = forwardRef<HTMLButtonElement, PreviousTriggerProps>(
   ({ children, ...rest }, forwardedRef) => {
-    const { paginationId, page, send } = usePaginationContext()
+    const { paginationId, computed, send } = usePaginationContext()
 
     const { ref, domId } = useNode<PaginationRole>({
       role: 'previous',
       id: paginationId,
     })
-
-    const isDisabled = !hasPreviousPage(page)
 
     const handleClick = () => {
       send('GO_PREV')
@@ -177,7 +172,7 @@ export const PreviousTrigger = forwardRef<HTMLButtonElement, PreviousTriggerProp
           {
             type: 'button',
             id: domId,
-            disabled: isDisabled,
+            disabled: !computed.hasPrev,
             onClick: handleClick,
             'aria-label': 'Go to previous page',
           },
@@ -198,14 +193,12 @@ export type NextTriggerProps = ComponentPropsWithoutRef<'button'>
 
 export const NextTrigger = forwardRef<HTMLButtonElement, NextTriggerProps>(
   ({ children, ...rest }, forwardedRef) => {
-    const { paginationId, page, pageSize, totalCount, send } = usePaginationContext()
+    const { paginationId, computed, send } = usePaginationContext()
 
     const { ref, domId } = useNode<PaginationRole>({
       role: 'next',
       id: paginationId,
     })
-
-    const isDisabled = !hasNextPage(page, totalCount, pageSize)
 
     const handleClick = () => {
       send('GO_NEXT')
@@ -218,7 +211,7 @@ export const NextTrigger = forwardRef<HTMLButtonElement, NextTriggerProps>(
           {
             type: 'button',
             id: domId,
-            disabled: isDisabled,
+            disabled: !computed.hasNext,
             onClick: handleClick,
             'aria-label': 'Go to next page',
           },

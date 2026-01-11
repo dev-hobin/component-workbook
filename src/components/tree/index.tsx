@@ -7,12 +7,7 @@ import React, {
 import { useControllableState } from '@radix-ui/react-use-controllable-state'
 import { useEventMachine, type Send } from '../../event-machine'
 
-import {
-  treeMachine,
-  type TreeContext as MachineContext,
-  type TreeEvents,
-  type NodeId,
-} from './machine'
+import { treeMachine, type TreeEvents, type NodeId } from './machine'
 import { findNodeFromMouseEvent } from '../../primitives/dom'
 
 import {
@@ -165,16 +160,14 @@ function RootInner({
   const expandedIdsRef = useRef(expandedIds)
   expandedIdsRef.current = expandedIds
 
-  // Machine context
-  const machineCtx: MachineContext = {
+  // Event machine
+  const { send } = useEventMachine(treeMachine, {
     focusedId: focusedId ?? null,
     selectedId: selectedId ?? null,
     expandedIds: expandedIds ?? new Set(),
-
-    setFocusedId: (id) => setFocusedId(id),
-    setSelectedId: (id) => setSelectedId(id),
-    setExpandedIds: (ids) => setExpandedIds(ids),
-
+    onFocusedIdChange: (id) => setFocusedId(id),
+    onSelectedIdChange: (id) => setSelectedId(id),
+    onExpandedIdsChange: (ids) => setExpandedIds(ids),
     getVisibleItemIds: () => getVisibleItemIds(storeRef.current, expandedIdsRef.current ?? new Set()),
     getChildrenIds: (nodeId) => storeRef.current.getChildrenByRole(nodeId, 'item').map((n) => n.id),
     getParentId: (nodeId) => {
@@ -185,10 +178,7 @@ function RootInner({
     },
     isLeaf: (nodeId) => storeRef.current.getChildrenByRole(nodeId, 'item').length === 0,
     getItemElement: (nodeId) => storeRef.current.getElement(nodeId, 'item'),
-  }
-
-  // Event machine
-  const { send } = useEventMachine(treeMachine, machineCtx)
+  })
 
   // 키보드 핸들러
   const handleKeyDown = (e: React.KeyboardEvent) => {

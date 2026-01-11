@@ -19,17 +19,27 @@ export type PaginationEvents = {
 }
 
 // ============================================
-// Context
+// Input
 // ============================================
 
-export type PaginationContext = {
+export type PaginationInput = {
   // State
   page: number
   pageSize: number
   totalCount: number
 
-  // Setters
-  setPage: (page: number) => void
+  // Callbacks
+  onPageChange: (page: number) => void
+}
+
+// ============================================
+// Computed
+// ============================================
+
+export type PaginationComputed = {
+  totalPages: number
+  hasPrev: boolean
+  hasNext: boolean
 }
 
 // ============================================
@@ -37,18 +47,26 @@ export type PaginationContext = {
 // ============================================
 
 export const paginationMachine = createEventMachine<{
-  input: PaginationContext
+  input: PaginationInput
   events: PaginationEvents
+  computed: PaginationComputed
   actions: 'noop' | 'goToPage' | 'goPrev' | 'goNext'
 }>({
+  computed: {
+    totalPages: (input) => Math.ceil(input.totalCount / input.pageSize),
+    hasPrev: (input) => input.page > 1,
+    hasNext: (input) =>
+      input.page < Math.ceil(input.totalCount / input.pageSize),
+  },
+
   on: {
     GO_TO_PAGE: 'goToPage',
     GO_PREV: [
-      { when: (ctx) => ctx.page <= 1, do: 'noop' },
+      { when: (context) => !context.hasPrev, do: 'noop' },
       { do: 'goPrev' },
     ],
     GO_NEXT: [
-      { when: (ctx) => ctx.page >= getTotalPages(ctx.totalCount, ctx.pageSize), do: 'noop' },
+      { when: (context) => !context.hasNext, do: 'noop' },
       { do: 'goNext' },
     ],
   },
@@ -56,19 +74,18 @@ export const paginationMachine = createEventMachine<{
   actions: {
     noop: () => {},
 
-    goToPage: (ctx, payload: { page: number }) => {
+    goToPage: (context, payload: { page: number }) => {
       const { page } = payload
-      const totalPages = getTotalPages(ctx.totalCount, ctx.pageSize)
-      const clampedPage = Math.max(1, Math.min(page, totalPages))
-      ctx.setPage(clampedPage)
+      const clampedPage = Math.max(1, Math.min(page, context.totalPages))
+      context.onPageChange(clampedPage)
     },
 
-    goPrev: (ctx) => {
-      ctx.setPage(ctx.page - 1)
+    goPrev: (context) => {
+      context.onPageChange(context.page - 1)
     },
 
-    goNext: (ctx) => {
-      ctx.setPage(ctx.page + 1)
+    goNext: (context) => {
+      context.onPageChange(context.page + 1)
     },
   },
 })

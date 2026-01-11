@@ -31,23 +31,32 @@ export type MenuEvents = {
   CLOSE_SUBMENU: undefined // 현재 서브메뉴 닫기
 }
 
-export type MenuContext = {
+export type MenuInput = {
   // State
   openedPath: MenuId[]
   focusedItemId: ItemId | null
-  setOpenedPath: (path: MenuId[]) => void
-  setFocusedItemId: (id: ItemId | null) => void
+  onOpenedPathChange: (path: MenuId[]) => void
+  onFocusedItemIdChange: (id: ItemId | null) => void
 
   // Helpers (lazy evaluation)
-  getActiveMenuId: () => MenuId | null
   getActiveMenuItems: () => MenuItem[]
-  isActiveMenuSub: () => boolean
   isItemSubTrigger: (itemId: ItemId) => boolean
 
   // DOM helpers
   getItemElement: (itemId: ItemId) => HTMLElement | null
   getTriggerElement: (menuId: MenuId) => HTMLElement | null
   getAllElements: () => Map<string, HTMLElement>
+}
+
+// ============================================
+// Computed
+// ============================================
+
+export type MenuComputed = {
+  activeMenuId: MenuId | null
+  rootMenuId: MenuId | null
+  isActiveMenuSub: boolean
+  isOpen: boolean
 }
 
 // ============================================
@@ -69,10 +78,18 @@ type MenuActions =
   | 'closeActiveSubmenu'
 
 export const menuMachine = createEventMachine<{
-  input: MenuContext
+  input: MenuInput
   events: MenuEvents
+  computed: MenuComputed
   actions: MenuActions
 }>({
+  computed: {
+    activeMenuId: (input) => input.openedPath[input.openedPath.length - 1] ?? null,
+    rootMenuId: (input) => input.openedPath[0] ?? null,
+    isActiveMenuSub: (input) => input.openedPath.length > 1,
+    isOpen: (input) => input.openedPath.length > 0,
+  },
+
   on: {
     OPEN_MENU: 'openMenu',
     CLOSE_MENU: 'closeMenu',
@@ -87,15 +104,15 @@ export const menuMachine = createEventMachine<{
 
     OPEN_SUBMENU: [
       {
-        when: (ctx) =>
-          ctx.focusedItemId !== null && ctx.isItemSubTrigger(ctx.focusedItemId),
+        when: (context) =>
+          context.focusedItemId !== null && context.isItemSubTrigger(context.focusedItemId),
         do: 'openFocusedSubmenu',
       },
       { do: 'noop' },
     ],
 
     CLOSE_SUBMENU: [
-      { when: (ctx) => ctx.isActiveMenuSub(), do: 'closeActiveSubmenu' },
+      { when: (context) => context.isActiveMenuSub, do: 'closeActiveSubmenu' },
       { do: 'noop' },
     ],
   },
@@ -103,19 +120,19 @@ export const menuMachine = createEventMachine<{
   effects: [
     {
       // 메뉴 열림 상태 감시 → outside click listener
-      watch: (ctx) => ctx.openedPath.length > 0,
-      enter: (ctx) => {
+      watch: (context) => context.isOpen,
+      enter: (context) => {
         const handleOutsideClick = (event: PointerEvent) => {
           const target = event.target as Node | null
           if (!target) return
 
-          const elements = ctx.getAllElements()
+          const elements = context.getAllElements()
           for (const element of elements.values()) {
             if (element.contains(target)) return
           }
 
-          ctx.setOpenedPath([])
-          ctx.setFocusedItemId(null)
+          context.onOpenedPathChange([])
+          context.onFocusedItemIdChange(null)
         }
 
         document.addEventListener('pointerdown', handleOutsideClick, true)
@@ -126,10 +143,10 @@ export const menuMachine = createEventMachine<{
     },
     {
       // 포커스 변경 감시 → DOM focus 동기화
-      watch: (ctx) => ctx.focusedItemId,
-      change: (ctx) => {
-        if (ctx.focusedItemId) {
-          ctx.getItemElement(ctx.focusedItemId)?.focus()
+      watch: (context) => context.focusedItemId,
+      change: (context) => {
+        if (context.focusedItemId) {
+          context.getItemElement(context.focusedItemId)?.focus()
         }
       },
     },
@@ -138,131 +155,128 @@ export const menuMachine = createEventMachine<{
   actions: {
     noop: () => {},
 
-    openMenu: (ctx, payload: { menuId: MenuId; parentMenuId: MenuId | null }) => {
+    openMenu: (context, payload: { menuId: MenuId; parentMenuId: MenuId | null }) => {
       const { menuId, parentMenuId } = payload
 
       if (parentMenuId === null) {
         // 루트 메뉴
-        ctx.setOpenedPath([menuId])
+        context.onOpenedPathChange([menuId])
       } else {
         // 서브메뉴: 부모까지의 경로 유지 + 새 메뉴 추가
-        const parentIndex = ctx.openedPath.indexOf(parentMenuId)
+        const parentIndex = context.openedPath.indexOf(parentMenuId)
         if (parentIndex === -1) {
-          ctx.setOpenedPath([parentMenuId, menuId])
+          context.onOpenedPathChange([parentMenuId, menuId])
         } else {
-          const basePath = ctx.openedPath.slice(0, parentIndex + 1)
-          ctx.setOpenedPath([...basePath, menuId])
+          const basePath = context.openedPath.slice(0, parentIndex + 1)
+          context.onOpenedPathChange([...basePath, menuId])
         }
       }
     },
 
-    closeMenu: (ctx, payload: { menuId: MenuId }) => {
+    closeMenu: (context, payload: { menuId: MenuId }) => {
       const { menuId } = payload
-      const index = ctx.openedPath.indexOf(menuId)
+      const index = context.openedPath.indexOf(menuId)
       if (index !== -1) {
-        ctx.setOpenedPath(ctx.openedPath.slice(0, index))
+        context.onOpenedPathChange(context.openedPath.slice(0, index))
       }
     },
 
-    closeAll: (ctx) => {
-      ctx.setOpenedPath([])
-      ctx.setFocusedItemId(null)
+    closeAll: (context) => {
+      context.onOpenedPathChange([])
+      context.onFocusedItemIdChange(null)
     },
 
-    closeAndFocusTrigger: (ctx, payload: { menuId: MenuId }) => {
+    closeAndFocusTrigger: (context, payload: { menuId: MenuId }) => {
       const { menuId } = payload
-      const index = ctx.openedPath.indexOf(menuId)
+      const index = context.openedPath.indexOf(menuId)
       if (index !== -1) {
-        ctx.setOpenedPath(ctx.openedPath.slice(0, index))
+        context.onOpenedPathChange(context.openedPath.slice(0, index))
         // 닫히는 메뉴의 ID가 부모 메뉴에서의 서브트리거 아이템 ID
-        ctx.setFocusedItemId(menuId)
+        context.onFocusedItemIdChange(menuId)
 
         // 루트 메뉴가 닫히면 트리거로 포커스
         if (index === 0) {
-          ctx.getTriggerElement(menuId)?.focus()
+          context.getTriggerElement(menuId)?.focus()
         }
       }
     },
 
-    setFocus: (ctx, payload: { itemId: ItemId | null }) => {
-      ctx.setFocusedItemId(payload.itemId)
+    setFocus: (context, payload: { itemId: ItemId | null }) => {
+      context.onFocusedItemIdChange(payload.itemId)
     },
 
-    focusNext: (ctx) => {
-      const items = ctx.getActiveMenuItems()
+    focusNext: (context) => {
+      const items = context.getActiveMenuItems()
       if (items.length === 0) return
 
-      if (ctx.focusedItemId === null) {
-        ctx.setFocusedItemId(items[0].id)
+      if (context.focusedItemId === null) {
+        context.onFocusedItemIdChange(items[0].id)
         return
       }
 
-      const currentIndex = items.findIndex((item) => item.id === ctx.focusedItemId)
+      const currentIndex = items.findIndex((item) => item.id === context.focusedItemId)
       if (currentIndex === -1) {
-        ctx.setFocusedItemId(items[0].id)
+        context.onFocusedItemIdChange(items[0].id)
         return
       }
 
       const nextIndex = (currentIndex + 1) % items.length
-      ctx.setFocusedItemId(items[nextIndex].id)
+      context.onFocusedItemIdChange(items[nextIndex].id)
     },
 
-    focusPrev: (ctx) => {
-      const items = ctx.getActiveMenuItems()
+    focusPrev: (context) => {
+      const items = context.getActiveMenuItems()
       if (items.length === 0) return
 
-      if (ctx.focusedItemId === null) {
-        ctx.setFocusedItemId(items[items.length - 1].id)
+      if (context.focusedItemId === null) {
+        context.onFocusedItemIdChange(items[items.length - 1].id)
         return
       }
 
-      const currentIndex = items.findIndex((item) => item.id === ctx.focusedItemId)
+      const currentIndex = items.findIndex((item) => item.id === context.focusedItemId)
       if (currentIndex === -1) {
-        ctx.setFocusedItemId(items[0].id)
+        context.onFocusedItemIdChange(items[0].id)
         return
       }
 
       const prevIndex = (currentIndex - 1 + items.length) % items.length
-      ctx.setFocusedItemId(items[prevIndex].id)
+      context.onFocusedItemIdChange(items[prevIndex].id)
     },
 
-    focusFirst: (ctx) => {
-      const items = ctx.getActiveMenuItems()
+    focusFirst: (context) => {
+      const items = context.getActiveMenuItems()
       if (items.length > 0) {
-        ctx.setFocusedItemId(items[0].id)
+        context.onFocusedItemIdChange(items[0].id)
       }
     },
 
-    focusLast: (ctx) => {
-      const items = ctx.getActiveMenuItems()
+    focusLast: (context) => {
+      const items = context.getActiveMenuItems()
       if (items.length > 0) {
-        ctx.setFocusedItemId(items[items.length - 1].id)
+        context.onFocusedItemIdChange(items[items.length - 1].id)
       }
     },
 
-    openFocusedSubmenu: (ctx) => {
-      const focusedId = ctx.focusedItemId
+    openFocusedSubmenu: (context) => {
+      const focusedId = context.focusedItemId
       if (!focusedId) return
-
-      const activeMenuId = ctx.getActiveMenuId()
-      if (!activeMenuId) return
+      if (!context.activeMenuId) return
 
       // focusedId가 서브메뉴의 menuId
-      const parentIndex = ctx.openedPath.indexOf(activeMenuId)
+      const parentIndex = context.openedPath.indexOf(context.activeMenuId)
       if (parentIndex === -1) return
 
-      const basePath = ctx.openedPath.slice(0, parentIndex + 1)
-      ctx.setOpenedPath([...basePath, focusedId])
+      const basePath = context.openedPath.slice(0, parentIndex + 1)
+      context.onOpenedPathChange([...basePath, focusedId])
     },
 
-    closeActiveSubmenu: (ctx) => {
-      const activeMenuId = ctx.getActiveMenuId()
-      if (!activeMenuId) return
+    closeActiveSubmenu: (context) => {
+      if (!context.activeMenuId) return
 
-      const index = ctx.openedPath.indexOf(activeMenuId)
+      const index = context.openedPath.indexOf(context.activeMenuId)
       if (index > 0) {
-        ctx.setOpenedPath(ctx.openedPath.slice(0, index))
-        ctx.setFocusedItemId(activeMenuId)
+        context.onOpenedPathChange(context.openedPath.slice(0, index))
+        context.onFocusedItemIdChange(context.activeMenuId)
       }
     },
   },

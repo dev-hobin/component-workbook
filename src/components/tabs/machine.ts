@@ -26,14 +26,14 @@ export type TabsEvents = {
 // Context
 // ============================================
 
-export type TabsContext = {
+export type TabsInput = {
   // State
   activeValue: TabValue | null
   focusedValue: TabValue | null
 
-  // Setters
-  setActiveValue: (value: TabValue | null) => void
-  setFocusedValue: (value: TabValue | null) => void
+  // Callbacks
+  onActiveValueChange: (value: TabValue | null) => void
+  onFocusedValueChange: (value: TabValue | null) => void
 
   // Lazy getters
   getEnabledTabs: () => Array<{ value: TabValue }>
@@ -47,7 +47,7 @@ export type TabsContext = {
 // ============================================
 
 export const tabsMachine = createEventMachine<{
-  input: TabsContext
+  input: TabsInput
   events: TabsEvents
   actions: 'select' | 'focus' | 'blur' | 'focusNext' | 'focusPrev' | 'focusFirst' | 'focusLast'
 }>({
@@ -64,80 +64,80 @@ export const tabsMachine = createEventMachine<{
   effects: [
     {
       // 포커스 변경 시 DOM 동기화
-      watch: (ctx) => ctx.focusedValue,
-      change: (ctx) => {
-        if (ctx.focusedValue !== null) {
-          ctx.getTabElement(ctx.focusedValue)?.focus()
+      watch: (context) => context.focusedValue,
+      change: (context) => {
+        if (context.focusedValue !== null) {
+          context.getTabElement(context.focusedValue)?.focus()
         }
       },
     },
   ],
 
   actions: {
-    select: (ctx, payload: { value: TabValue }) => {
+    select: (context, payload: { value: TabValue }) => {
       const { value } = payload
-      ctx.setActiveValue(value)
-      ctx.setFocusedValue(value)
+      context.onActiveValueChange(value)
+      context.onFocusedValueChange(value)
     },
 
-    focus: (ctx, payload: { value: TabValue }) => {
+    focus: (context, payload: { value: TabValue }) => {
       const { value } = payload
-      ctx.setFocusedValue(value)
+      context.onFocusedValueChange(value)
     },
 
-    blur: (ctx) => {
-      ctx.setFocusedValue(null)
+    blur: (context) => {
+      context.onFocusedValueChange(null)
     },
 
-    focusNext: (ctx) => {
-      const tabs = ctx.getEnabledTabs()
+    focusNext: (context) => {
+      const tabs = context.getEnabledTabs()
       if (tabs.length === 0) return
 
-      if (ctx.focusedValue === null) {
-        ctx.setFocusedValue(tabs[0].value)
+      if (context.focusedValue === null) {
+        context.onFocusedValueChange(tabs[0].value)
         return
       }
 
-      const currentIndex = tabs.findIndex((t) => t.value === ctx.focusedValue)
+      const currentIndex = tabs.findIndex((t) => t.value === context.focusedValue)
       if (currentIndex === -1) {
-        ctx.setFocusedValue(tabs[0].value)
+        context.onFocusedValueChange(tabs[0].value)
         return
       }
 
       const nextIndex = (currentIndex + 1) % tabs.length
-      ctx.setFocusedValue(tabs[nextIndex].value)
+      context.onFocusedValueChange(tabs[nextIndex].value)
     },
 
-    focusPrev: (ctx) => {
-      const tabs = ctx.getEnabledTabs()
+    focusPrev: (context) => {
+      const tabs = context.getEnabledTabs()
       if (tabs.length === 0) return
 
-      if (ctx.focusedValue === null) {
-        ctx.setFocusedValue(tabs[tabs.length - 1].value)
+      if (context.focusedValue === null) {
+        context.onFocusedValueChange(tabs[tabs.length - 1].value)
         return
       }
 
-      const currentIndex = tabs.findIndex((t) => t.value === ctx.focusedValue)
+      const currentIndex = tabs.findIndex((t) => t.value === context.focusedValue)
       if (currentIndex === -1) {
-        ctx.setFocusedValue(tabs[0].value)
+        context.onFocusedValueChange(tabs[0].value)
         return
       }
 
       const prevIndex = (currentIndex - 1 + tabs.length) % tabs.length
-      ctx.setFocusedValue(tabs[prevIndex].value)
+      context.onFocusedValueChange(tabs[prevIndex].value)
     },
 
-    focusFirst: (ctx) => {
-      const tabs = ctx.getEnabledTabs()
+    focusFirst: (context) => {
+      const tabs = context.getEnabledTabs()
       if (tabs.length > 0) {
-        ctx.setFocusedValue(tabs[0].value)
+        context.onFocusedValueChange(tabs[0].value)
       }
     },
 
-    focusLast: (ctx) => {
-      const tabs = ctx.getEnabledTabs()
+    focusLast: (context) => {
+      const tabs = context.getEnabledTabs()
       if (tabs.length > 0) {
-        ctx.setFocusedValue(tabs[tabs.length - 1].value)
+        context.onFocusedValueChange(tabs[tabs.length - 1].value)
       }
     },
   },

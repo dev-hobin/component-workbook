@@ -11,7 +11,6 @@ import { useEventMachine, type Send } from '../../event-machine'
 import {
   accordionMachine,
   isExpanded,
-  type AccordionContext,
   type AccordionEvents,
 } from './machine'
 import { composeRefs } from '../../utils/compose-refs'
@@ -130,12 +129,12 @@ const RootInner = forwardRef<HTMLDivElement, RootProps>(
     // Internal focused state
     const [focusedId, setFocusedId] = useState<string | null>(null)
 
-    // Build context for machine
-    const machineCtx: AccordionContext = {
+    // Event machine
+    const { send } = useEventMachine(accordionMachine, {
       expandedIds,
       focusedId,
-      setExpandedIds,
-      setFocusedId,
+      onExpandedIdsChange: setExpandedIds,
+      onFocusedIdChange: setFocusedId,
       multiple,
       collapsible,
       disabled,
@@ -146,10 +145,7 @@ const RootInner = forwardRef<HTMLDivElement, RootProps>(
           .map((item) => item.id)
       },
       getTriggerElement: (itemId) => store.getElement(itemId, 'trigger'),
-    }
-
-    // Event machine
-    const { send } = useEventMachine(accordionMachine, machineCtx)
+    })
 
     // Keyboard handler
     const handleKeyDown = (e: React.KeyboardEvent) => {
