@@ -6,7 +6,11 @@ const components = [
     path: '/accordion',
     description: 'Vertically stacked set of interactive headings that reveal content.',
   },
-  // 추후 컴포넌트 추가
+  {
+    name: 'Tabs',
+    path: '/tabs',
+    description: 'A set of layered sections of content that display one panel at a time.',
+  },
 ]
 
 export default function HomePage() {

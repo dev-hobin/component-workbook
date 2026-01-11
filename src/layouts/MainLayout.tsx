@@ -3,7 +3,7 @@ import { Link, Outlet, useLocation } from 'react-router-dom'
 const navItems = [
   { name: 'Home', path: '/' },
   { name: 'Accordion', path: '/accordion' },
-  // 추후 컴포넌트 추가
+  { name: 'Tabs', path: '/tabs' },
 ]
 
 export default function MainLayout() {

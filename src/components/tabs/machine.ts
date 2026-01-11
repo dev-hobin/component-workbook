@@ -4,43 +4,60 @@ import { createMachine } from 'controlled-machine'
 // Types
 // ============================================
 
-export type TabValue = string | number
-
-export type TabsOrientation = 'horizontal' | 'vertical'
-
-// ============================================
-// Events
-// ============================================
-
-export type TabsEvents = {
-  SELECT: { value: TabValue }
-  FOCUS: { value: TabValue }
-  BLUR: undefined
-  FOCUS_NEXT: undefined
-  FOCUS_PREV: undefined
-  FOCUS_FIRST: undefined
-  FOCUS_LAST: undefined
-}
-
-// ============================================
-// Context
-// ============================================
+export type TabValue = string
 
 export type TabsInput = {
   // State
-  activeValue: TabValue | null
-  focusedValue: TabValue | null
+  value: TabValue
+  onValueChange: (value: TabValue) => void
 
-  // Callbacks
-  onActiveValueChange: (value: TabValue | null) => void
+  // Focus tracking for keyboard navigation
+  focusedValue: TabValue | null
   onFocusedValueChange: (value: TabValue | null) => void
 
-  // Lazy getters
-  getEnabledTabs: () => Array<{ value: TabValue }>
+  // Options
+  activationMode: 'automatic' | 'manual'
+  loop: boolean
 
-  // DOM helpers
-  getTabElement: (value: TabValue) => HTMLElement | null
+  // Lazy helpers (computed from NodeStore in shell)
+  getEnabledValues: () => TabValue[]
 }
+
+export type TabsEvents = {
+  // Tab selection
+  SELECT: { value: TabValue }
+
+  // Focus tracking (syncs focusedValue when trigger receives focus)
+  FOCUS: { value: TabValue }
+
+  // Keyboard navigation (W3C APG)
+  FOCUS_NEXT: Record<string, never>
+  FOCUS_PREV: Record<string, never>
+  FOCUS_FIRST: Record<string, never>
+  FOCUS_LAST: Record<string, never>
+
+  // Manual mode activation (Enter/Space)
+  ACTIVATE_FOCUSED: Record<string, never>
+}
+
+export type TabsComputed = {
+  // Navigation helpers
+  enabledValues: TabValue[]
+  currentIndex: number
+  nextValue: TabValue | null
+  prevValue: TabValue | null
+  firstValue: TabValue | null
+  lastValue: TabValue | null
+}
+
+export type TabsActions =
+  | 'select'
+  | 'focus'
+  | 'focusNext'
+  | 'focusPrev'
+  | 'focusFirst'
+  | 'focusLast'
+  | 'activateFocused'
 
 // ============================================
 // Machine
@@ -49,101 +66,163 @@ export type TabsInput = {
 export const tabsMachine = createMachine<{
   input: TabsInput
   events: TabsEvents
-  actions: 'setActive' | 'setFocus' | 'clearFocus' | 'focusNext' | 'focusPrev' | 'focusFirst' | 'focusLast'
+  computed: TabsComputed
+  actions: TabsActions
 }>({
+  computed: {
+    enabledValues: (context) => context.getEnabledValues(),
+
+    currentIndex: (context) => {
+      const enabledValues = context.getEnabledValues()
+      // Use focusedValue for navigation, fallback to value
+      const current = context.focusedValue ?? context.value
+      return enabledValues.indexOf(current)
+    },
+
+    nextValue: (context) => {
+      const enabledValues = context.getEnabledValues()
+      if (enabledValues.length === 0) return null
+
+      const currentIndex = enabledValues.indexOf(context.focusedValue ?? context.value)
+      if (currentIndex === -1) return enabledValues[0]
+
+      if (context.loop) {
+        return enabledValues[(currentIndex + 1) % enabledValues.length]
+      }
+      return currentIndex < enabledValues.length - 1
+        ? enabledValues[currentIndex + 1]
+        : null
+    },
+
+    prevValue: (context) => {
+      const enabledValues = context.getEnabledValues()
+      if (enabledValues.length === 0) return null
+
+      const currentIndex = enabledValues.indexOf(context.focusedValue ?? context.value)
+      if (currentIndex === -1) return enabledValues[enabledValues.length - 1]
+
+      if (context.loop) {
+        return enabledValues[
+          (currentIndex - 1 + enabledValues.length) % enabledValues.length
+        ]
+      }
+      return currentIndex > 0 ? enabledValues[currentIndex - 1] : null
+    },
+
+    firstValue: (context) => {
+      const enabledValues = context.getEnabledValues()
+      return enabledValues[0] ?? null
+    },
+
+    lastValue: (context) => {
+      const enabledValues = context.getEnabledValues()
+      return enabledValues[enabledValues.length - 1] ?? null
+    },
+  },
+
   on: {
-    SELECT: ['setActive', 'setFocus'],  // 선택 시 활성화 + 포커스
-    FOCUS: 'setFocus',
-    BLUR: 'clearFocus',
+    SELECT: 'select',
+    FOCUS: 'focus',
     FOCUS_NEXT: 'focusNext',
     FOCUS_PREV: 'focusPrev',
     FOCUS_FIRST: 'focusFirst',
     FOCUS_LAST: 'focusLast',
+    ACTIVATE_FOCUSED: 'activateFocused',
   },
 
-  effects: [
-    {
-      // 포커스 변경 시 DOM 동기화
-      watch: (context) => context.focusedValue,
-      change: (context) => {
-        if (context.focusedValue !== null) {
-          context.getTabElement(context.focusedValue)?.focus()
-        }
-      },
-    },
-  ],
-
   actions: {
-    setActive: (context, payload: { value: TabValue }) => {
-      context.onActiveValueChange(payload.value)
+    select: (context, payload: { value: TabValue }) => {
+      if (payload.value !== context.value) {
+        context.onValueChange(payload.value)
+      }
     },
 
-    setFocus: (context, payload: { value: TabValue }) => {
-      context.onFocusedValueChange(payload.value)
-    },
-
-    clearFocus: (context) => {
-      context.onFocusedValueChange(null)
+    focus: (context, payload: { value: TabValue }) => {
+      // Sync focusedValue when trigger receives focus (click, programmatic focus, etc.)
+      if (payload.value !== context.focusedValue) {
+        context.onFocusedValueChange(payload.value)
+      }
     },
 
     focusNext: (context) => {
-      const tabs = context.getEnabledTabs()
-      if (tabs.length === 0) return
+      const enabledValues = context.getEnabledValues()
+      if (enabledValues.length === 0) return
 
-      if (context.focusedValue === null) {
-        context.onFocusedValueChange(tabs[0].value)
-        return
-      }
+      const currentIndex = enabledValues.indexOf(context.focusedValue ?? context.value)
+      let nextIndex: number
 
-      const currentIndex = tabs.findIndex((t) => t.value === context.focusedValue)
       if (currentIndex === -1) {
-        context.onFocusedValueChange(tabs[0].value)
-        return
+        nextIndex = 0
+      } else if (context.loop) {
+        nextIndex = (currentIndex + 1) % enabledValues.length
+      } else {
+        nextIndex = Math.min(currentIndex + 1, enabledValues.length - 1)
       }
 
-      const nextIndex = (currentIndex + 1) % tabs.length
-      context.onFocusedValueChange(tabs[nextIndex].value)
+      const nextValue = enabledValues[nextIndex]
+      context.onFocusedValueChange(nextValue)
+
+      // Automatic mode: also activate
+      if (context.activationMode === 'automatic' && nextValue !== context.value) {
+        context.onValueChange(nextValue)
+      }
     },
 
     focusPrev: (context) => {
-      const tabs = context.getEnabledTabs()
-      if (tabs.length === 0) return
+      const enabledValues = context.getEnabledValues()
+      if (enabledValues.length === 0) return
 
-      if (context.focusedValue === null) {
-        context.onFocusedValueChange(tabs[tabs.length - 1].value)
-        return
-      }
+      const currentIndex = enabledValues.indexOf(context.focusedValue ?? context.value)
+      let prevIndex: number
 
-      const currentIndex = tabs.findIndex((t) => t.value === context.focusedValue)
       if (currentIndex === -1) {
-        context.onFocusedValueChange(tabs[0].value)
-        return
+        prevIndex = enabledValues.length - 1
+      } else if (context.loop) {
+        prevIndex = (currentIndex - 1 + enabledValues.length) % enabledValues.length
+      } else {
+        prevIndex = Math.max(currentIndex - 1, 0)
       }
 
-      const prevIndex = (currentIndex - 1 + tabs.length) % tabs.length
-      context.onFocusedValueChange(tabs[prevIndex].value)
+      const prevValue = enabledValues[prevIndex]
+      context.onFocusedValueChange(prevValue)
+
+      // Automatic mode: also activate
+      if (context.activationMode === 'automatic' && prevValue !== context.value) {
+        context.onValueChange(prevValue)
+      }
     },
 
     focusFirst: (context) => {
-      const tabs = context.getEnabledTabs()
-      if (tabs.length > 0) {
-        context.onFocusedValueChange(tabs[0].value)
+      const enabledValues = context.getEnabledValues()
+      if (enabledValues.length === 0) return
+
+      const firstValue = enabledValues[0]
+      context.onFocusedValueChange(firstValue)
+
+      // Automatic mode: also activate
+      if (context.activationMode === 'automatic' && firstValue !== context.value) {
+        context.onValueChange(firstValue)
       }
     },
 
     focusLast: (context) => {
-      const tabs = context.getEnabledTabs()
-      if (tabs.length > 0) {
-        context.onFocusedValueChange(tabs[tabs.length - 1].value)
+      const enabledValues = context.getEnabledValues()
+      if (enabledValues.length === 0) return
+
+      const lastValue = enabledValues[enabledValues.length - 1]
+      context.onFocusedValueChange(lastValue)
+
+      // Automatic mode: also activate
+      if (context.activationMode === 'automatic' && lastValue !== context.value) {
+        context.onValueChange(lastValue)
+      }
+    },
+
+    activateFocused: (context) => {
+      // Manual mode: Enter/Space to activate focused tab
+      if (context.focusedValue && context.focusedValue !== context.value) {
+        context.onValueChange(context.focusedValue)
       }
     },
   },
 })
-
-// ============================================
-// Query Helpers
-// ============================================
-
-export function isActive(activeValue: TabValue | null, value: TabValue): boolean {
-  return activeValue === value
-}

@@ -11,14 +11,14 @@ export function UncontrolledExample() {
           </h2>
           <Tabs.Root defaultValue="account" orientation="horizontal">
             <Tabs.List>
-              <Tabs.Tab value="account">Account</Tabs.Tab>
-              <Tabs.Tab value="password">Password</Tabs.Tab>
-              <Tabs.Tab value="notifications">Notifications</Tabs.Tab>
-              <Tabs.Tab value="advanced" disabled>
+              <Tabs.Trigger value="account">Account</Tabs.Trigger>
+              <Tabs.Trigger value="password">Password</Tabs.Trigger>
+              <Tabs.Trigger value="notifications">Notifications</Tabs.Trigger>
+              <Tabs.Trigger value="advanced" disabled>
                 Advanced (Disabled)
-              </Tabs.Tab>
+              </Tabs.Trigger>
             </Tabs.List>
-            <Tabs.Panel value="account">
+            <Tabs.Content value="account">
               <h3 className="font-semibold mb-2">Account Settings</h3>
               <p>Manage your account information and preferences here.</p>
               <ul className="mt-4 list-disc list-inside space-y-1">
@@ -26,8 +26,8 @@ export function UncontrolledExample() {
                 <li>Username</li>
                 <li>Profile picture</li>
               </ul>
-            </Tabs.Panel>
-            <Tabs.Panel value="password">
+            </Tabs.Content>
+            <Tabs.Content value="password">
               <h3 className="font-semibold mb-2">Password Settings</h3>
               <p>Change your password and security settings.</p>
               <form className="mt-4 space-y-2">
@@ -46,8 +46,8 @@ export function UncontrolledExample() {
                   />
                 </div>
               </form>
-            </Tabs.Panel>
-            <Tabs.Panel value="notifications">
+            </Tabs.Content>
+            <Tabs.Content value="notifications">
               <h3 className="font-semibold mb-2">Notification Preferences</h3>
               <p>Configure how and when you receive notifications.</p>
               <div className="mt-4 space-y-2">
@@ -64,10 +64,10 @@ export function UncontrolledExample() {
                   SMS notifications
                 </label>
               </div>
-            </Tabs.Panel>
-            <Tabs.Panel value="advanced">
+            </Tabs.Content>
+            <Tabs.Content value="advanced">
               <p>This panel is disabled.</p>
-            </Tabs.Panel>
+            </Tabs.Content>
           </Tabs.Root>
         </div>
 
@@ -81,25 +81,25 @@ export function UncontrolledExample() {
             className="flex gap-4"
           >
             <Tabs.List className="shrink-0">
-              <Tabs.Tab value="overview">Overview</Tabs.Tab>
-              <Tabs.Tab value="analytics">Analytics</Tabs.Tab>
-              <Tabs.Tab value="reports">Reports</Tabs.Tab>
+              <Tabs.Trigger value="overview">Overview</Tabs.Trigger>
+              <Tabs.Trigger value="analytics">Analytics</Tabs.Trigger>
+              <Tabs.Trigger value="reports">Reports</Tabs.Trigger>
             </Tabs.List>
             <div className="flex-1">
-              <Tabs.Panel value="overview">
+              <Tabs.Content value="overview">
                 <h3 className="font-semibold mb-2">Dashboard Overview</h3>
                 <p>
                   View your dashboard metrics and key information at a glance.
                 </p>
-              </Tabs.Panel>
-              <Tabs.Panel value="analytics">
+              </Tabs.Content>
+              <Tabs.Content value="analytics">
                 <h3 className="font-semibold mb-2">Analytics</h3>
                 <p>Deep dive into your data with advanced analytics tools.</p>
-              </Tabs.Panel>
-              <Tabs.Panel value="reports">
+              </Tabs.Content>
+              <Tabs.Content value="reports">
                 <h3 className="font-semibold mb-2">Reports</h3>
                 <p>Generate and view detailed reports on your activities.</p>
-              </Tabs.Panel>
+              </Tabs.Content>
             </div>
           </Tabs.Root>
         </div>
@@ -109,8 +109,8 @@ export function UncontrolledExample() {
 }
 
 export function ControlledExample() {
-  const [activeTab, setActiveTab] = useState<string | number>('general')
-  const [secondTabGroup, setSecondTabGroup] = useState<string | number>('tab-1')
+  const [activeTab, setActiveTab] = useState('general')
+  const [secondTabGroup, setSecondTabGroup] = useState('tab-1')
 
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-8">
@@ -127,12 +127,12 @@ export function ControlledExample() {
             orientation="horizontal"
           >
             <Tabs.List>
-              <Tabs.Tab value="general">General</Tabs.Tab>
-              <Tabs.Tab value="appearance">Appearance</Tabs.Tab>
-              <Tabs.Tab value="accessibility">Accessibility</Tabs.Tab>
-              <Tabs.Tab value="privacy">Privacy</Tabs.Tab>
+              <Tabs.Trigger value="general">General</Tabs.Trigger>
+              <Tabs.Trigger value="appearance">Appearance</Tabs.Trigger>
+              <Tabs.Trigger value="accessibility">Accessibility</Tabs.Trigger>
+              <Tabs.Trigger value="privacy">Privacy</Tabs.Trigger>
             </Tabs.List>
-            <Tabs.Panel value="general">
+            <Tabs.Content value="general">
               <h3 className="font-semibold mb-2">General Settings</h3>
               <p>Configure general application settings and preferences.</p>
               <div className="mt-4">
@@ -143,8 +143,8 @@ export function ControlledExample() {
                   Go to Appearance Tab (Programmatically)
                 </button>
               </div>
-            </Tabs.Panel>
-            <Tabs.Panel value="appearance">
+            </Tabs.Content>
+            <Tabs.Content value="appearance">
               <h3 className="font-semibold mb-2">Appearance Settings</h3>
               <p>Customize the look and feel of your application.</p>
               <div className="mt-4 space-y-2">
@@ -161,8 +161,8 @@ export function ControlledExample() {
                   System preference
                 </label>
               </div>
-            </Tabs.Panel>
-            <Tabs.Panel value="accessibility">
+            </Tabs.Content>
+            <Tabs.Content value="accessibility">
               <h3 className="font-semibold mb-2">Accessibility Options</h3>
               <p>
                 Configure accessibility features to enhance your experience.
@@ -181,8 +181,8 @@ export function ControlledExample() {
                   Screen reader optimizations
                 </label>
               </div>
-            </Tabs.Panel>
-            <Tabs.Panel value="privacy">
+            </Tabs.Content>
+            <Tabs.Content value="privacy">
               <h3 className="font-semibold mb-2">Privacy & Security</h3>
               <p>Manage your privacy settings and data preferences.</p>
               <div className="mt-4 space-y-3">
@@ -203,7 +203,7 @@ export function ControlledExample() {
                   Back to General
                 </button>
               </div>
-            </Tabs.Panel>
+            </Tabs.Content>
           </Tabs.Root>
         </div>
 
@@ -223,13 +223,13 @@ export function ControlledExample() {
                 orientation="horizontal"
               >
                 <Tabs.List>
-                  <Tabs.Tab value="general">General</Tabs.Tab>
-                  <Tabs.Tab value="appearance">Appearance</Tabs.Tab>
+                  <Tabs.Trigger value="general">General</Tabs.Trigger>
+                  <Tabs.Trigger value="appearance">Appearance</Tabs.Trigger>
                 </Tabs.List>
-                <Tabs.Panel value="general">First Group - General</Tabs.Panel>
-                <Tabs.Panel value="appearance">
+                <Tabs.Content value="general">First Group - General</Tabs.Content>
+                <Tabs.Content value="appearance">
                   First Group - Appearance
-                </Tabs.Panel>
+                </Tabs.Content>
               </Tabs.Root>
             </div>
             <div>
@@ -243,19 +243,19 @@ export function ControlledExample() {
                 orientation="horizontal"
               >
                 <Tabs.List>
-                  <Tabs.Tab value="tab-1">Tab 1</Tabs.Tab>
-                  <Tabs.Tab value="tab-2">Tab 2</Tabs.Tab>
-                  <Tabs.Tab value="tab-3">Tab 3</Tabs.Tab>
+                  <Tabs.Trigger value="tab-1">Tab 1</Tabs.Trigger>
+                  <Tabs.Trigger value="tab-2">Tab 2</Tabs.Trigger>
+                  <Tabs.Trigger value="tab-3">Tab 3</Tabs.Trigger>
                 </Tabs.List>
-                <Tabs.Panel value="tab-1">
+                <Tabs.Content value="tab-1">
                   Second Group - Tab 1 Content
-                </Tabs.Panel>
-                <Tabs.Panel value="tab-2">
+                </Tabs.Content>
+                <Tabs.Content value="tab-2">
                   Second Group - Tab 2 Content
-                </Tabs.Panel>
-                <Tabs.Panel value="tab-3">
+                </Tabs.Content>
+                <Tabs.Content value="tab-3">
                   Second Group - Tab 3 Content
-                </Tabs.Panel>
+                </Tabs.Content>
               </Tabs.Root>
             </div>
           </div>

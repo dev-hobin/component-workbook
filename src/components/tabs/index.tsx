@@ -1,22 +1,19 @@
-import React, {
+import {
   createContext,
   forwardRef,
   useContext,
-  useId,
   useState,
   useRef,
+  useLayoutEffect,
+  useCallback,
+  useEffect,
   type ComponentPropsWithoutRef,
 } from 'react'
 import { useControllableState } from '@radix-ui/react-use-controllable-state'
 import { useMachine, type Send } from 'controlled-machine/react'
 
-import {
-  tabsMachine,
-  isActive,
-  type TabsEvents,
-  type TabValue,
-  type TabsOrientation,
-} from './machine'
+import { tabsMachine, type TabsEvents, type TabValue, type TabsComputed } from './machine'
+import { usePresence } from '../../hooks/use-presence'
 import { composeRefs } from '../../utils/compose-refs'
 import { mergeProps } from '../../utils/merge-props'
 
@@ -32,20 +29,22 @@ import type { NodeStore } from '../../primitives/node-store'
 // Types
 // ============================================
 
-type TabsRole = 'list' | 'tab' | 'panel'
-
+type TabsRole = 'root' | 'list' | 'trigger' | 'content' | 'indicator'
 type TabsMeta = {
-  value?: TabValue
   disabled?: boolean
 }
 
 type TabsContextValue = {
-  tabsId: string
-  activeValue: TabValue | null
+  value: TabValue
   focusedValue: TabValue | null
-  store: NodeStore<TabsRole, TabsMeta>
   send: Send<TabsEvents>
-  orientation: TabsOrientation
+  computed: TabsComputed
+  store: NodeStore<TabsRole, TabsMeta>
+  disabled: boolean
+  orientation: 'horizontal' | 'vertical'
+  activationMode: 'automatic' | 'manual'
+  getTriggerElement: (value: TabValue) => HTMLElement | null
+  listRef: React.RefObject<HTMLDivElement | null>
 }
 
 // ============================================
@@ -57,7 +56,7 @@ const TabsContext = createContext<TabsContextValue | null>(null)
 function useTabsContext() {
   const context = useContext(TabsContext)
   if (!context) {
-    throw new Error('Tabs 컴포넌트는 Tabs.Root 안에서 사용해야 합니다.')
+    throw new Error('Tabs components must be used within Tabs.Root')
   }
   return context
 }
@@ -69,9 +68,12 @@ function useTabsContext() {
 export type RootProps = {
   children: React.ReactNode
   value?: TabValue
-  onValueChange?: (value: TabValue) => void
   defaultValue?: TabValue
-  orientation?: TabsOrientation
+  onValueChange?: (value: TabValue) => void
+  orientation?: 'horizontal' | 'vertical'
+  activationMode?: 'automatic' | 'manual'
+  disabled?: boolean
+  loop?: boolean
 } & Omit<ComponentPropsWithoutRef<'div'>, 'defaultValue'>
 
 export function Root(props: RootProps) {
@@ -87,90 +89,82 @@ const RootInner = forwardRef<HTMLDivElement, RootProps>(
     {
       children,
       value: valueProp,
-      onValueChange,
       defaultValue,
+      onValueChange,
       orientation = 'horizontal',
+      activationMode = 'automatic',
+      disabled = false,
+      loop = true,
       ...rest
     },
     forwardedRef,
   ) => {
     const store = useNodeStore<TabsRole, TabsMeta>()
-    const tabsId = useId()
+    const listRef = useRef<HTMLDivElement>(null)
 
-    const [activeValue, setActiveValue] = useControllableState({
-      prop: valueProp,
-      onChange: (value) => (value ? onValueChange?.(value) : undefined),
-      defaultProp: defaultValue,
+    const { ref } = useNode<TabsRole>({
+      role: 'root',
     })
 
+    // Controllable value state
+    const [value = '', setValue] = useControllableState({
+      prop: valueProp,
+      defaultProp: defaultValue ?? '',
+      onChange: onValueChange,
+    })
+
+    // Focus tracking for keyboard navigation
     const [focusedValue, setFocusedValue] = useState<TabValue | null>(null)
 
-    // Ref for lazy getter
-    const storeRef = useRef(store)
-    storeRef.current = store
+    // Helper to get enabled trigger values (for machine)
+    const getEnabledValues = useCallback(() => {
+      const triggers = store.getNodesByRole('trigger')
+      return triggers
+        .filter((node) => !node.meta.disabled && !disabled)
+        .map((node) => node.id)
+    }, [store, disabled])
 
-    // Event machine
-    const { send } = useMachine(tabsMachine, {
-      activeValue: activeValue ?? null,
-      focusedValue,
-      onActiveValueChange: (value: TabValue | null) => setActiveValue(value ?? undefined),
-      onFocusedValueChange: setFocusedValue,
-      getEnabledTabs: () => {
-        const tabs = storeRef.current.getNodesByRole('tab')
-        return tabs
-          .filter((tab) => !tab.meta.disabled)
-          .map((tab) => ({ value: tab.meta.value! }))
+    // Helper to get trigger element
+    const getTriggerElement = useCallback(
+      (triggerValue: TabValue) => {
+        return store.getElement(triggerValue, 'trigger')
       },
-      getTabElement: (value: TabValue) =>
-        storeRef.current.getElement(String(value), 'tab'),
+      [store],
+    )
+
+    // Machine
+    const { send, computed } = useMachine(tabsMachine, {
+      value,
+      onValueChange: setValue,
+      focusedValue,
+      onFocusedValueChange: setFocusedValue,
+      activationMode,
+      loop,
+      getEnabledValues,
     })
 
-    // 키보드 네비게이션
-    const handleKeyDown = (event: React.KeyboardEvent) => {
-      if (focusedValue === null) return
-
-      const isNext =
-        orientation === 'horizontal'
-          ? event.key === 'ArrowRight'
-          : event.key === 'ArrowDown'
-
-      const isPrev =
-        orientation === 'horizontal'
-          ? event.key === 'ArrowLeft'
-          : event.key === 'ArrowUp'
-
-      if (isNext) {
-        event.preventDefault()
-        send('FOCUS_NEXT')
-      } else if (isPrev) {
-        event.preventDefault()
-        send('FOCUS_PREV')
-      } else if (event.key === 'Home') {
-        event.preventDefault()
-        send('FOCUS_FIRST')
-      } else if (event.key === 'End') {
-        event.preventDefault()
-        send('FOCUS_LAST')
-      }
-    }
-
     const contextValue: TabsContextValue = {
-      tabsId,
-      activeValue: activeValue ?? null,
+      value,
       focusedValue,
-      store,
       send,
+      computed,
+      store,
+      disabled,
       orientation,
+      activationMode,
+      getTriggerElement,
+      listRef,
     }
 
     return (
       <TabsContext.Provider value={contextValue}>
         <div
-          ref={forwardedRef}
+          ref={composeRefs(forwardedRef, ref)}
           {...mergeProps(
             {
+              'data-part': 'root',
               'data-orientation': orientation,
-              onKeyDown: handleKeyDown,
+              'data-disabled': disabled || undefined,
             },
             rest,
           )}
@@ -190,22 +184,71 @@ export type ListProps = ComponentPropsWithoutRef<'div'>
 
 export const List = forwardRef<HTMLDivElement, ListProps>(
   ({ children, ...rest }, forwardedRef) => {
-    const { tabsId, orientation } = useTabsContext()
+    const {
+      send,
+      orientation,
+      disabled,
+      focusedValue,
+      getTriggerElement,
+      listRef,
+    } = useTabsContext()
 
-    const { ref, domId } = useNode<TabsRole>({
+    const { ref } = useNode<TabsRole>({
       role: 'list',
-      id: tabsId,
     })
+
+    // Focus DOM element when focusedValue changes
+    useEffect(() => {
+      if (focusedValue) {
+        const element = getTriggerElement(focusedValue)
+        element?.focus()
+      }
+    }, [focusedValue, getTriggerElement])
+
+    // Keyboard navigation - just send events, machine handles logic
+    const handleKeyDown = (e: React.KeyboardEvent) => {
+      if (disabled) return
+
+      const isHorizontal = orientation === 'horizontal'
+      const nextKey = isHorizontal ? 'ArrowRight' : 'ArrowDown'
+      const prevKey = isHorizontal ? 'ArrowLeft' : 'ArrowUp'
+
+      switch (e.key) {
+        case nextKey:
+          e.preventDefault()
+          send('FOCUS_NEXT', {})
+          break
+        case prevKey:
+          e.preventDefault()
+          send('FOCUS_PREV', {})
+          break
+        case 'Home':
+          e.preventDefault()
+          send('FOCUS_FIRST', {})
+          break
+        case 'End':
+          e.preventDefault()
+          send('FOCUS_LAST', {})
+          break
+        case 'Enter':
+        case ' ':
+          e.preventDefault()
+          send('ACTIVATE_FOCUSED', {})
+          break
+      }
+    }
 
     return (
       <div
-        ref={composeRefs(forwardedRef, ref)}
+        ref={composeRefs(forwardedRef, ref, listRef)}
         {...mergeProps(
           {
             role: 'tablist',
-            id: domId,
             'aria-orientation': orientation,
+            'data-part': 'list',
             'data-orientation': orientation,
+            onKeyDown: handleKeyDown,
+            style: { position: 'relative' } as React.CSSProperties,
           },
           rest,
         )}
@@ -217,43 +260,47 @@ export const List = forwardRef<HTMLDivElement, ListProps>(
 )
 
 // ============================================
-// Tab
+// Trigger
 // ============================================
 
-export type TabProps = {
+export type TriggerProps = {
   value: TabValue
+  disabled?: boolean
 } & Omit<ComponentPropsWithoutRef<'button'>, 'value'>
 
-export const Tab = forwardRef<HTMLButtonElement, TabProps>(
-  ({ children, value, disabled, ...rest }, forwardedRef) => {
-    const { activeValue, store, send, orientation } = useTabsContext()
+export const Trigger = forwardRef<HTMLButtonElement, TriggerProps>(
+  ({ children, value: triggerValue, disabled = false, ...rest }, forwardedRef) => {
+    const {
+      value,
+      send,
+      store,
+      disabled: rootDisabled,
+    } = useTabsContext()
 
-    const valueStr = String(value)
+    const isDisabled = rootDisabled || disabled
+    const isActive = value === triggerValue
 
     const { ref, domId } = useNode<TabsRole, TabsMeta>({
-      role: 'tab',
-      id: valueStr,
-      meta: { value, disabled },
+      role: 'trigger',
+      id: triggerValue,
+      meta: { disabled: isDisabled },
     })
 
-    // store에서 panel element의 id 구독
-    const panelId = useStoreSubscribe(
+    // Subscribe to content element id
+    const contentId = useStoreSubscribe(
       store,
-      (s) => s.getElement(valueStr, 'panel')?.id || null,
+      (s) => s.getElement(triggerValue, 'content')?.id ?? null,
     )
 
-    const isTabActive = isActive(activeValue, value)
-
     const handleClick = () => {
-      send('SELECT', { value })
+      if (!isDisabled && triggerValue !== value) {
+        send('SELECT', { value: triggerValue })
+      }
     }
 
     const handleFocus = () => {
-      send('FOCUS', { value })
-    }
-
-    const handleBlur = () => {
-      send('BLUR')
+      // Sync focusedValue when trigger receives focus
+      send('FOCUS', { value: triggerValue })
     }
 
     return (
@@ -261,20 +308,19 @@ export const Tab = forwardRef<HTMLButtonElement, TabProps>(
         ref={composeRefs(forwardedRef, ref)}
         {...mergeProps(
           {
-            role: 'tab',
             type: 'button',
+            role: 'tab',
             id: domId,
-            disabled,
-            tabIndex: activeValue ? (isTabActive ? 0 : -1) : undefined,
+            disabled: isDisabled,
+            tabIndex: isActive ? 0 : -1,
+            'aria-selected': isActive,
+            'aria-controls': contentId ?? undefined,
+            'aria-disabled': isDisabled || undefined,
+            'data-part': 'trigger',
+            'data-state': isActive ? 'active' : 'inactive',
+            'data-disabled': isDisabled || undefined,
             onClick: handleClick,
             onFocus: handleFocus,
-            onBlur: handleBlur,
-            'aria-selected': isTabActive,
-            'aria-controls': panelId ?? undefined,
-            'data-orientation': orientation,
-            'data-active': isTabActive || undefined,
-            'data-disabled': disabled || undefined,
-            'data-value': value,
           },
           rest,
         )}
@@ -286,34 +332,59 @@ export const Tab = forwardRef<HTMLButtonElement, TabProps>(
 )
 
 // ============================================
-// Panel
+// Content
 // ============================================
 
-export type PanelProps = {
+export type ContentProps = {
   value: TabValue
+  lazyMount?: boolean
+  unmountOnExit?: boolean
 } & ComponentPropsWithoutRef<'div'>
 
-export const Panel = forwardRef<HTMLDivElement, PanelProps>(
-  ({ children, value, ...rest }, forwardedRef) => {
-    const { activeValue, store, orientation } = useTabsContext()
+export const Content = forwardRef<HTMLDivElement, ContentProps>(
+  (
+    { children, value: contentValue, lazyMount = false, unmountOnExit = false, ...rest },
+    forwardedRef,
+  ) => {
+    const { value, store } = useTabsContext()
 
-    const valueStr = String(value)
+    const isActive = value === contentValue
 
-    const { ref, domId } = useNode<TabsRole, TabsMeta>({
-      role: 'panel',
-      id: valueStr,
-      meta: { value },
+    const { ref, domId, elementRef } = useNode<TabsRole>({
+      role: 'content',
+      id: contentValue,
     })
 
-    // store에서 tab element의 id 구독
-    const tabId = useStoreSubscribe(
+    // Track if content was ever active (for lazyMount)
+    const [wasEverActive, setWasEverActive] = useState(isActive)
+    if (isActive && !wasEverActive) {
+      setWasEverActive(true)
+    }
+
+    // Animation state
+    const { isPresent, transitionState } = usePresence({
+      isVisible: isActive,
+      resolveElement: () => elementRef.current,
+    })
+
+    // Subscribe to trigger element id
+    const triggerId = useStoreSubscribe(
       store,
-      (s) => s.getElement(valueStr, 'tab')?.id || null,
+      (s) => s.getElement(contentValue, 'trigger')?.id ?? null,
     )
 
-    const isTabActive = isActive(activeValue, value)
+    // Determine if we should render
+    const shouldRender = (() => {
+      if (lazyMount && !wasEverActive) {
+        return false
+      }
+      if (unmountOnExit && !isPresent) {
+        return false
+      }
+      return true
+    })()
 
-    if (!isTabActive) {
+    if (!shouldRender) {
       return null
     }
 
@@ -325,10 +396,11 @@ export const Panel = forwardRef<HTMLDivElement, PanelProps>(
             role: 'tabpanel',
             id: domId,
             tabIndex: 0,
-            'aria-labelledby': tabId ?? undefined,
-            'data-orientation': orientation,
-            'data-active': isTabActive || undefined,
-            'data-value': value,
+            'aria-labelledby': triggerId ?? undefined,
+            'data-part': 'content',
+            'data-state': isActive ? 'active' : 'inactive',
+            'data-transition': transitionState,
+            hidden: !isActive && !isPresent,
           },
           rest,
         )}
@@ -340,14 +412,77 @@ export const Panel = forwardRef<HTMLDivElement, PanelProps>(
 )
 
 // ============================================
+// Indicator
+// ============================================
+
+export type IndicatorProps = ComponentPropsWithoutRef<'div'>
+
+export const Indicator = forwardRef<HTMLDivElement, IndicatorProps>(
+  ({ style, ...rest }, forwardedRef) => {
+    const { value, orientation, getTriggerElement, listRef } = useTabsContext()
+
+    const { ref } = useNode<TabsRole>({
+      role: 'indicator',
+    })
+
+    const [indicatorStyle, setIndicatorStyle] = useState<React.CSSProperties>({})
+
+    // Update indicator position when value changes
+    useLayoutEffect(() => {
+      const triggerElement = getTriggerElement(value)
+      const listElement = listRef.current
+
+      if (!triggerElement || !listElement) {
+        return
+      }
+
+      const triggerRect = triggerElement.getBoundingClientRect()
+      const listRect = listElement.getBoundingClientRect()
+
+      if (orientation === 'horizontal') {
+        setIndicatorStyle({
+          left: triggerRect.left - listRect.left,
+          width: triggerRect.width,
+        })
+      } else {
+        setIndicatorStyle({
+          top: triggerRect.top - listRect.top,
+          height: triggerRect.height,
+        })
+      }
+    }, [value, orientation, getTriggerElement, listRef])
+
+    return (
+      <div
+        ref={composeRefs(forwardedRef, ref)}
+        {...mergeProps(
+          {
+            'aria-hidden': true,
+            'data-part': 'indicator',
+            'data-orientation': orientation,
+            style: {
+              position: 'absolute' as const,
+              ...indicatorStyle,
+              ...style,
+            },
+          },
+          rest,
+        )}
+      />
+    )
+  },
+)
+
+// ============================================
 // Export
 // ============================================
 
 const Tabs = {
   Root,
   List,
-  Tab,
-  Panel,
+  Trigger,
+  Content,
+  Indicator,
 }
 
 export default Tabs
