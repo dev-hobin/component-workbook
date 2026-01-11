@@ -97,12 +97,18 @@ export interface DismissableLayerProps {
   /**
    * 외부 클릭 시 호출되는 콜백
    * isTopmost일 때만 호출됨
+   * excludeRefs에 포함된 요소 클릭은 외부 클릭으로 간주하지 않음
    */
   onPointerDownOutside?: (event: PointerEvent) => void
   /**
    * 외부 클릭 감지 대상 요소
    */
   contentRef?: React.RefObject<HTMLElement | null>
+  /**
+   * 외부 클릭에서 제외할 요소들
+   * 이 요소들 클릭은 외부 클릭으로 간주하지 않음
+   */
+  excludeRefs?: React.RefObject<HTMLElement | null>[]
 }
 
 export function DismissableLayer({
@@ -112,6 +118,7 @@ export function DismissableLayer({
   onEscapeKeyDown,
   onPointerDownOutside,
   contentRef,
+  excludeRefs = [],
 }: DismissableLayerProps) {
   const layerId = useId()
   const isTopmostRef = useRef(false)
@@ -160,16 +167,23 @@ export function DismissableLayer({
 
       if (!target || !content) return
 
-      // content 외부 클릭인지 확인
-      if (!content.contains(target)) {
-        onPointerDownOutside(event)
+      // content 내부 클릭이면 무시
+      if (content.contains(target)) return
+
+      // excludeRefs에 포함된 요소 클릭이면 무시
+      for (const ref of excludeRefs) {
+        if (ref.current?.contains(target)) {
+          return
+        }
       }
+
+      onPointerDownOutside(event)
     }
 
     // capture phase로 먼저 감지
     document.addEventListener('pointerdown', handlePointerDown, true)
     return () => document.removeEventListener('pointerdown', handlePointerDown, true)
-  }, [isActive, onPointerDownOutside, contentRef, layerId])
+  }, [isActive, onPointerDownOutside, contentRef, excludeRefs, layerId])
 
   const isTopmost = useCallback(() => {
     return globalLayerStack.isTopmost(layerId)

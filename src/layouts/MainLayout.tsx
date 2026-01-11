@@ -5,6 +5,7 @@ const navItems = [
   { name: 'Accordion', path: '/accordion' },
   { name: 'Tabs', path: '/tabs' },
   { name: 'Modal', path: '/modal' },
+  { name: 'Menu', path: '/menu' },
 ]
 
 export default function MainLayout() {

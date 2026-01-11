@@ -10,6 +10,7 @@
 | **DOM helpers 패턴** | Machine은 "무엇을", Shell은 "언제/어떻게" | Effect가 DOM 렌더링 전에 실행되어 동작 안함 |
 | **stopPropagation 금지** | 라이브러리 코드에서 이벤트 흐름 방해 금지 | 상위 컴포넌트가 이벤트 감지 불가 |
 | **전역 레이어 스택** | 중첩 레이어는 상태 기반으로 topmost 판별 | 중첩 Modal에서 Escape가 모두 닫음 |
+| **NodeStore 실시간 쿼리** | 스냅샷 아닌 이벤트 시점 직접 조회 | 동적 요소 클릭 시 깜빡임/오동작 |
 
 ### 컴포넌트 유형 판별
 
@@ -135,6 +136,44 @@ const { ref, domId } = useNode<ComponentRole, ComponentMeta>({
   meta: { disabled },
 })
 ```
+
+**NodeStore 핵심 원칙: 실시간 쿼리 사용**
+
+> ⚠️ **중요**: NodeStore는 실시간 요소 추적을 위해 설계됨. 스냅샷이 아닌 실시간 쿼리 사용 필수.
+
+```ts
+// ❌ 잘못된 패턴: useLayoutEffect로 스냅샷 저장
+const [excludeRefs, setExcludeRefs] = useState<RefObject<HTMLElement>[]>([])
+useLayoutEffect(() => {
+  const triggers = store.getNodesByRole('sub-trigger')
+  setExcludeRefs(triggers.map(n => ({ current: n.element })))
+}, [store])
+// 문제: SubTrigger 마운트 타이밍에 따라 스냅샷이 불완전할 수 있음
+
+// ✅ 올바른 패턴: 이벤트 발생 시점에 store 직접 쿼리
+const handlePointerDownOutside = useCallback((event: PointerEvent) => {
+  const target = event.target as Node | null
+  if (!target) return
+
+  // 클릭 시점에 store에서 최신 정보 조회
+  const subTriggerNodes = store.getNodesByRole('sub-trigger')
+  for (const node of subTriggerNodes) {
+    if (node.element?.contains(target)) {
+      return // sub-trigger 클릭은 외부 클릭 아님
+    }
+  }
+
+  send('CLOSE_ALL')
+}, [send, store])
+```
+
+**사용 사례별 패턴:**
+| 사용 사례 | 패턴 | 이유 |
+|----------|------|------|
+| Machine helper 함수 | 실시간 쿼리 | 호출 시점의 정확한 상태 필요 |
+| DismissableLayer excludeRefs | 실시간 쿼리 | 클릭 시점의 정확한 요소 목록 필요 |
+| ARIA id 연결 | useNode의 domId | 자동 생성, 렌더링과 동기화 |
+| 조건부 렌더링 체크 | 실시간 쿼리 | 마운트/언마운트 타이밍 이슈 방지 |
 
 ### 라이브러리 3: usePresence
 ```ts
@@ -529,6 +568,7 @@ src/components/[component]/
 | Focus 동기화 누락 | 프로그래밍 방식 focus 후 키보드 동작 오류 | 모든 focus 진입점에 FOCUS 이벤트 |
 | Machine 로직 부족 | Shell에 조건문 과다 | W3C 요구사항 → Machine 이벤트 매핑 검토 |
 | Effect 타이밍 이슈 | Effect가 DOM 렌더링 전에 실행되어 동작 안함 | DOM helpers 패턴 사용 (Shell이 타이밍 책임) |
+| **NodeStore 스냅샷 사용** | 동적 요소 클릭 시 깜빡임/오동작 | **이벤트 핸들러에서 store 실시간 쿼리** |
 
 ### 중간 위험도
 | 위험 | 증상 | 예방 |
@@ -565,6 +605,7 @@ src/components/[component]/
 ## 부록: 체크리스트
 
 ### 계획 작성 시
+- [ ] **primitives 먼저 확인**: useNode, NodeStore, ParentProvider 활용 가능성 검토했는가?
 - [ ] 외부 라이브러리의 **정확한 API** 문서화했는가?
 - [ ] **모든 data 속성** 매트릭스 작성했는가?
 - [ ] **Role/Type 전체** 열거했는가?
@@ -596,6 +637,7 @@ src/components/[component]/
 - [ ] 모든 focus 진입점에서 focusedValue 동기화되는가?
 - [ ] **중첩 케이스 테스트했는가?** (레이어 컴포넌트는 중첩 시 Escape 동작 확인)
 - [ ] **stopPropagation 사용하지 않았는가?** (DismissableLayer로 해결)
+- [ ] **NodeStore 스냅샷 대신 실시간 쿼리 사용했는가?** (이벤트 핸들러에서 직접 조회)
 - [ ] 예상 못한 이슈가 있었다면 템플릿에 반영할 것은?
 
 ### 코드 스멜 체크
@@ -627,6 +669,14 @@ event.stopPropagation()
 
 // ❌ 중첩 레이어에서 직접 Escape 처리
 if (event.key === 'Escape') { onClose() }  // DismissableLayer 없이
+
+// ❌ NodeStore 스냅샷으로 excludeRefs 구성 (타이밍 버그 유발)
+const [excludeRefs, setExcludeRefs] = useState<RefObject<HTMLElement>[]>([])
+useLayoutEffect(() => {
+  const nodes = store.getNodesByRole('sub-trigger')
+  setExcludeRefs(nodes.map(n => ({ current: n.element })))
+}, [store])
+// 문제: 새 SubTrigger가 마운트되기 전에 스냅샷이 만들어져 클릭 감지 실패
 ```
 
 **올바른 패턴:**
@@ -646,4 +696,18 @@ const activateFocusTrap = useCallback(() => {
 <DismissableLayer isActive={open} onEscapeKeyDown={handleEscape}>
   {children}
 </DismissableLayer>
+
+// ✅ NodeStore: 이벤트 핸들러에서 실시간 쿼리
+const handlePointerDownOutside = useCallback((event: PointerEvent) => {
+  const target = event.target as Node | null
+  if (!target) return
+
+  // 클릭 발생 시점에 store 직접 조회 (스냅샷 아님)
+  const subTriggerNodes = store.getNodesByRole('sub-trigger')
+  for (const node of subTriggerNodes) {
+    if (node.element?.contains(target)) return
+  }
+
+  send('CLOSE_ALL')
+}, [send, store])
 ```

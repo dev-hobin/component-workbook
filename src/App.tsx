@@ -4,6 +4,7 @@ import HomePage from './pages/HomePage'
 import AccordionPage from './pages/AccordionPage'
 import TabsPage from './pages/TabsPage'
 import ModalPage from './pages/ModalPage'
+import MenuPage from './pages/MenuPage'
 
 function App() {
   return (
@@ -14,6 +15,7 @@ function App() {
           <Route path="/accordion" element={<AccordionPage />} />
           <Route path="/tabs" element={<TabsPage />} />
           <Route path="/modal" element={<ModalPage />} />
+          <Route path="/menu" element={<MenuPage />} />
         </Route>
       </Routes>
     </BrowserRouter>
