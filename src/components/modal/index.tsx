@@ -1,49 +1,41 @@
 import {
   createContext,
   forwardRef,
+  useCallback,
   useContext,
+  useEffect,
   useId,
   useRef,
   type ComponentPropsWithoutRef,
+  type RefObject,
 } from 'react'
 import { createPortal } from 'react-dom'
 import { useControllableState } from '@radix-ui/react-use-controllable-state'
-import type * as focusTrapLib from 'focus-trap'
+import { createFocusTrap, type FocusTrap } from 'focus-trap'
 import { useMachine, type Send } from 'controlled-machine/react'
 
-import { modalMachine, type ModalEvents } from './machine'
+import { modalMachine, type ModalEvents, type ModalComputed } from './machine'
 import { usePresence } from '../../hooks/use-presence'
-import { useStableCallback } from '../../hooks/use-stable-callback'
 import { composeRefs } from '../../utils/compose-refs'
 import { mergeProps } from '../../utils/merge-props'
-
-import {
-  NodeStoreProvider,
-  useNodeStore,
-} from '../../primitives/use-node-store'
-import { useNode } from '../../primitives/use-node'
-import { useStoreSubscribe } from '../../primitives/use-store-subscribe'
-import type { NodeStore } from '../../primitives/node-store'
+import { DismissableLayer } from '../../primitives/dismissable-layer'
 
 // ============================================
 // Types
 // ============================================
 
-type ModalRole =
-  | 'trigger'
-  | 'close-trigger'
-  | 'content'
-  | 'backdrop'
-  | 'title'
-  | 'description'
-
-type ModalMeta = object
-
 type ModalContextValue = {
-  modalId: string
-  isOpen: boolean
+  open: boolean
   send: Send<ModalEvents>
-  store: NodeStore<ModalRole, ModalMeta>
+  computed: ModalComputed
+  triggerRef: RefObject<HTMLButtonElement | null>
+  contentRef: RefObject<HTMLDivElement | null>
+  initialFocusRef: RefObject<HTMLElement | null>
+  setInitialFocusRef: (ref: RefObject<HTMLElement | null>) => void
+  closeOnEscape: boolean
+  titleId: string
+  descriptionId: string
+  contentId: string
 }
 
 // ============================================
@@ -55,7 +47,7 @@ const ModalContext = createContext<ModalContextValue | null>(null)
 function useModalContext() {
   const context = useContext(ModalContext)
   if (!context) {
-    throw new Error('Modal 컴포넌트는 Modal.Root 안에서 사용해야 합니다.')
+    throw new Error('Modal components must be used within Modal.Root')
   }
   return context
 }
@@ -67,74 +59,107 @@ function useModalContext() {
 export type RootProps = {
   children: React.ReactNode
   open?: boolean
-  onOpenChange?: (open: boolean) => void
   defaultOpen?: boolean
-  initialFocus?: HTMLElement | (() => HTMLElement | null)
-  closeOnOutsideClick?: boolean
+  onOpenChange?: (open: boolean) => void
   closeOnEscape?: boolean
+  closeOnBackdropClick?: boolean
 }
 
-export function Root(props: RootProps) {
-  return (
-    <NodeStoreProvider<ModalRole, ModalMeta>>
-      <RootInner {...props} />
-    </NodeStoreProvider>
-  )
-}
-
-function RootInner({
+export function Root({
   children,
   open: openProp,
-  onOpenChange,
   defaultOpen = false,
-  initialFocus,
-  closeOnOutsideClick = false,
+  onOpenChange,
   closeOnEscape = true,
+  closeOnBackdropClick = true,
 }: RootProps) {
-  const store = useNodeStore<ModalRole, ModalMeta>()
-  const modalId = useId()
+  const id = useId()
+  const titleId = `${id}-title`
+  const descriptionId = `${id}-description`
+  const contentId = `${id}-content`
 
-  const [isOpen = false, setOpen] = useControllableState({
-    prop: openProp,
-    onChange: onOpenChange,
-    defaultProp: defaultOpen,
-  })
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const contentRef = useRef<HTMLDivElement>(null)
+  const initialFocusRefState = useRef<RefObject<HTMLElement | null>>({ current: null })
 
-  // Effect state refs (exposed via getter/setter to keep machine React-agnostic)
-  const trapRef = useRef<focusTrapLib.FocusTrap | null>(null)
+  // Focus trap & scroll lock state
+  const trapRef = useRef<FocusTrap | null>(null)
   const prevOverflowRef = useRef<string>('')
 
-  // Initial focus callback
-  const getInitialFocusElement = useStableCallback(() => {
-    if (typeof initialFocus === 'function') {
-      return initialFocus()
-    }
-    return initialFocus
+  const [open = false, setOpen] = useControllableState({
+    prop: openProp,
+    defaultProp: defaultOpen,
+    onChange: onOpenChange,
   })
 
-  // Event machine (state 기능 활용)
-  const { send } = useMachine(modalMachine, {
-    state: isOpen ? 'open' : 'closed',
+  // DOM helpers for machine effects (Shell이 타이밍 책임)
+  const activateFocusTrap = useCallback(() => {
+    // DOM 렌더링 대기 후 포커스 트랩 활성화
+    requestAnimationFrame(() => {
+      const contentElement = contentRef.current
+      if (!contentElement) return
+
+      try {
+        const trap = createFocusTrap(contentElement, {
+          initialFocus: initialFocusRefState.current?.current ?? undefined,
+          fallbackFocus: contentElement,
+          escapeDeactivates: false,
+          clickOutsideDeactivates: false,
+          returnFocusOnDeactivate: false,
+          allowOutsideClick: true,
+        })
+        trap.activate()
+        trapRef.current = trap
+      } catch {
+        // focus-trap 활성화 실패 시 무시 (테스트 환경 등)
+      }
+    })
+  }, [])
+
+  const deactivateFocusTrap = useCallback(() => {
+    trapRef.current?.deactivate()
+    trapRef.current = null
+    triggerRef.current?.focus()
+  }, [])
+
+  const lockScroll = useCallback(() => {
+    prevOverflowRef.current = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+  }, [])
+
+  const unlockScroll = useCallback(() => {
+    document.body.style.overflow = prevOverflowRef.current
+  }, [])
+
+  const { send, computed } = useMachine(modalMachine, {
+    open,
     onOpenChange: setOpen,
     closeOnEscape,
-    closeOnOutsideClick,
-    getContentElement: () => store.getElement(modalId, 'content'),
-    getInitialFocusElement,
-    getTrap: () => trapRef.current,
-    onTrapChange: (trap: focusTrapLib.FocusTrap | null) => {
-      trapRef.current = trap
-    },
-    getPrevOverflow: () => prevOverflowRef.current,
-    onPrevOverflowChange: (overflow: string) => {
-      prevOverflowRef.current = overflow
+    closeOnBackdropClick,
+    dom: {
+      activateFocusTrap,
+      deactivateFocusTrap,
+      lockScroll,
+      unlockScroll,
     },
   })
 
+  const setInitialFocusRef = useCallback((ref: RefObject<HTMLElement | null>) => {
+    initialFocusRefState.current = ref
+  }, [])
+
   const contextValue: ModalContextValue = {
-    modalId,
-    isOpen,
+    open,
     send,
-    store,
+    computed,
+    triggerRef,
+    contentRef,
+    initialFocusRef: initialFocusRefState.current,
+    setInitialFocusRef,
+    closeOnEscape,
+    titleId,
+    descriptionId,
+    contentId,
   }
 
   return (
@@ -152,12 +177,7 @@ export type TriggerProps = ComponentPropsWithoutRef<'button'>
 
 export const Trigger = forwardRef<HTMLButtonElement, TriggerProps>(
   ({ children, ...rest }, forwardedRef) => {
-    const { modalId, send } = useModalContext()
-
-    const { ref, domId } = useNode<ModalRole>({
-      role: 'trigger',
-      id: modalId,
-    })
+    const { open, send, triggerRef, contentId } = useModalContext()
 
     const handleClick = () => {
       send('OPEN')
@@ -165,11 +185,15 @@ export const Trigger = forwardRef<HTMLButtonElement, TriggerProps>(
 
     return (
       <button
-        ref={composeRefs(forwardedRef, ref)}
+        ref={composeRefs(forwardedRef, triggerRef)}
         {...mergeProps(
           {
             type: 'button',
-            id: domId,
+            'aria-haspopup': 'dialog' as const,
+            'aria-expanded': open,
+            'aria-controls': open ? contentId : undefined,
+            'data-part': 'trigger',
+            'data-state': open ? 'open' : 'closed',
             onClick: handleClick,
           },
           rest,
@@ -182,97 +206,17 @@ export const Trigger = forwardRef<HTMLButtonElement, TriggerProps>(
 )
 
 // ============================================
-// CloseTrigger
+// Portal
 // ============================================
 
-export type CloseTriggerProps = ComponentPropsWithoutRef<'button'>
+export type PortalProps = {
+  children: React.ReactNode
+  container?: Element | DocumentFragment
+}
 
-export const CloseTrigger = forwardRef<HTMLButtonElement, CloseTriggerProps>(
-  ({ children, ...rest }, forwardedRef) => {
-    const { modalId, send } = useModalContext()
-
-    const { ref, domId } = useNode<ModalRole>({
-      role: 'close-trigger',
-      id: modalId,
-    })
-
-    const handleClick = () => {
-      send('CLOSE')
-    }
-
-    return (
-      <button
-        ref={composeRefs(forwardedRef, ref)}
-        {...mergeProps(
-          {
-            type: 'button',
-            id: domId,
-            onClick: handleClick,
-          },
-          rest,
-        )}
-      >
-        {children}
-      </button>
-    )
-  },
-)
-
-// ============================================
-// Content
-// ============================================
-
-export type ContentProps = ComponentPropsWithoutRef<'div'>
-
-export const Content = forwardRef<HTMLDivElement, ContentProps>(
-  ({ children, ...rest }, forwardedRef) => {
-    const { modalId, isOpen, store } = useModalContext()
-
-    const { ref, domId, elementRef } = useNode<ModalRole>({
-      role: 'content',
-      id: modalId,
-    })
-
-    const { isPresent, transitionState } = usePresence({
-      isVisible: isOpen,
-      resolveElement: () => elementRef.current,
-    })
-
-    // store에서 title/description element의 id 구독
-    const titleId = useStoreSubscribe(
-      store,
-      (s) => s.getElement(modalId, 'title')?.id || null,
-    )
-    const descriptionId = useStoreSubscribe(
-      store,
-      (s) => s.getElement(modalId, 'description')?.id || null,
-    )
-
-    if (!isPresent) {
-      return null
-    }
-
-    return (
-      <div
-        ref={composeRefs(forwardedRef, ref)}
-        {...mergeProps(
-          {
-            role: 'dialog',
-            id: domId,
-            'aria-modal': true,
-            'aria-labelledby': titleId ?? undefined,
-            'aria-describedby': descriptionId ?? undefined,
-            'data-state': isOpen ? 'open' : 'closed',
-            'data-transition': transitionState,
-          },
-          rest,
-        )}
-      >
-        {children}
-      </div>
-    )
-  },
-)
+export function Portal({ children, container = document.body }: PortalProps) {
+  return createPortal(children, container)
+}
 
 // ============================================
 // Backdrop
@@ -282,20 +226,17 @@ export type BackdropProps = ComponentPropsWithoutRef<'div'>
 
 export const Backdrop = forwardRef<HTMLDivElement, BackdropProps>(
   ({ ...rest }, forwardedRef) => {
-    const { modalId, isOpen, send } = useModalContext()
+    const { open, send } = useModalContext()
 
-    const { ref, domId, elementRef } = useNode<ModalRole>({
-      role: 'backdrop',
-      id: modalId,
-    })
+    const elementRef = useRef<HTMLDivElement>(null)
 
     const { isPresent, transitionState } = usePresence({
-      isVisible: isOpen,
+      isVisible: open,
       resolveElement: () => elementRef.current,
     })
 
     const handleClick = () => {
-      send('OUTSIDE_CLICK')
+      send('BACKDROP_CLICK')
     }
 
     if (!isPresent) {
@@ -304,17 +245,92 @@ export const Backdrop = forwardRef<HTMLDivElement, BackdropProps>(
 
     return (
       <div
-        ref={composeRefs(forwardedRef, ref)}
+        ref={composeRefs(forwardedRef, elementRef)}
         {...mergeProps(
           {
-            id: domId,
-            onClick: handleClick,
-            'data-state': isOpen ? 'open' : 'closed',
+            'aria-hidden': true,
+            'data-part': 'backdrop',
+            'data-state': open ? 'open' : 'closed',
             'data-transition': transitionState,
+            onClick: handleClick,
           },
           rest,
         )}
       />
+    )
+  },
+)
+
+// ============================================
+// Content
+// ============================================
+
+export type ContentProps = {
+  initialFocusRef?: RefObject<HTMLElement | null>
+} & ComponentPropsWithoutRef<'div'>
+
+export const Content = forwardRef<HTMLDivElement, ContentProps>(
+  ({ children, initialFocusRef, ...rest }, forwardedRef) => {
+    const {
+      open,
+      send,
+      contentRef,
+      setInitialFocusRef,
+      closeOnEscape,
+      titleId,
+      descriptionId,
+      contentId,
+    } = useModalContext()
+
+    const elementRef = useRef<HTMLDivElement>(null)
+
+    const { isPresent, transitionState } = usePresence({
+      isVisible: open,
+      resolveElement: () => elementRef.current,
+    })
+
+    // initialFocusRef를 Root에 전달하여 machine effects에서 사용
+    useEffect(() => {
+      if (initialFocusRef) {
+        setInitialFocusRef(initialFocusRef)
+      }
+    }, [initialFocusRef, setInitialFocusRef])
+
+    // Escape 키 핸들러 - DismissableLayer가 topmost일 때만 호출됨
+    const handleEscapeKeyDown = useCallback(() => {
+      send('ESCAPE_KEY')
+    }, [send])
+
+    if (!isPresent) {
+      return null
+    }
+
+    return (
+      <DismissableLayer
+        isActive={open}
+        dismissOnEscape={closeOnEscape}
+        onEscapeKeyDown={handleEscapeKeyDown}
+      >
+        <div
+          ref={composeRefs(forwardedRef, elementRef, contentRef)}
+          {...mergeProps(
+            {
+              role: 'dialog',
+              id: contentId,
+              'aria-modal': true,
+              'aria-labelledby': titleId,
+              'aria-describedby': descriptionId,
+              tabIndex: -1,
+              'data-part': 'content',
+              'data-state': open ? 'open' : 'closed',
+              'data-transition': transitionState,
+            },
+            rest,
+          )}
+        >
+          {children}
+        </div>
+      </DismissableLayer>
     )
   },
 )
@@ -327,17 +343,18 @@ export type TitleProps = ComponentPropsWithoutRef<'h2'>
 
 export const Title = forwardRef<HTMLHeadingElement, TitleProps>(
   ({ children, ...rest }, forwardedRef) => {
-    const { modalId } = useModalContext()
-
-    const { ref, domId } = useNode<ModalRole>({
-      role: 'title',
-      id: modalId,
-    })
+    const { titleId } = useModalContext()
 
     return (
       <h2
-        ref={composeRefs(forwardedRef, ref)}
-        {...mergeProps({ id: domId }, rest)}
+        ref={forwardedRef}
+        {...mergeProps(
+          {
+            id: titleId,
+            'data-part': 'title',
+          },
+          rest,
+        )}
       >
         {children}
       </h2>
@@ -353,17 +370,18 @@ export type DescriptionProps = ComponentPropsWithoutRef<'p'>
 
 export const Description = forwardRef<HTMLParagraphElement, DescriptionProps>(
   ({ children, ...rest }, forwardedRef) => {
-    const { modalId } = useModalContext()
-
-    const { ref, domId } = useNode<ModalRole>({
-      role: 'description',
-      id: modalId,
-    })
+    const { descriptionId } = useModalContext()
 
     return (
       <p
-        ref={composeRefs(forwardedRef, ref)}
-        {...mergeProps({ id: domId }, rest)}
+        ref={forwardedRef}
+        {...mergeProps(
+          {
+            id: descriptionId,
+            'data-part': 'description',
+          },
+          rest,
+        )}
       >
         {children}
       </p>
@@ -372,22 +390,36 @@ export const Description = forwardRef<HTMLParagraphElement, DescriptionProps>(
 )
 
 // ============================================
-// Portal
+// Close
 // ============================================
 
-export type PortalProps = {
-  children: React.ReactNode
-  container?: Element | DocumentFragment
-  key?: React.Key | null
-}
+export type CloseProps = ComponentPropsWithoutRef<'button'>
 
-export function Portal({
-  children,
-  container = document.body,
-  key,
-}: PortalProps) {
-  return createPortal(children, container, key)
-}
+export const Close = forwardRef<HTMLButtonElement, CloseProps>(
+  ({ children, ...rest }, forwardedRef) => {
+    const { send } = useModalContext()
+
+    const handleClick = () => {
+      send('CLOSE')
+    }
+
+    return (
+      <button
+        ref={forwardedRef}
+        {...mergeProps(
+          {
+            type: 'button',
+            'data-part': 'close',
+            onClick: handleClick,
+          },
+          rest,
+        )}
+      >
+        {children}
+      </button>
+    )
+  },
+)
 
 // ============================================
 // Export
@@ -396,12 +428,12 @@ export function Portal({
 const Modal = {
   Root,
   Trigger,
-  CloseTrigger,
-  Content,
+  Portal,
   Backdrop,
+  Content,
   Title,
   Description,
-  Portal,
+  Close,
 }
 
 export default Modal

@@ -1,11 +1,11 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import Modal from './styled'
 
 export function UncontrolledExample() {
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-8">
       <div className="max-w-2xl w-full">
-        <Modal.Root closeOnOutsideClick closeOnEscape defaultOpen={true}>
+        <Modal.Root closeOnBackdropClick closeOnEscape defaultOpen={true}>
           <Modal.Trigger>Open Modal</Modal.Trigger>
           <Modal.Portal>
             <Modal.Backdrop />
@@ -29,7 +29,7 @@ export function UncontrolledExample() {
                 />
               </div>
               <div className="mt-6 flex justify-end gap-2">
-                <Modal.CloseTrigger>Cancel</Modal.CloseTrigger>
+                <Modal.Close>Cancel</Modal.Close>
                 <button
                   type="button"
                   className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
@@ -74,7 +74,7 @@ export function ControlledExample() {
                 animations work seamlessly with controlled state.
               </Modal.Description>
               <div className="mt-6 flex justify-end gap-2">
-                <Modal.CloseTrigger>Close</Modal.CloseTrigger>
+                <Modal.Close>Close</Modal.Close>
               </div>
             </Modal.Content>
           </Modal.Portal>
@@ -84,21 +84,21 @@ export function ControlledExample() {
   )
 }
 
-export function CloseOnOutsideClickExample() {
+export function CloseOnBackdropClickExample() {
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-8">
       <div className="max-w-2xl w-full">
-        <Modal.Root closeOnOutsideClick>
-          <Modal.Trigger>Open Modal (Click Outside to Close)</Modal.Trigger>
+        <Modal.Root closeOnBackdropClick>
+          <Modal.Trigger>Open Modal (Click Backdrop to Close)</Modal.Trigger>
           <Modal.Portal>
             <Modal.Backdrop />
             <Modal.Content>
-              <Modal.Title>Close on Outside Click</Modal.Title>
+              <Modal.Title>Close on Backdrop Click</Modal.Title>
               <Modal.Description>
                 Click on the backdrop to close this modal.
               </Modal.Description>
               <div className="mt-6 flex justify-end">
-                <Modal.CloseTrigger>Close</Modal.CloseTrigger>
+                <Modal.Close>Close</Modal.Close>
               </div>
             </Modal.Content>
           </Modal.Portal>
@@ -109,16 +109,16 @@ export function CloseOnOutsideClickExample() {
 }
 
 export function CustomInitialFocusExample() {
+  const inputRef = useRef<HTMLInputElement>(null)
+
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-8">
       <div className="max-w-2xl w-full">
-        <Modal.Root
-          initialFocus={() => document.getElementById('initial-focus-input')}
-        >
+        <Modal.Root>
           <Modal.Trigger>Open Modal (Custom Focus)</Modal.Trigger>
           <Modal.Portal>
             <Modal.Backdrop />
-            <Modal.Content>
+            <Modal.Content initialFocusRef={inputRef}>
               <Modal.Title>Custom Initial Focus</Modal.Title>
               <Modal.Description>
                 The second input will receive focus when the modal opens.
@@ -130,7 +130,7 @@ export function CustomInitialFocusExample() {
                   className="w-full px-3 py-2 border border-gray-300 rounded-md"
                 />
                 <input
-                  id="initial-focus-input"
+                  ref={inputRef}
                   type="text"
                   placeholder="This input gets focus (second input)"
                   className="w-full px-3 py-2 border border-gray-300 rounded-md"
@@ -142,7 +142,7 @@ export function CustomInitialFocusExample() {
                 />
               </div>
               <div className="mt-6 flex justify-end">
-                <Modal.CloseTrigger>Close</Modal.CloseTrigger>
+                <Modal.Close>Close</Modal.Close>
               </div>
             </Modal.Content>
           </Modal.Portal>
@@ -154,12 +154,12 @@ export function CustomInitialFocusExample() {
 
 export function NestedModalExample() {
   // First Modal Settings
-  const [firstCloseOnOutsideClick, setFirstCloseOnOutsideClick] =
+  const [firstCloseOnBackdropClick, setFirstCloseOnBackdropClick] =
     useState(false)
   const [firstCloseOnEscape, setFirstCloseOnEscape] = useState(true)
 
   // Nested Modal Settings
-  const [nestedCloseOnOutsideClick, setNestedCloseOnOutsideClick] =
+  const [nestedCloseOnBackdropClick, setNestedCloseOnBackdropClick] =
     useState(false)
   const [nestedCloseOnEscape, setNestedCloseOnEscape] = useState(true)
 
@@ -177,13 +177,13 @@ export function NestedModalExample() {
                 <label className="flex items-center gap-2">
                   <input
                     type="checkbox"
-                    checked={firstCloseOnOutsideClick}
+                    checked={firstCloseOnBackdropClick}
                     onChange={(e) =>
-                      setFirstCloseOnOutsideClick(e.target.checked)
+                      setFirstCloseOnBackdropClick(e.target.checked)
                     }
                     className="w-4 h-4"
                   />
-                  <span className="text-sm">Close on Outside Click</span>
+                  <span className="text-sm">Close on Backdrop Click</span>
                 </label>
                 <label className="flex items-center gap-2">
                   <input
@@ -205,13 +205,13 @@ export function NestedModalExample() {
                 <label className="flex items-center gap-2">
                   <input
                     type="checkbox"
-                    checked={nestedCloseOnOutsideClick}
+                    checked={nestedCloseOnBackdropClick}
                     onChange={(e) =>
-                      setNestedCloseOnOutsideClick(e.target.checked)
+                      setNestedCloseOnBackdropClick(e.target.checked)
                     }
                     className="w-4 h-4"
                   />
-                  <span className="text-sm">Close on Outside Click</span>
+                  <span className="text-sm">Close on Backdrop Click</span>
                 </label>
                 <label className="flex items-center gap-2">
                   <input
@@ -229,7 +229,7 @@ export function NestedModalExample() {
           {/* Modal Demo */}
           <div className="flex items-center justify-center">
             <Modal.Root
-              closeOnOutsideClick={firstCloseOnOutsideClick}
+              closeOnBackdropClick={firstCloseOnBackdropClick}
               closeOnEscape={firstCloseOnEscape}
             >
               <Modal.Trigger>Open First Modal</Modal.Trigger>
@@ -245,8 +245,8 @@ export function NestedModalExample() {
                   <div className="mt-4 space-y-2">
                     <div className="text-xs text-gray-500 space-y-1">
                       <div>
-                        Close on Outside Click:{' '}
-                        {firstCloseOnOutsideClick ? 'Enabled' : 'Disabled'}
+                        Close on Backdrop Click:{' '}
+                        {firstCloseOnBackdropClick ? 'Enabled' : 'Disabled'}
                       </div>
                       <div>
                         Close on Escape:{' '}
@@ -256,7 +256,7 @@ export function NestedModalExample() {
                   </div>
                   <div className="mt-6">
                     <Modal.Root
-                      closeOnOutsideClick={nestedCloseOnOutsideClick}
+                      closeOnBackdropClick={nestedCloseOnBackdropClick}
                       closeOnEscape={nestedCloseOnEscape}
                     >
                       <Modal.Trigger className="w-full">
@@ -275,8 +275,8 @@ export function NestedModalExample() {
                           <div className="mt-4 space-y-2">
                             <div className="text-xs text-gray-500 space-y-1">
                               <div>
-                                Close on Outside Click:{' '}
-                                {nestedCloseOnOutsideClick
+                                Close on Backdrop Click:{' '}
+                                {nestedCloseOnBackdropClick
                                   ? 'Enabled'
                                   : 'Disabled'}
                               </div>
@@ -287,16 +287,14 @@ export function NestedModalExample() {
                             </div>
                           </div>
                           <div className="mt-6 flex justify-end gap-2">
-                            <Modal.CloseTrigger>
-                              Close Nested
-                            </Modal.CloseTrigger>
+                            <Modal.Close>Close Nested</Modal.Close>
                           </div>
                         </Modal.Content>
                       </Modal.Portal>
                     </Modal.Root>
                   </div>
                   <div className="mt-6 flex justify-end gap-2">
-                    <Modal.CloseTrigger>Close First</Modal.CloseTrigger>
+                    <Modal.Close>Close First</Modal.Close>
                   </div>
                 </Modal.Content>
               </Modal.Portal>

@@ -3,6 +3,7 @@ import MainLayout from './layouts/MainLayout'
 import HomePage from './pages/HomePage'
 import AccordionPage from './pages/AccordionPage'
 import TabsPage from './pages/TabsPage'
+import ModalPage from './pages/ModalPage'
 
 function App() {
   return (
@@ -12,6 +13,7 @@ function App() {
           <Route path="/" element={<HomePage />} />
           <Route path="/accordion" element={<AccordionPage />} />
           <Route path="/tabs" element={<TabsPage />} />
+          <Route path="/modal" element={<ModalPage />} />
         </Route>
       </Routes>
     </BrowserRouter>

@@ -31,13 +31,13 @@ export type TabsEvents = {
   FOCUS: { value: TabValue }
 
   // Keyboard navigation (W3C APG)
-  FOCUS_NEXT: Record<string, never>
-  FOCUS_PREV: Record<string, never>
-  FOCUS_FIRST: Record<string, never>
-  FOCUS_LAST: Record<string, never>
+  FOCUS_NEXT: undefined
+  FOCUS_PREV: undefined
+  FOCUS_FIRST: undefined
+  FOCUS_LAST: undefined
 
   // Manual mode activation (Enter/Space)
-  ACTIVATE_FOCUSED: Record<string, never>
+  ACTIVATE_FOCUSED: undefined
 }
 
 export type TabsComputed = {

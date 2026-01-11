@@ -1,5 +1,27 @@
 # [컴포넌트명] 구현 계획
 
+## 0. 핵심 원칙
+
+> 이 원칙들은 과거 구현에서 발생한 실제 버그에서 도출됨
+
+| 원칙 | 설명 | 위반 시 증상 |
+|------|------|-------------|
+| **Machine = 선언적 명세서** | Machine만 읽으면 컴포넌트 동작이 이해되어야 함 | Shell에 조건문/비즈니스 로직 과다 |
+| **DOM helpers 패턴** | Machine은 "무엇을", Shell은 "언제/어떻게" | Effect가 DOM 렌더링 전에 실행되어 동작 안함 |
+| **stopPropagation 금지** | 라이브러리 코드에서 이벤트 흐름 방해 금지 | 상위 컴포넌트가 이벤트 감지 불가 |
+| **전역 레이어 스택** | 중첩 레이어는 상태 기반으로 topmost 판별 | 중첩 Modal에서 Escape가 모두 닫음 |
+
+### 컴포넌트 유형 판별
+
+| 유형 | 특징 | 필요 패턴 | 예시 |
+|------|------|----------|------|
+| **레이어 컴포넌트** | Escape로 닫힘, 중첩 가능, 오버레이 | DismissableLayer + DOM helpers | Modal, Dropdown, Popover, Tooltip |
+| **인라인 컴포넌트** | 페이지 흐름 내 존재, 중첩 개념 없음 | Machine만 | Accordion, Tabs, Toggle |
+
+> ⚠️ 레이어 컴포넌트는 반드시 **중첩 케이스 테스트** 필수
+
+---
+
 ## 1. 요구사항
 
 ### 기능 요구사항
@@ -135,6 +157,43 @@ rafId = requestAnimationFrame(() => {
 })
 ```
 
+### 프리미티브 1: DismissableLayer
+```ts
+// 중첩된 dismissable 컴포넌트(Modal, Dropdown, Popover 등)에서
+// Escape 키가 최상위 레이어만 닫도록 처리
+
+import { DismissableLayer } from '@/primitives/dismissable-layer'
+
+// 사용 패턴
+<DismissableLayer
+  isActive={open}                    // 레이어가 활성화되었는지 (스택에 등록)
+  dismissOnEscape={closeOnEscape}    // Escape 키로 닫을 수 있는지
+  onEscapeKeyDown={handleEscape}     // Escape 키 핸들러 (isTopmost일 때만 호출)
+  onPointerDownOutside={handleOutsideClick}  // 외부 클릭 핸들러
+  contentRef={contentRef}            // 외부 클릭 감지 대상 요소
+>
+  {children}
+</DismissableLayer>
+```
+
+**핵심 동작:**
+- 전역 레이어 스택으로 활성화된 레이어 순서 추적
+- `isTopmost`인 레이어만 Escape 키/외부 클릭 이벤트 처리
+- 중첩 Modal에서 Escape 누르면 최상위 Modal만 닫힘
+
+**언제 사용하는가:**
+| 컴포넌트 | DismissableLayer 필요? | 이유 |
+|---------|----------------------|------|
+| Modal | ✅ | 중첩 Modal에서 Escape가 최상위만 닫아야 함 |
+| Dropdown | ✅ | Modal 안에 Dropdown이 있을 때 |
+| Popover | ✅ | 중첩 가능한 모든 레이어 컴포넌트 |
+| Accordion | ❌ | 중첩/레이어 개념 없음 |
+| Tabs | ❌ | 중첩/레이어 개념 없음 |
+
+**주의: stopPropagation 금지**
+> 라이브러리 수준 코드에서 `event.stopPropagation()`은 절대 사용하면 안 됨
+> 사용자가 상위에서 이벤트를 감지할 수 없게 되어 예측 불가능한 동작 발생
+
 ---
 
 ## 5. 상태 관리
@@ -197,13 +256,14 @@ type Events = {
   FOCUS: { value: string }
 
   // 키보드 네비게이션 (W3C APG 직접 반영)
-  FOCUS_NEXT: {}    // ArrowRight/Down
-  FOCUS_PREV: {}    // ArrowLeft/Up
-  FOCUS_FIRST: {}   // Home
-  FOCUS_LAST: {}    // End
+  // 페이로드 없는 이벤트는 undefined 사용
+  FOCUS_NEXT: undefined    // ArrowRight/Down
+  FOCUS_PREV: undefined    // ArrowLeft/Up
+  FOCUS_FIRST: undefined   // Home
+  FOCUS_LAST: undefined    // End
 
   // Manual 모드 활성화
-  ACTIVATE_FOCUSED: {}  // Enter/Space
+  ACTIVATE_FOCUSED: undefined  // Enter/Space
 }
 ```
 
@@ -228,10 +288,78 @@ focusNext: (context) => {
 }
 ```
 
+**Effects (부수효과)**
+```ts
+// 상태 변화 감지 후 부수효과 실행
+effects: [
+  {
+    watch: (context) => context.open,
+    enter: (context) => {
+      // open이 true가 될 때 실행
+      context.dom.lockScroll()
+      context.dom.activateFocusTrap()
+
+      // cleanup 함수 반환
+      return () => {
+        context.dom.deactivateFocusTrap()
+        context.dom.unlockScroll()
+      }
+    },
+  },
+],
+```
+
+> ⚠️ **핵심**: Machine effects는 "무엇을 할지"만 선언 (`dom.activateFocusTrap()`)
+> 타이밍, 렌더링 대기, 외부 라이브러리 연동은 Shell이 제공하는 DOM helper가 처리
+
+**DOM helpers 타입 (Input에 포함)**
+```ts
+type ComponentDom = {
+  // Shell이 구현하는 DOM 조작 함수들
+  activateFocusTrap: () => void    // 타이밍 처리 포함
+  deactivateFocusTrap: () => void
+  lockScroll: () => void
+  unlockScroll: () => void
+}
+
+type Input = {
+  // ...기존 props
+  dom: ComponentDom
+}
+```
+
+**Shell에서 DOM helper 구현**
+```ts
+// Shell (index.tsx)
+const activateFocusTrap = useCallback(() => {
+  // Shell이 타이밍 책임 - DOM 렌더링 대기
+  requestAnimationFrame(() => {
+    const contentElement = contentRef.current
+    if (!contentElement) return
+
+    // 외부 라이브러리 사용
+    const trap = createFocusTrap(contentElement, { ... })
+    trap.activate()
+    trapRef.current = trap
+  })
+}, [])
+
+// Machine에 전달
+const { send, computed } = useMachine(machine, {
+  ...props,
+  dom: {
+    activateFocusTrap,
+    deactivateFocusTrap,
+    lockScroll,
+    unlockScroll,
+  },
+})
+```
+
 ### Machine과 Shell의 역할 분리
 
 > Machine = **"무엇을, 어떻게"** (선언적 명세)
-> Shell = **"언제, 어디서"** (데이터 제공 + 실행 시점)
+> Shell = **"언제, 어디서"** (데이터 제공 + 실행 시점 + 타이밍)
 
 | 역할 | Machine | Shell |
 |------|---------|-------|
@@ -240,12 +368,17 @@ focusNext: (context) => {
 | 네비게이션 계산 | ✅ | ❌ |
 | 조건부 로직 (automatic/manual) | ✅ | ❌ |
 | 비즈니스 규칙 (collapsible, multiple 등) | ✅ | ❌ |
+| 부수효과 선언 (effects) | ✅ (`dom.xxx()` 호출) | ❌ |
 | **실행 컨텍스트 (When/Where)** | | |
 | DOM 이벤트 리스닝 | ❌ | ✅ |
 | 이벤트 발송 시점 결정 | ❌ | ✅ |
 | DOM 노드 데이터 제공 (getEnabledValues 등) | ❌ | ✅ |
 | DOM 포커스 실행 | ❌ | ✅ (useEffect) |
 | ARIA 속성 적용 | ❌ | ✅ |
+| **DOM helpers (타이밍 책임)** | | |
+| 렌더링 타이밍 처리 (requestAnimationFrame) | ❌ | ✅ |
+| 외부 라이브러리 연동 (focus-trap 등) | ❌ | ✅ |
+| cleanup 로직 구현 | ❌ | ✅ |
 
 ### Context 구조
 ```
@@ -359,6 +492,16 @@ src/components/[component]/
 - [ ] aria-labelledby ↔ id 연결
 - [ ] tabindex 관리
 
+**레이어 컴포넌트 전용 (Modal, Dropdown, Popover 등)**
+- [ ] 열기/닫기 기본 동작
+- [ ] Escape로 닫기
+- [ ] 외부 클릭으로 닫기
+- [ ] Focus trap 동작 (Tab 순환)
+- [ ] 닫을 때 트리거로 포커스 복귀
+- [ ] **중첩 테스트: Escape가 topmost만 닫는지**
+- [ ] **중첩 테스트: 외부 클릭 시 동작**
+- [ ] Scroll lock 동작
+
 ---
 
 ## 9. 구현 순서
@@ -385,12 +528,16 @@ src/components/[component]/
 |------|------|------|
 | Focus 동기화 누락 | 프로그래밍 방식 focus 후 키보드 동작 오류 | 모든 focus 진입점에 FOCUS 이벤트 |
 | Machine 로직 부족 | Shell에 조건문 과다 | W3C 요구사항 → Machine 이벤트 매핑 검토 |
+| Effect 타이밍 이슈 | Effect가 DOM 렌더링 전에 실행되어 동작 안함 | DOM helpers 패턴 사용 (Shell이 타이밍 책임) |
 
 ### 중간 위험도
 | 위험 | 증상 | 예방 |
 |------|------|------|
 | 콘텐츠 깜빡임 | 전환 시 두 콘텐츠 동시 표시 | 콘텐츠 전환 전략 사전 결정 |
 | Props 위치 오류 | Machine에서 prop 접근 불가 | Props 위치 결정 섹션 체크 |
+| Machine에 타이밍 로직 포함 | requestAnimationFrame 등이 machine에 존재 | DOM helpers로 추상화 |
+| 중첩 레이어 Escape 처리 | 중첩 Modal에서 Escape가 모두 닫음 | DismissableLayer 프리미티브 사용 |
+| stopPropagation 사용 | 상위 컴포넌트가 이벤트 감지 불가 | 전역 레이어 스택으로 해결 |
 
 ### 낮은 위험도
 | 위험 | 증상 | 예방 |
@@ -408,6 +555,11 @@ src/components/[component]/
 - [ ] 콘텐츠 전환 깜빡임 없음
 - [ ] Focus/Selection 동기화 정상
 
+**레이어 컴포넌트 추가 기준:**
+- [ ] 중첩 시 Escape가 topmost만 닫음
+- [ ] stopPropagation 미사용
+- [ ] Machine에 타이밍 로직 없음 (DOM helpers 사용)
+
 ---
 
 ## 부록: 체크리스트
@@ -422,10 +574,76 @@ src/components/[component]/
 - [ ] **모든 요구사항 → Machine 이벤트/액션 매핑** 했는가?
 - [ ] Machine 로직에 필요한 **Props 위치 확인**했는가?
 - [ ] **콘텐츠 전환 전략** 결정했는가?
+- [ ] **부수효과(effects) 필요 여부** 확인했는가? (focus trap, scroll lock 등)
+- [ ] **DOM helpers 인터페이스** 정의했는가? (effects 사용 시)
+- [ ] **DismissableLayer 필요 여부** 확인했는가? (레이어/중첩 가능 컴포넌트)
+
+### 레이어 컴포넌트 추가 체크 (Modal, Dropdown, Popover 등)
+- [ ] **DismissableLayer로 Content 래핑**했는가?
+- [ ] **DOM helpers 패턴** 적용했는가? (focus trap, scroll lock)
+- [ ] **중첩 시나리오** 정의했는가?
+  - 같은 컴포넌트 중첩 (Modal 안에 Modal)
+  - 다른 컴포넌트 중첩 (Modal 안에 Dropdown)
+- [ ] **Escape 동작** 명세했는가? (topmost만 닫힘)
+- [ ] **외부 클릭 동작** 명세했는가? (중첩 시 어떻게 처리?)
+- [ ] **포커스 복귀** 고려했는가? (닫힐 때 트리거로 복귀)
 
 ### 구현 완료 시
 - [ ] **Machine만 읽으면 컴포넌트 동작이 이해되는가?** (선언적 명세)
 - [ ] Shell에 조건문/비즈니스 로직이 없는가? (있다면 Machine으로 이동)
+- [ ] **Machine에 타이밍 로직이 없는가?** (requestAnimationFrame 등은 DOM helpers로)
 - [ ] 프리모템에서 예상한 위험들 확인했는가?
 - [ ] 모든 focus 진입점에서 focusedValue 동기화되는가?
+- [ ] **중첩 케이스 테스트했는가?** (레이어 컴포넌트는 중첩 시 Escape 동작 확인)
+- [ ] **stopPropagation 사용하지 않았는가?** (DismissableLayer로 해결)
 - [ ] 예상 못한 이슈가 있었다면 템플릿에 반영할 것은?
+
+### 코드 스멜 체크
+
+> 아래 패턴이 보이면 설계 재검토 필요
+
+**Machine 파일에서:**
+```ts
+// ❌ 타이밍 로직이 Machine에 있음
+requestAnimationFrame(() => { ... })
+setTimeout(() => { ... })
+
+// ❌ DOM 직접 조작
+document.body.style.overflow = 'hidden'
+element.focus()
+
+// ❌ 외부 라이브러리 직접 호출
+createFocusTrap(element).activate()
+```
+
+**Shell 파일에서:**
+```tsx
+// ❌ 비즈니스 로직이 Shell에 있음
+if (mode === 'automatic') { ... }
+if (multiple && expandedIds.has(id)) { ... }
+
+// ❌ stopPropagation 사용
+event.stopPropagation()
+
+// ❌ 중첩 레이어에서 직접 Escape 처리
+if (event.key === 'Escape') { onClose() }  // DismissableLayer 없이
+```
+
+**올바른 패턴:**
+```ts
+// ✅ Machine: 선언만
+effects: [{
+  watch: (ctx) => ctx.open,
+  enter: (ctx) => { ctx.dom.activateFocusTrap() }  // 무엇을 할지만
+}]
+
+// ✅ Shell: 타이밍 처리
+const activateFocusTrap = useCallback(() => {
+  requestAnimationFrame(() => { ... })  // 언제/어떻게
+}, [])
+
+// ✅ 중첩 레이어: DismissableLayer 사용
+<DismissableLayer isActive={open} onEscapeKeyDown={handleEscape}>
+  {children}
+</DismissableLayer>
+```

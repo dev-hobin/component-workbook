@@ -1,7 +1,7 @@
 import ModalPrimitives, {
   type RootProps,
   type TriggerProps,
-  type CloseTriggerProps,
+  type CloseProps,
   type ContentProps,
   type BackdropProps,
   type TitleProps,
@@ -18,7 +18,10 @@ export function Trigger({ className, ...rest }: TriggerProps) {
   return (
     <ModalPrimitives.Trigger
       className={cn(
-        'px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors',
+        'px-4 py-2 bg-blue-600 text-white rounded-md',
+        'hover:bg-blue-700',
+        'focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2',
+        'transition-colors',
         className,
       )}
       {...rest}
@@ -26,11 +29,14 @@ export function Trigger({ className, ...rest }: TriggerProps) {
   )
 }
 
-export function CloseTrigger({ className, ...rest }: CloseTriggerProps) {
+export function Close({ className, ...rest }: CloseProps) {
   return (
-    <ModalPrimitives.CloseTrigger
+    <ModalPrimitives.Close
       className={cn(
-        'px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 transition-colors',
+        'px-4 py-2 bg-gray-200 text-gray-800 rounded-md',
+        'hover:bg-gray-300',
+        'focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2',
+        'transition-colors',
         className,
       )}
       {...rest}
@@ -42,12 +48,13 @@ export function Backdrop({ className, ...rest }: BackdropProps) {
   return (
     <ModalPrimitives.Backdrop
       className={cn(
-        'fixed inset-0 bg-black/50 z-40 transition-opacity duration-150',
-        // Enter animation (starting)
+        'fixed inset-0 bg-black/50 z-40',
+        'transition-opacity duration-150',
+        // Enter animation
         'data-[transition=starting]:opacity-0',
-        // Idle state (fully visible)
+        // Idle state
         'data-[transition=idle]:opacity-100',
-        // Exit animation (ending)
+        // Exit animation
         'data-[transition=ending]:opacity-0',
         className,
       )}
@@ -65,20 +72,12 @@ export function Content({ className, ...rest }: ContentProps) {
         'max-h-[90vh] overflow-y-auto',
         'focus:outline-none',
         'transition-all duration-200 ease-out',
-        // Enter animation (starting)
-        'data-[transition=starting]:opacity-0',
-        'data-[transition=starting]:scale-95',
-        'data-[transition=starting]:-translate-y-2',
-        // Idle state (fully visible)
-        'data-[transition=idle]:opacity-100',
-        'data-[transition=idle]:scale-100',
-        'data-[transition=idle]:translate-y-0',
-        // Exit animation (ending)
-        'data-[transition=ending]:opacity-0',
-        'data-[transition=ending]:scale-95',
-        'data-[transition=ending]:-translate-y-2',
-        'data-[transition=ending]:duration-150',
-        'data-[transition=ending]:ease-in',
+        // Enter animation
+        'data-[transition=starting]:opacity-0 data-[transition=starting]:scale-95',
+        // Idle state
+        'data-[transition=idle]:opacity-100 data-[transition=idle]:scale-100',
+        // Exit animation
+        'data-[transition=ending]:opacity-0 data-[transition=ending]:scale-95',
         className,
       )}
       {...rest}
@@ -104,14 +103,14 @@ export function Description({ className, ...rest }: DescriptionProps) {
   )
 }
 
-export function Portal({ ...rest }: PortalProps) {
-  return <ModalPrimitives.Portal {...rest} />
+export function Portal(props: PortalProps) {
+  return <ModalPrimitives.Portal {...props} />
 }
 
 const Modal = {
   Root,
   Trigger,
-  CloseTrigger,
+  Close,
   Content,
   Backdrop,
   Title,

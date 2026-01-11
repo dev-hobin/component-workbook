@@ -216,24 +216,24 @@ export const List = forwardRef<HTMLDivElement, ListProps>(
       switch (e.key) {
         case nextKey:
           e.preventDefault()
-          send('FOCUS_NEXT', {})
+          send('FOCUS_NEXT')
           break
         case prevKey:
           e.preventDefault()
-          send('FOCUS_PREV', {})
+          send('FOCUS_PREV')
           break
         case 'Home':
           e.preventDefault()
-          send('FOCUS_FIRST', {})
+          send('FOCUS_FIRST')
           break
         case 'End':
           e.preventDefault()
-          send('FOCUS_LAST', {})
+          send('FOCUS_LAST')
           break
         case 'Enter':
         case ' ':
           e.preventDefault()
-          send('ACTIVATE_FOCUSED', {})
+          send('ACTIVATE_FOCUSED')
           break
       }
     }

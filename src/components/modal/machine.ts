@@ -1,109 +1,120 @@
-import * as focusTrapLib from 'focus-trap'
 import { createMachine } from 'controlled-machine'
 
 // ============================================
 // Types
 // ============================================
 
-export type ModalEvents = {
-  OPEN: undefined
-  CLOSE: undefined
-  OUTSIDE_CLICK: undefined
+export type ModalDom = {
+  // 포커스 트랩 활성화 (Shell이 타이밍 처리)
+  activateFocusTrap: () => void
+  // 포커스 트랩 해제 및 포커스 복귀
+  deactivateFocusTrap: () => void
+  // 스크롤 잠금
+  lockScroll: () => void
+  // 스크롤 복원
+  unlockScroll: () => void
 }
-
-export type ModalState = 'open' | 'closed'
 
 export type ModalInput = {
-  // State (state 기능 활용을 위해 'state' 프로퍼티 필요)
-  state: ModalState
+  // 핵심 상태
+  open: boolean
   onOpenChange: (open: boolean) => void
 
-  // Options
+  // 닫기 옵션
   closeOnEscape: boolean
-  closeOnOutsideClick: boolean
+  closeOnBackdropClick: boolean
 
-  // Helpers
-  getContentElement: () => HTMLElement | null
-  getInitialFocusElement: () => HTMLElement | null | undefined
-
-  // Effect state (React-agnostic)
-  getTrap: () => focusTrapLib.FocusTrap | null
-  onTrapChange: (trap: focusTrapLib.FocusTrap | null) => void
-  getPrevOverflow: () => string
-  onPrevOverflowChange: (overflow: string) => void
+  // DOM helpers
+  dom: ModalDom
 }
+
+export type ModalEvents = {
+  // 상태 변경
+  OPEN: undefined
+  CLOSE: undefined
+
+  // 사용자 인터랙션 (조건부 닫기)
+  ESCAPE_KEY: undefined
+  BACKDROP_CLICK: undefined
+}
+
+export type ModalComputed = {
+  isOpen: boolean
+}
+
+export type ModalActions = 'open' | 'close'
 
 // ============================================
 // Machine
 // ============================================
 
+/**
+ * Modal Machine - 선언적 명세
+ *
+ * 이 Machine을 읽으면 Modal의 동작이 이해됩니다:
+ *
+ * ## 이벤트
+ * - OPEN 이벤트 → 모달 열기
+ * - CLOSE 이벤트 → 모달 닫기
+ * - ESCAPE_KEY 이벤트 → closeOnEscape가 true면 닫기
+ * - BACKDROP_CLICK 이벤트 → closeOnBackdropClick이 true면 닫기
+ *
+ * ## 부수 효과 (Effects)
+ * - 모달 열림 시: 포커스 트랩 활성화, 스크롤 잠금
+ * - 모달 닫힘 시: 포커스 트랩 해제, 스크롤 복원, 트리거로 포커스 복귀
+ */
 export const modalMachine = createMachine<{
   input: ModalInput
   events: ModalEvents
-  state: ModalState
-  actions: 'noop' | 'open' | 'close'
+  computed: ModalComputed
+  actions: ModalActions
 }>({
-  // 상태별 핸들러: 각 상태에서 유효한 이벤트만 처리
-  states: {
-    closed: {
-      on: {
-        OPEN: 'open',
-        // closed 상태에서 CLOSE, OUTSIDE_CLICK은 무시됨
-      },
-    },
-    open: {
-      on: {
-        CLOSE: 'close',
-        OUTSIDE_CLICK: [
-          { when: (context) => context.closeOnOutsideClick, do: 'close' },
-          { do: 'noop' },
-        ],
-        // open 상태에서 OPEN은 무시됨
-      },
-    },
+  computed: {
+    isOpen: (context) => context.open,
+  },
+
+  on: {
+    OPEN: 'open',
+    CLOSE: 'close',
+
+    // Escape 키: closeOnEscape 옵션이 true일 때만 닫기
+    ESCAPE_KEY: [{ when: (context) => context.closeOnEscape, do: 'close' }],
+
+    // 백드롭 클릭: closeOnBackdropClick 옵션이 true일 때만 닫기
+    BACKDROP_CLICK: [
+      { when: (context) => context.closeOnBackdropClick, do: 'close' },
+    ],
   },
 
   effects: [
     {
-      watch: (context) => context.state === 'open',
+      // 포커스 트랩 및 스크롤 잠금
+      watch: (context) => context.open,
       enter: (context) => {
-        // 1. Body scroll lock
-        context.onPrevOverflowChange(getComputedStyle(document.body).overflow)
-        document.body.style.overflow = 'hidden'
+        context.dom.lockScroll()
+        context.dom.activateFocusTrap()
 
-        // 2. Focus trap 활성화 (다음 프레임에서 실행)
-        requestAnimationFrame(() => {
-          const contentEl = context.getContentElement()
-          if (contentEl && !context.getTrap()) {
-            const trap = focusTrapLib
-              .createFocusTrap(contentEl, {
-                initialFocus: context.getInitialFocusElement() ?? undefined,
-                fallbackFocus: contentEl,
-                allowOutsideClick: context.closeOnOutsideClick,
-                escapeDeactivates: context.closeOnEscape,
-                onDeactivate: () => context.onOpenChange(false),
-              })
-              .activate()
-            context.onTrapChange(trap)
-          }
-        })
-
-        // 3. Cleanup 반환
         return () => {
-          const trap = context.getTrap()
-          if (trap) {
-            trap.deactivate()
-            context.onTrapChange(null)
-          }
-          document.body.style.overflow = context.getPrevOverflow()
+          context.dom.deactivateFocusTrap()
+          context.dom.unlockScroll()
         }
       },
     },
+    // Escape 키, 외부 클릭은 DismissableLayer가 처리 (Shell에서 설정)
+    // Machine은 ESCAPE_KEY, BACKDROP_CLICK 이벤트만 선언적으로 처리
   ],
 
   actions: {
-    noop: () => {},
-    open: (context) => context.onOpenChange(true),
-    close: (context) => context.onOpenChange(false),
+    open: (context) => {
+      if (!context.open) {
+        context.onOpenChange(true)
+      }
+    },
+
+    close: (context) => {
+      if (context.open) {
+        context.onOpenChange(false)
+      }
+    },
   },
 })
