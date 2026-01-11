@@ -1,8 +1,8 @@
 import { useCallback, useId, useLayoutEffect, useRef } from 'react'
-import { useComponentStore } from './use-component-store'
+import { useNodeStore } from './use-node-store'
 import { useParentId } from './use-parent-context'
 import { useLatestRef } from '../hooks/use-latest-ref'
-import type { NodeId } from './component-store'
+import type { NodeId } from './node-store'
 
 export function useNode<
   Role extends string,
@@ -11,7 +11,7 @@ export function useNode<
   const generatedId = useId()
   const id = options.id ?? generatedId
   const parentId = useParentId()
-  const { store } = useComponentStore<Role, Meta>()
+  const store = useNodeStore<Role, Meta>()
   const elementRef = useRef<HTMLElement | null>(null)
   const metaRef = useLatestRef(options.meta)
 
@@ -53,7 +53,7 @@ export function useLogicalNode<
   const generatedId = useId()
   const id = options.id ?? generatedId
   const parentId = useParentId()
-  const { store } = useComponentStore<Role, Meta>()
+  const store = useNodeStore<Role, Meta>()
   const metaRef = useLatestRef(options.meta)
 
   useLayoutEffect(() => {

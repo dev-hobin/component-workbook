@@ -26,12 +26,12 @@ import { composeRefs } from '../../utils/compose-refs'
 import { mergeProps } from '../../utils/merge-props'
 
 import {
-  ComponentStoreProvider,
-  useComponentStore,
-} from '../../primitives/use-component-store'
+  NodeStoreProvider,
+  useNodeStore,
+} from '../../primitives/use-node-store'
 import { useNode } from '../../primitives/use-node'
-import { useComponentSubscribe } from '../../primitives/use-component-subscribe'
-import type { ComponentStore } from '../../primitives/component-store'
+import { useStoreSubscribe } from '../../primitives/use-store-subscribe'
+import type { NodeStore } from '../../primitives/node-store'
 
 // ============================================
 // Types
@@ -53,7 +53,7 @@ type ComboboxContextValue = {
   selectedValue: string | null
   highlightedOptionId: OptionId | null
   autocompleteText: string | null
-  store: ComponentStore<ComboboxRole, ComboboxMeta>
+  store: NodeStore<ComboboxRole, ComboboxMeta>
   send: Send<ComboboxEvents>
   autocomplete: AutocompleteMode
   options: ComboboxOption[]
@@ -111,9 +111,9 @@ export type RootProps = {
 
 export function Root(props: RootProps) {
   return (
-    <ComponentStoreProvider<ComboboxRole, ComboboxMeta>>
+    <NodeStoreProvider<ComboboxRole, ComboboxMeta>>
       <RootInner {...props} />
-    </ComponentStoreProvider>
+    </NodeStoreProvider>
   )
 }
 
@@ -136,7 +136,7 @@ function RootInner({
   loop = true,
   onSelect,
 }: RootProps) {
-  const { store } = useComponentStore<ComboboxRole, ComboboxMeta>()
+  const store = useNodeStore<ComboboxRole, ComboboxMeta>()
   const comboboxId = useId()
 
   // Options 관리
@@ -197,37 +197,47 @@ function RootInner({
 
   // Event machine
   const { send } = useEventMachine(comboboxMachine, {
-    isOpen: isOpen ?? false,
-    inputValue: inputValue ?? '',
-    selectedValue: selectedValue ?? null,
-    highlightedOptionId,
-    autocompleteText,
-    onOpenChange: (open) => setIsOpen(open),
-    onInputValueChange: (value) => setInputValue(value),
-    onSelectedValueChange: (value) => setSelectedValue(value),
-    onHighlightedOptionIdChange: setHighlightedOptionId,
-    onAutocompleteTextChange: setAutocompleteText,
-    autocomplete,
-    openOnFocus,
-    closeOnSelect,
-    showAllOnEmpty,
-    clearOnSelect,
-    loop,
-    getFilteredOptions: () => filteredOptionsRef.current,
-    getOptionById: (id) => optionsRef.current.find((o) => o.id === id),
-    getOptionElement: (optionId) => store.getElement(optionId, 'option'),
-    getInputElement: () => inputRef.current,
-    getAllElements: () => {
-      const elements = new Map<string, HTMLElement>()
-      const inputEl = store.getElement(comboboxId, 'input')
-      const listbox = store.getElement(comboboxId, 'listbox')
-      const trigger = store.getElement(comboboxId, 'trigger')
-      if (inputEl) elements.set('input', inputEl)
-      if (listbox) elements.set('listbox', listbox)
-      if (trigger) elements.set('trigger', trigger)
-      return elements
+    props: {
+      isOpen: isOpen ?? false,
+      inputValue: inputValue ?? '',
+      selectedValue: selectedValue ?? null,
+      highlightedOptionId,
+      autocompleteText,
     },
-    notifySelect: (value) => onSelect?.(value),
+    handler: {
+      setIsOpen: (open) => setIsOpen(open),
+      setInputValue: (value) => setInputValue(value),
+      setSelectedValue: (value) => setSelectedValue(value),
+      setHighlightedOptionId,
+      setAutocompleteText,
+      onSelect,
+    },
+    options: {
+      autocomplete,
+      openOnFocus,
+      closeOnSelect,
+      showAllOnEmpty,
+      clearOnSelect,
+      loop,
+    },
+    helpers: {
+      getFilteredOptions: () => filteredOptionsRef.current,
+      getOptionById: (id) => optionsRef.current.find((o) => o.id === id),
+    },
+    dom: {
+      getOptionElement: (optionId) => store.getElement(optionId, 'option'),
+      getInputElement: () => inputRef.current,
+      getAllElements: () => {
+        const elements = new Map<string, HTMLElement>()
+        const inputEl = store.getElement(comboboxId, 'input')
+        const listbox = store.getElement(comboboxId, 'listbox')
+        const trigger = store.getElement(comboboxId, 'trigger')
+        if (inputEl) elements.set('input', inputEl)
+        if (listbox) elements.set('listbox', listbox)
+        if (trigger) elements.set('trigger', trigger)
+        return elements
+      },
+    },
   })
 
   // Input ref setter
@@ -324,7 +334,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
     })
 
     // Listbox ID 구독
-    const listboxDomId = useComponentSubscribe(
+    const listboxDomId = useStoreSubscribe(
       store,
       (s) => s.getElement(comboboxId, 'listbox')?.id || null,
     )
@@ -495,7 +505,7 @@ export const Listbox = forwardRef<HTMLUListElement, ListboxProps>(
     })
 
     // Label ID 구독
-    const labelId = useComponentSubscribe(
+    const labelId = useStoreSubscribe(
       store,
       (s) => s.getElement(comboboxId, 'label')?.id || null,
     )

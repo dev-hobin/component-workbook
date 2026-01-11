@@ -1,5 +1,5 @@
 import { createContext, useContext, type ReactNode } from 'react'
-import type { NodeId } from './component-store'
+import type { NodeId } from './node-store'
 
 type ParentContextValue = {
   id: NodeId

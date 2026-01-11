@@ -21,7 +21,7 @@ export interface ComponentNode<
   element: HTMLElement | null
 }
 
-export interface ComponentStore<
+export interface NodeStore<
   Role extends string = string,
   Meta extends object = object,
 > {
@@ -50,10 +50,10 @@ export interface ComponentStore<
   getAllElements(): Map<StoreKey, HTMLElement>
 }
 
-export function createComponentStore<
+export function createNodeStore<
   Role extends string = string,
   Meta extends object = object,
->(): ComponentStore<Role, Meta> {
+>(): NodeStore<Role, Meta> {
   const nodes = new Map<StoreKey, ComponentNode<Role, Meta>>()
   const childrenByParent = new Map<NodeId | null, StoreKey[]>()
   const listeners = new Set<StoreListener>()

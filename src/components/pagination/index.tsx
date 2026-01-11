@@ -19,11 +19,11 @@ import { composeRefs } from '../../utils/compose-refs'
 import { mergeProps } from '../../utils/merge-props'
 
 import {
-  ComponentStoreProvider,
-  useComponentStore,
-} from '../../primitives/use-component-store'
+  NodeStoreProvider,
+  useNodeStore,
+} from '../../primitives/use-node-store'
 import { useNode } from '../../primitives/use-node'
-import type { ComponentStore } from '../../primitives/component-store'
+import type { NodeStore } from '../../primitives/node-store'
 
 // ============================================
 // Types
@@ -41,7 +41,7 @@ type PaginationContextValue = {
   pageSize: number
   totalCount: number
   computed: PaginationComputed
-  store: ComponentStore<PaginationRole, PaginationMeta>
+  store: NodeStore<PaginationRole, PaginationMeta>
   send: Send<PaginationEvents>
 }
 
@@ -74,9 +74,9 @@ export type RootProps = {
 
 export function Root(props: RootProps) {
   return (
-    <ComponentStoreProvider<PaginationRole, PaginationMeta>>
+    <NodeStoreProvider<PaginationRole, PaginationMeta>>
       <RootInner {...props} />
-    </ComponentStoreProvider>
+    </NodeStoreProvider>
   )
 }
 
@@ -93,7 +93,7 @@ const RootInner = forwardRef<HTMLElement, RootProps>(
     },
     forwardedRef,
   ) => {
-    const { store } = useComponentStore<PaginationRole, PaginationMeta>()
+    const store = useNodeStore<PaginationRole, PaginationMeta>()
     const paginationId = useId()
 
     const [currentPage, setCurrentPage] = useControllableState({

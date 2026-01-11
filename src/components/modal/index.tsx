@@ -18,12 +18,12 @@ import { composeRefs } from '../../utils/compose-refs'
 import { mergeProps } from '../../utils/merge-props'
 
 import {
-  ComponentStoreProvider,
-  useComponentStore,
-} from '../../primitives/use-component-store'
+  NodeStoreProvider,
+  useNodeStore,
+} from '../../primitives/use-node-store'
 import { useNode } from '../../primitives/use-node'
-import { useComponentSubscribe } from '../../primitives/use-component-subscribe'
-import type { ComponentStore } from '../../primitives/component-store'
+import { useStoreSubscribe } from '../../primitives/use-store-subscribe'
+import type { NodeStore } from '../../primitives/node-store'
 
 // ============================================
 // Types
@@ -43,7 +43,7 @@ type ModalContextValue = {
   modalId: string
   isOpen: boolean
   send: Send<ModalEvents>
-  store: ComponentStore<ModalRole, ModalMeta>
+  store: NodeStore<ModalRole, ModalMeta>
 }
 
 // ============================================
@@ -76,9 +76,9 @@ export type RootProps = {
 
 export function Root(props: RootProps) {
   return (
-    <ComponentStoreProvider<ModalRole, ModalMeta>>
+    <NodeStoreProvider<ModalRole, ModalMeta>>
       <RootInner {...props} />
-    </ComponentStoreProvider>
+    </NodeStoreProvider>
   )
 }
 
@@ -91,7 +91,7 @@ function RootInner({
   closeOnOutsideClick = false,
   closeOnEscape = true,
 }: RootProps) {
-  const { store } = useComponentStore<ModalRole, ModalMeta>()
+  const store = useNodeStore<ModalRole, ModalMeta>()
   const modalId = useId()
 
   const [isOpen = false, setOpen] = useControllableState({
@@ -239,11 +239,11 @@ export const Content = forwardRef<HTMLDivElement, ContentProps>(
     })
 
     // store에서 title/description element의 id 구독
-    const titleId = useComponentSubscribe(
+    const titleId = useStoreSubscribe(
       store,
       (s) => s.getElement(modalId, 'title')?.id || null,
     )
-    const descriptionId = useComponentSubscribe(
+    const descriptionId = useStoreSubscribe(
       store,
       (s) => s.getElement(modalId, 'description')?.id || null,
     )

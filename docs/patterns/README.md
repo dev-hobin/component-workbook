@@ -1,102 +1,173 @@
-# 핵심 패턴
+# 컴포넌트 구현 가이드
 
-이 프로젝트에서 사용하는 핵심 패턴들입니다.
+이 문서는 공통 모듈을 사용하여 컴포넌트를 구현하는 방법을 설명합니다.
 
-## 패턴 목록
-
-| 패턴 | 설명 | 문서 |
-|------|------|------|
-| **Status 패턴** | 복잡한 State에서 단순한 Status를 파생하여 안전한 Effect 실행 | [status-pattern.md](./status-pattern.md) |
-| **Effect as Data** | 부수효과를 데이터로 표현하고 Shell에서 해석 | [effect-as-data.md](./effect-as-data.md) |
-| **handlersRef 패턴** | 안정적인 이벤트 핸들러 참조 유지 | [handlers-ref.md](./handlers-ref.md) |
-| **Cleanup 분리** | 상태 전환 Effect와 언마운트 Cleanup 분리 | [cleanup-separation.md](./cleanup-separation.md) |
-| **Controllable State** | Controlled/Uncontrolled 모드 지원 | [controllable-state.md](./controllable-state.md) |
-
----
-
-## 패턴 간 관계
+## 파일 구조
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                         사용자 인터랙션                               │
-└──────────────────────────────┬──────────────────────────────────────┘
-                               │
-                               ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                     Controllable State                              │
-│  - controlled/uncontrolled 모드 처리                                 │
-│  - useControllableState로 상태 관리                                  │
-└──────────────────────────────┬──────────────────────────────────────┘
-                               │
-                               ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                       Status 패턴                                   │
-│  - State에서 Status 파생                                            │
-│  - prevStatusRef로 전환 추적                                         │
-└──────────────────────────────┬──────────────────────────────────────┘
-                               │
-                               ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                     Effect as Data                                  │
-│  - 상태 전환에 따른 Effect[] 결정 (Core)                              │
-│  - runEffect로 실행 (Shell)                                         │
-└──────────────────────────────┬──────────────────────────────────────┘
-                               │
-                    ┌──────────┴──────────┐
-                    │                     │
-                    ▼                     ▼
-┌─────────────────────────┐   ┌─────────────────────────┐
-│    handlersRef 패턴      │   │    Cleanup 분리         │
-│  - 안정적인 리스너 참조   │   │  - 정상 전환 vs 언마운트  │
-│  - useLatestRef 활용    │   │  - Strict Mode 대응     │
-└─────────────────────────┘   └─────────────────────────┘
+src/components/{component-name}/
+├── machine.ts    # Event Machine 정의
+└── index.tsx     # React Shell (Compound Component)
 ```
 
 ---
 
-## 컴포넌트별 패턴 사용
+## 구현 순서
 
-### 기본 패턴 (외부 리소스 없음)
+### 1. machine.ts 작성
 
-| 컴포넌트 | Controllable State | 비고 |
-|---------|-------------------|------|
-| Accordion | ✅ | expandedIds 제어 |
-| Tabs | ✅ | selectedId 제어 |
-| Pagination | ✅ | page 제어 |
+```typescript
+import { createEventMachine } from '../../event-machine'
 
-### Status 패턴 (외부 리소스 관리)
+// 1. Events 정의
+export type MyEvents = {
+  TOGGLE: undefined
+  SELECT: { itemId: string }
+}
 
-| 컴포넌트 | 패턴 | 외부 리소스 |
-|---------|------|------------|
-| Modal | Status + Effect + Cleanup | focus-trap, scroll-lock |
-| Menu | Status + Effect + Cleanup + handlersRef | document 리스너 |
+// 2. Input 정의
+export type MyInput = {
+  value: string
+  onValueChange: (value: string) => void
+  getElement: (id: string) => HTMLElement | null
+}
+
+// 3. Machine 정의
+export const myMachine = createEventMachine<{
+  input: MyInput
+  events: MyEvents
+  actions: 'toggle' | 'select'
+}>({
+  on: {
+    TOGGLE: 'toggle',
+    SELECT: 'select',
+  },
+  actions: {
+    toggle: (context) => { ... },
+    select: (context, payload) => { ... },
+  },
+})
+```
+
+### 2. index.tsx 작성
+
+```typescript
+import { useControllableState } from '@radix-ui/react-use-controllable-state'
+import { useEventMachine } from '../../event-machine'
+import { NodeStoreProvider, useNodeStore } from '../../primitives/use-node-store'
+import { useNode } from '../../primitives/use-node'
+import { myMachine } from './machine'
+
+// Root
+export function Root(props: RootProps) {
+  return (
+    <NodeStoreProvider>
+      <RootInner {...props} />
+    </NodeStoreProvider>
+  )
+}
+
+function RootInner({ value, defaultValue, onValueChange, children }: RootProps) {
+  const { store } = useNodeStore()
+
+  const [currentValue, setCurrentValue] = useControllableState({
+    prop: value,
+    defaultProp: defaultValue,
+    onChange: onValueChange,
+  })
+
+  const { send } = useEventMachine(myMachine, {
+    value: currentValue,
+    onValueChange: setCurrentValue,
+    getElement: (id) => store.getElement(id, 'item'),
+  })
+
+  return (
+    <MyContext.Provider value={{ send, store }}>
+      {children}
+    </MyContext.Provider>
+  )
+}
+
+// Item
+export function Item({ id, children }: ItemProps) {
+  const { send } = useMyContext()
+  const { ref, domId } = useNode({ role: 'item', id })
+
+  return (
+    <div ref={ref} id={domId} onClick={() => send('SELECT', { itemId: id })}>
+      {children}
+    </div>
+  )
+}
+```
 
 ---
 
-## 패턴 적용 결정 흐름
+## 공통 모듈
 
+### Event Machine
+
+상태 관리 로직을 정의합니다. [상세 문서](./event-machine.md)
+
+```typescript
+const { send, computed } = useEventMachine(machine, input)
 ```
-외부 리소스(이벤트 리스너, focus-trap 등)가 필요한가?
-    │
-    ├─ No → 기본 패턴
-    │       └─ Controllable State만 적용
-    │
-    └─ Yes → Status 패턴
-             │
-             ├─ Effect as Data 적용
-             │
-             ├─ document 이벤트 리스너?
-             │   └─ handlersRef 패턴 적용
-             │
-             └─ Cleanup 분리 적용
+
+### Controllable State
+
+Controlled/Uncontrolled 모드 지원. [상세 문서](./controllable-state.md)
+
+```typescript
+const [value, setValue] = useControllableState({
+  prop: valueProp,
+  defaultProp: defaultValue,
+  onChange: onValueChange,
+})
+```
+
+### NodeStore
+
+노드 등록/조회. [상세 문서](../node-store.md)
+
+```typescript
+// Root에서 Provider
+<NodeStoreProvider>
+  <RootInner />
+</NodeStoreProvider>
+
+// 자식에서 사용
+const { store } = useNodeStore()
+const { ref, domId } = useNode({ role: 'item', id })
 ```
 
 ---
 
-## 권장 학습 순서
+## Input 설계 가이드
 
-1. **[Controllable State](./controllable-state.md)** - 모든 컴포넌트의 기본
-2. **[Status 패턴](./status-pattern.md)** - 외부 리소스 관리의 핵심
-3. **[Effect as Data](./effect-as-data.md)** - Core/Shell 분리의 핵심
-4. **[handlersRef 패턴](./handlers-ref.md)** - 이벤트 핸들러 최적화
-5. **[Cleanup 분리](./cleanup-separation.md)** - 안전한 리소스 정리
+| 카테고리 | 예시 |
+|----------|------|
+| 상태값 | `value`, `isOpen`, `focusedId`, `expandedIds` |
+| 콜백 | `onValueChange`, `onOpenChange`, `onFocusedIdChange` |
+| 옵션 | `loop`, `closeOnSelect`, `disabled` |
+| 헬퍼 | `getElement`, `getItems`, `getParentId` |
+
+---
+
+## Effects 사용 시점
+
+| 상황 | 사용 |
+|------|------|
+| 외부 클릭 감지 | `watch: isOpen` + `enter`에서 document 리스너 |
+| 포커스 동기화 | `watch: focusedId` + `change`에서 focus() |
+| 스크롤 동기화 | `watch: highlightedId` + `change`에서 scrollIntoView() |
+
+---
+
+## Computed 사용 시점
+
+| 상황 | 예시 |
+|------|------|
+| 페이지네이션 | `totalPages`, `hasPrev`, `hasNext` |
+| 메뉴 | `activeMenuId`, `isOpen` |
+| 활성 상태 | `isSelected`, `isExpanded` |

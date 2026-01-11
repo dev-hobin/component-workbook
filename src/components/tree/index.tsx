@@ -11,13 +11,13 @@ import { treeMachine, type TreeEvents, type NodeId } from './machine'
 import { findNodeFromMouseEvent } from '../../primitives/dom'
 
 import {
-  ComponentStoreProvider,
-  useComponentStore,
-} from '../../primitives/use-component-store'
+  NodeStoreProvider,
+  useNodeStore,
+} from '../../primitives/use-node-store'
 import { ParentProvider, useParentId, useLevel } from '../../primitives/use-parent-context'
 import { useNode } from '../../primitives/use-node'
-import { useComponentSubscribe } from '../../primitives/use-component-subscribe'
-import type { ComponentStore } from '../../primitives/component-store'
+import { useStoreSubscribe } from '../../primitives/use-store-subscribe'
+import type { NodeStore } from '../../primitives/node-store'
 
 // ============================================
 // Types
@@ -30,7 +30,7 @@ type TreeContextValue = {
   focusedId: NodeId | null
   selectedId: NodeId | null
   expandedIds: Set<NodeId>
-  store: ComponentStore<TreeRole, TreeMeta>
+  store: NodeStore<TreeRole, TreeMeta>
   send: Send<TreeEvents>
 }
 
@@ -40,7 +40,7 @@ type TreeContextValue = {
 
 /** visible items를 DOM 순서대로 반환 (expandedIds 기반 필터링) */
 function getVisibleItemIds(
-  store: ComponentStore<TreeRole, TreeMeta>,
+  store: NodeStore<TreeRole, TreeMeta>,
   expandedIds: Set<NodeId>,
 ): NodeId[] {
   const result: NodeId[] = []
@@ -113,9 +113,9 @@ type RootProps = {
 
 function Root(props: RootProps) {
   return (
-    <ComponentStoreProvider<TreeRole, TreeMeta>>
+    <NodeStoreProvider<TreeRole, TreeMeta>>
       <RootInner {...props} />
-    </ComponentStoreProvider>
+    </NodeStoreProvider>
   )
 }
 
@@ -133,7 +133,7 @@ function RootInner({
   onSelectChange,
   onExpandChange,
 }: RootProps) {
-  const { store } = useComponentStore<TreeRole, TreeMeta>()
+  const store = useNodeStore<TreeRole, TreeMeta>()
   const treeId = useId()
 
   const [focusedId, setFocusedId] = useControllableState({
@@ -291,7 +291,7 @@ function Item({ nodeId, children, className }: ItemProps) {
   })
 
   const level = useLevel()
-  const hasChildren = useComponentSubscribe(
+  const hasChildren = useStoreSubscribe(
     store,
     (s) => s.getChildrenByRole(nodeId, 'item').length > 0,
   )

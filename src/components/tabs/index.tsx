@@ -21,12 +21,12 @@ import { composeRefs } from '../../utils/compose-refs'
 import { mergeProps } from '../../utils/merge-props'
 
 import {
-  ComponentStoreProvider,
-  useComponentStore,
-} from '../../primitives/use-component-store'
+  NodeStoreProvider,
+  useNodeStore,
+} from '../../primitives/use-node-store'
 import { useNode } from '../../primitives/use-node'
-import { useComponentSubscribe } from '../../primitives/use-component-subscribe'
-import type { ComponentStore } from '../../primitives/component-store'
+import { useStoreSubscribe } from '../../primitives/use-store-subscribe'
+import type { NodeStore } from '../../primitives/node-store'
 
 // ============================================
 // Types
@@ -43,7 +43,7 @@ type TabsContextValue = {
   tabsId: string
   activeValue: TabValue | null
   focusedValue: TabValue | null
-  store: ComponentStore<TabsRole, TabsMeta>
+  store: NodeStore<TabsRole, TabsMeta>
   send: Send<TabsEvents>
   orientation: TabsOrientation
 }
@@ -76,9 +76,9 @@ export type RootProps = {
 
 export function Root(props: RootProps) {
   return (
-    <ComponentStoreProvider<TabsRole, TabsMeta>>
+    <NodeStoreProvider<TabsRole, TabsMeta>>
       <RootInner {...props} />
-    </ComponentStoreProvider>
+    </NodeStoreProvider>
   )
 }
 
@@ -94,7 +94,7 @@ const RootInner = forwardRef<HTMLDivElement, RootProps>(
     },
     forwardedRef,
   ) => {
-    const { store } = useComponentStore<TabsRole, TabsMeta>()
+    const store = useNodeStore<TabsRole, TabsMeta>()
     const tabsId = useId()
 
     const [activeValue, setActiveValue] = useControllableState({
@@ -237,7 +237,7 @@ export const Tab = forwardRef<HTMLButtonElement, TabProps>(
     })
 
     // store에서 panel element의 id 구독
-    const panelId = useComponentSubscribe(
+    const panelId = useStoreSubscribe(
       store,
       (s) => s.getElement(valueStr, 'panel')?.id || null,
     )
@@ -306,7 +306,7 @@ export const Panel = forwardRef<HTMLDivElement, PanelProps>(
     })
 
     // store에서 tab element의 id 구독
-    const tabId = useComponentSubscribe(
+    const tabId = useStoreSubscribe(
       store,
       (s) => s.getElement(valueStr, 'tab')?.id || null,
     )

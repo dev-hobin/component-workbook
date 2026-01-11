@@ -37,11 +37,11 @@ import { composeRefs } from '../../utils/compose-refs'
 import { mergeProps } from '../../utils/merge-props'
 
 import {
-  ComponentStoreProvider,
-  useComponentStore,
-} from '../../primitives/use-component-store'
+  NodeStoreProvider,
+  useNodeStore,
+} from '../../primitives/use-node-store'
 import { useNode } from '../../primitives/use-node'
-import type { ComponentStore } from '../../primitives/component-store'
+import type { NodeStore } from '../../primitives/node-store'
 
 // ============================================
 // Types
@@ -64,7 +64,7 @@ type MenuContextValue = {
   focusedItemId: ItemId | null
   computed: MenuComputed
   send: Send<MenuEvents>
-  store: ComponentStore<MenuRole, MenuMeta>
+  store: NodeStore<MenuRole, MenuMeta>
 }
 
 type MenuIdContextValue = {
@@ -111,9 +111,9 @@ export type RootProps = {
 
 export function Root(props: RootProps) {
   return (
-    <ComponentStoreProvider>
+    <NodeStoreProvider>
       <RootInner {...props} />
-    </ComponentStoreProvider>
+    </NodeStoreProvider>
   )
 }
 
@@ -124,7 +124,7 @@ function RootInner({
   defaultOpenedPath,
   onOpenedPathChange,
 }: RootProps) {
-  const { store } = useComponentStore<MenuRole, MenuMeta>()
+  const store = useNodeStore<MenuRole, MenuMeta>()
 
   const autoId = useId()
   const menuId = menuIdProp ?? autoId
