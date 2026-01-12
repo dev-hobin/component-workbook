@@ -84,9 +84,7 @@ export type MenuActions =
   | 'focusTrigger'
   | 'focusItem'
 
-export type MenuGuards =
-  | 'isHighlightedSubTrigger'
-  | 'hasOpenedSubmenu'
+export type MenuGuards = 'isHighlightedSubTrigger' | 'hasOpenedSubmenu'
 
 // ============================================
 // Machine
@@ -196,10 +194,15 @@ export const menuMachine = createMachine<{
   actions: {
     noop: () => {},
 
-    openMenu: (ctx, event) => {
-      if (!('menuId' in event)) return
-
-      const { menuId, parentMenuId, highlightFirst = true } = event
+    openMenu: (
+      ctx,
+      payload: {
+        menuId: MenuId
+        parentMenuId: MenuId | null
+        highlightFirst?: boolean
+      },
+    ) => {
+      const { menuId, parentMenuId, highlightFirst = true } = payload
 
       if (parentMenuId === null) {
         // 루트 메뉴
@@ -230,10 +233,8 @@ export const menuMachine = createMachine<{
       }
     },
 
-    closeMenu: (ctx, event) => {
-      if (!('menuId' in event)) return
-
-      const { menuId } = event
+    closeMenu: (ctx, payload: { menuId: MenuId }) => {
+      const { menuId } = payload
       const index = ctx.openedPath.indexOf(menuId)
 
       if (index !== -1) {
@@ -247,10 +248,8 @@ export const menuMachine = createMachine<{
       ctx.onHighlightedIdChange(null)
     },
 
-    highlightById: (ctx, event) => {
-      if ('id' in event) {
-        ctx.onHighlightedIdChange(event.id)
-      }
+    highlightById: (ctx, payload: { id: ItemId }) => {
+      ctx.onHighlightedIdChange(payload.id)
     },
 
     highlightFirst: (ctx) => {
@@ -363,13 +362,11 @@ export const menuMachine = createMachine<{
       ctx.onHighlightedIdChange(closingMenuId)
     },
 
-    highlightByCharacter: (ctx, event) => {
-      if (!('character' in event)) return
-
+    highlightByCharacter: (ctx, payload: { character: string }) => {
       const activeMenuId = ctx.openedPath[ctx.openedPath.length - 1]
       if (!activeMenuId) return
 
-      const char = event.character.toLowerCase()
+      const char = payload.character.toLowerCase()
       const items = ctx.getEnabledItemIds(activeMenuId)
 
       // 현재 하이라이트 이후부터 검색

@@ -187,29 +187,26 @@ export const treeMachine = createMachine<{
   actions: {
     noop: () => {},
 
-    expand: (ctx, event) => {
-      if (!('value' in event)) return
+    expand: (ctx, payload: { value: ItemValue }) => {
 
-      const { value } = event
+      const { value } = payload
       if (!ctx.getHasChildren(value)) return
       if (ctx.expandedValues.includes(value)) return
 
       ctx.onExpandedValuesChange([...ctx.expandedValues, value])
     },
 
-    collapse: (ctx, event) => {
-      if (!('value' in event)) return
+    collapse: (ctx, payload: { value: ItemValue }) => {
 
-      const { value } = event
+      const { value } = payload
       if (!ctx.expandedValues.includes(value)) return
 
       ctx.onExpandedValuesChange(ctx.expandedValues.filter((v) => v !== value))
     },
 
-    toggleExpand: (ctx, event) => {
-      if (!('value' in event)) return
+    toggleExpand: (ctx, payload: { value: ItemValue }) => {
 
-      const { value } = event
+      const { value } = payload
       if (!ctx.getHasChildren(value)) return
 
       if (ctx.expandedValues.includes(value)) {
@@ -234,10 +231,9 @@ export const treeMachine = createMachine<{
       }
     },
 
-    select: (ctx, event) => {
-      if (!('value' in event)) return
+    select: (ctx, payload: { value: ItemValue }) => {
 
-      const { value } = event
+      const { value } = payload
       const meta = ctx.getItemMeta(value)
       if (meta?.disabled) return
 
@@ -251,10 +247,9 @@ export const treeMachine = createMachine<{
       }
     },
 
-    toggleSelect: (ctx, event) => {
-      if (!('value' in event)) return
+    toggleSelect: (ctx, payload: { value: ItemValue }) => {
 
-      const { value } = event
+      const { value } = payload
       const meta = ctx.getItemMeta(value)
       if (meta?.disabled) return
 
@@ -267,12 +262,11 @@ export const treeMachine = createMachine<{
       }
     },
 
-    highlightById: (ctx, event) => {
-      if ('value' in event) {
-        const meta = ctx.getItemMeta(event.value)
-        if (meta && !meta.disabled) {
-          ctx.onHighlightedValueChange(event.value)
-        }
+    highlightById: (ctx, payload: { value: ItemValue }) => {
+
+      const meta = ctx.getItemMeta(payload.value)
+      if (meta && !meta.disabled) {
+        ctx.onHighlightedValueChange(payload.value)
       }
     },
 
@@ -434,10 +428,9 @@ export const treeMachine = createMachine<{
       }
     },
 
-    highlightByCharacter: (ctx, event) => {
-      if (!('character' in event)) return
+    highlightByCharacter: (ctx, payload: { character: string }) => {
 
-      const char = event.character.toLowerCase()
+      const char = payload.character.toLowerCase()
       const visibleValues = ctx.getVisibleItemValues()
 
       // 현재 하이라이트 이후부터 검색

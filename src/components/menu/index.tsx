@@ -33,7 +33,10 @@ import { usePresence } from '../../hooks/use-presence'
 import { composeRefs } from '../../utils/compose-refs'
 import { mergeProps } from '../../utils/merge-props'
 import { DismissableLayer } from '../../primitives/dismissable-layer'
-import { NodeStoreProvider, useNodeStore } from '../../primitives/use-node-store'
+import {
+  NodeStoreProvider,
+  useNodeStore,
+} from '../../primitives/use-node-store'
 import { useNode } from '../../primitives/use-node'
 import { ParentProvider } from '../../primitives/use-parent-context'
 import type { NodeStore } from '../../primitives/node-store'
@@ -204,7 +207,8 @@ function RootImpl({
     (itemId: ItemId) => {
       requestAnimationFrame(() => {
         // Item or SubTrigger
-        const itemNode = store.getNode(itemId, 'item') ?? store.getNode(itemId, 'sub-trigger')
+        const itemNode =
+          store.getNode(itemId, 'item') ?? store.getNode(itemId, 'sub-trigger')
         itemNode?.element?.focus()
       })
     },
@@ -229,7 +233,8 @@ function RootImpl({
 
   const getItemTextValue = useCallback(
     (itemId: ItemId) => {
-      const node = store.getNode(itemId, 'item') ?? store.getNode(itemId, 'sub-trigger')
+      const node =
+        store.getNode(itemId, 'item') ?? store.getNode(itemId, 'sub-trigger')
       if (node && 'textValue' in node.meta) {
         return (node.meta as MenuItemMeta).textValue
       }
@@ -406,13 +411,8 @@ export const Content = forwardRef<HTMLDivElement, ContentProps>(
     { children, placement = 'bottom-start', sideOffset = 4, ...rest },
     forwardedRef,
   ) => {
-    const {
-      openedPath,
-      highlightedId,
-      send,
-      store,
-      onItemSelect,
-    } = useMenuContext()
+    const { openedPath, highlightedId, send, store, onItemSelect } =
+      useMenuContext()
     const { menuId } = useMenuIdContext()
 
     const positionerRef = useRef<HTMLDivElement>(null)
@@ -466,7 +466,8 @@ export const Content = forwardRef<HTMLDivElement, ContentProps>(
     // Get item meta from store for keyboard handling
     const getItemMeta = useCallback(
       (itemId: ItemId) => {
-        const node = store.getNode(itemId, 'item') ?? store.getNode(itemId, 'sub-trigger')
+        const node =
+          store.getNode(itemId, 'item') ?? store.getNode(itemId, 'sub-trigger')
         return node?.meta as MenuItemMeta | undefined
       },
       [store],
@@ -827,13 +828,8 @@ export const SubContent = forwardRef<HTMLDivElement, SubContentProps>(
     { children, placement = 'right-start', sideOffset = 4, ...rest },
     forwardedRef,
   ) => {
-    const {
-      openedPath,
-      highlightedId,
-      send,
-      store,
-      onItemSelect,
-    } = useMenuContext()
+    const { openedPath, highlightedId, send, store, onItemSelect } =
+      useMenuContext()
     const { menuId: subMenuId } = useMenuIdContext()
 
     const positionerRef = useRef<HTMLDivElement>(null)
@@ -887,7 +883,8 @@ export const SubContent = forwardRef<HTMLDivElement, SubContentProps>(
     // Get item meta from store for keyboard handling
     const getItemMeta = useCallback(
       (itemId: ItemId) => {
-        const node = store.getNode(itemId, 'item') ?? store.getNode(itemId, 'sub-trigger')
+        const node =
+          store.getNode(itemId, 'item') ?? store.getNode(itemId, 'sub-trigger')
         return node?.meta as MenuItemMeta | undefined
       },
       [store],

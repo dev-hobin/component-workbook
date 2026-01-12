@@ -21,8 +21,8 @@ importers:
         specifier: ^2.1.1
         version: 2.1.1
       controlled-machine:
-        specifier: ^0.2.1
-        version: 0.2.1(react@19.2.0)
+        specifier: ^0.3.1
+        version: 0.3.1(react@19.2.0)
       focus-trap:
         specifier: ^7.6.6
         version: 7.6.6
@@ -983,8 +983,8 @@ packages:
   concat-map@0.0.1:
     resolution: {integrity: sha512-/Srv4dswyQNBfohGpz9o6Yb3Gz3SrUDqBH5rTuhGR7ahtlbYKnVxw2bCFMRljaA7EXHaXZ8wsHdodFvbkhKmqg==}
 
-  controlled-machine@0.2.1:
-    resolution: {integrity: sha512-pQX2Dt0c5eR33i+WQ0h9+V1+Dc8IJh1y3F9bq6UlsAQj4622F9ia1Xz3yz5wOzYTdHUNybrY69CZXJmo3hu3vw==}
+  controlled-machine@0.3.1:
+    resolution: {integrity: sha512-SY5tYNy4nP3UtBh52qu23gemEdEumA3NkBlNmq5wcgUtVOWUX5obSzwi75QpVGRAEU2BKfiI09A7l56MeWhRRA==}
     peerDependencies:
       react: '>=18.0.0'
     peerDependenciesMeta:
@@ -2639,7 +2639,7 @@ snapshots:
 
   concat-map@0.0.1: {}
 
-  controlled-machine@0.2.1(react@19.2.0):
+  controlled-machine@0.3.1(react@19.2.0):
     optionalDependencies:
       react: 19.2.0
 

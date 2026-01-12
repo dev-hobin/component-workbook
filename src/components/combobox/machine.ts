@@ -147,16 +147,10 @@ export const comboboxMachine = createMachine<{
   on: {
     OPEN: 'open',
     CLOSE: 'close',
-    TOGGLE: [
-      { when: 'isOpen', do: 'close' },
-      { do: 'open' },
-    ],
+    TOGGLE: [{ when: 'isOpen', do: 'close' }, { do: 'open' }],
 
     INPUT_CHANGE: 'handleInputChange',
-    INPUT_FOCUS: [
-      { when: 'shouldOpenOnFocus', do: 'open' },
-      { do: 'noop' },
-    ],
+    INPUT_FOCUS: [{ when: 'shouldOpenOnFocus', do: 'open' }, { do: 'noop' }],
     INPUT_BLUR: 'handleInputBlur',
 
     HIGHLIGHT_NEXT: [
@@ -167,14 +161,8 @@ export const comboboxMachine = createMachine<{
       { when: 'isClosed', do: ['open', 'highlightLast'] },
       { do: 'highlightPrev' },
     ],
-    HIGHLIGHT_FIRST: [
-      { when: 'isOpen', do: 'highlightFirst' },
-      { do: 'noop' },
-    ],
-    HIGHLIGHT_LAST: [
-      { when: 'isOpen', do: 'highlightLast' },
-      { do: 'noop' },
-    ],
+    HIGHLIGHT_FIRST: [{ when: 'isOpen', do: 'highlightFirst' }, { do: 'noop' }],
+    HIGHLIGHT_LAST: [{ when: 'isOpen', do: 'highlightLast' }, { do: 'noop' }],
 
     SELECT_HIGHLIGHTED: [
       { when: 'isClosed', do: 'noop' },
@@ -214,10 +202,11 @@ export const comboboxMachine = createMachine<{
       ctx.onHighlightedOptionIdChange(null)
     },
 
-    handleInputChange: (ctx, event) => {
-      if (!('value' in event) || !('options' in event)) return
-
-      const { value, options } = event
+    handleInputChange: (
+      ctx,
+      payload: { value: string; options: ComboboxOption[] },
+    ) => {
+      const { value, options } = payload
       ctx.onInputValueChange(value)
 
       // 입력 시 팝업 열기
@@ -227,7 +216,7 @@ export const comboboxMachine = createMachine<{
 
       // 첫 번째 필터된 옵션 하이라이트 (list 모드)
       if (ctx.autocomplete === 'list' || ctx.autocomplete === 'both') {
-        const enabled = options.filter((o: ComboboxOption) => !o.disabled)
+        const enabled = options.filter((o) => !o.disabled)
         if (enabled.length > 0) {
           ctx.onHighlightedOptionIdChange(enabled[0].id)
         } else {
@@ -244,25 +233,22 @@ export const comboboxMachine = createMachine<{
       ctx.onHighlightedOptionIdChange(null)
     },
 
-    highlightFirst: (ctx, event) => {
-      if (!('options' in event)) return
-      const enabled = event.options.filter((o: ComboboxOption) => !o.disabled)
+    highlightFirst: (ctx, payload: { options: ComboboxOption[] }) => {
+      const enabled = payload.options.filter((o) => !o.disabled)
       if (enabled.length > 0) {
         ctx.onHighlightedOptionIdChange(enabled[0].id)
       }
     },
 
-    highlightLast: (ctx, event) => {
-      if (!('options' in event)) return
-      const enabled = event.options.filter((o: ComboboxOption) => !o.disabled)
+    highlightLast: (ctx, payload: { options: ComboboxOption[] }) => {
+      const enabled = payload.options.filter((o) => !o.disabled)
       if (enabled.length > 0) {
         ctx.onHighlightedOptionIdChange(enabled[enabled.length - 1].id)
       }
     },
 
-    highlightNext: (ctx, event) => {
-      if (!('options' in event)) return
-      const enabled = event.options.filter((o: ComboboxOption) => !o.disabled)
+    highlightNext: (ctx, payload: { options: ComboboxOption[] }) => {
+      const enabled = payload.options.filter((o) => !o.disabled)
       if (enabled.length === 0) return
 
       if (ctx.highlightedOptionId === null) {
@@ -271,7 +257,7 @@ export const comboboxMachine = createMachine<{
       }
 
       const currentIndex = enabled.findIndex(
-        (o: ComboboxOption) => o.id === ctx.highlightedOptionId,
+        (o) => o.id === ctx.highlightedOptionId,
       )
       if (currentIndex === -1) {
         ctx.onHighlightedOptionIdChange(enabled[0].id)
@@ -287,9 +273,8 @@ export const comboboxMachine = createMachine<{
       }
     },
 
-    highlightPrev: (ctx, event) => {
-      if (!('options' in event)) return
-      const enabled = event.options.filter((o: ComboboxOption) => !o.disabled)
+    highlightPrev: (ctx, payload: { options: ComboboxOption[] }) => {
+      const enabled = payload.options.filter((o) => !o.disabled)
       if (enabled.length === 0) return
 
       if (ctx.highlightedOptionId === null) {
@@ -298,7 +283,7 @@ export const comboboxMachine = createMachine<{
       }
 
       const currentIndex = enabled.findIndex(
-        (o: ComboboxOption) => o.id === ctx.highlightedOptionId,
+        (o) => o.id === ctx.highlightedOptionId,
       )
       if (currentIndex === -1) {
         ctx.onHighlightedOptionIdChange(enabled[enabled.length - 1].id)
@@ -314,9 +299,8 @@ export const comboboxMachine = createMachine<{
       }
     },
 
-    highlightOption: (ctx, event) => {
-      if (!('option' in event)) return
-      const { option } = event
+    highlightOption: (ctx, payload: { option: ComboboxOption }) => {
+      const { option } = payload
       if (!option.disabled) {
         ctx.onHighlightedOptionIdChange(option.id)
       }
@@ -326,12 +310,11 @@ export const comboboxMachine = createMachine<{
       ctx.onHighlightedOptionIdChange(null)
     },
 
-    selectHighlighted: (ctx, event) => {
+    selectHighlighted: (ctx, payload: { options: ComboboxOption[] }) => {
       if (!ctx.highlightedOptionId) return
-      if (!('options' in event)) return
 
-      const option = event.options.find(
-        (o: ComboboxOption) => o.id === ctx.highlightedOptionId,
+      const option = payload.options.find(
+        (o) => o.id === ctx.highlightedOptionId,
       )
       if (!option || option.disabled) return
 
@@ -351,10 +334,8 @@ export const comboboxMachine = createMachine<{
       ctx.onHighlightedOptionIdChange(null)
     },
 
-    selectOption: (ctx, event) => {
-      if (!('option' in event)) return
-
-      const { option } = event
+    selectOption: (ctx, payload: { option: ComboboxOption }) => {
+      const { option } = payload
       if (option.disabled) return
 
       ctx.onSelectedValueChange(option.value)
