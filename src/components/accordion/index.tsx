@@ -130,10 +130,12 @@ const RootInner = forwardRef<HTMLDivElement, RootProps>(
 
     // Machine
     const { send, computed } = useMachine(accordionMachine, {
-      value,
-      multiple,
-      collapsible,
-      onValueChange: setValue,
+      input: {
+        value,
+        multiple,
+        collapsible,
+        onValueChange: setValue,
+      },
     })
 
     // Helpers

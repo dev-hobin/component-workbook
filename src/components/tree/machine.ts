@@ -14,11 +14,6 @@ export type TreeItemMeta = {
   textValue: string
 }
 
-export type TreeDom = {
-  focusItem: (value: ItemValue) => void
-  focusTree: () => void
-}
-
 export type TreeInput = {
   // 확장 상태
   expandedValues: ItemValue[]
@@ -35,7 +30,7 @@ export type TreeInput = {
   // 옵션
   selectionMode: 'single' | 'multiple'
 
-  // 지연 헬퍼 (NodeStore에서 계산)
+  // 지연 헬퍼 (NodeStore에서 계산 - 지연 렌더링으로 인해 getter 필요)
   getVisibleItemValues: () => ItemValue[]
   getItemMeta: (value: ItemValue) => TreeItemMeta | null
   getParentValue: (value: ItemValue) => ItemValue | null
@@ -43,9 +38,6 @@ export type TreeInput = {
   getSiblingValues: (value: ItemValue) => ItemValue[]
   getItemTextValue: (value: ItemValue) => string
   getHasChildren: (value: ItemValue) => boolean
-
-  // DOM helpers
-  dom: TreeDom
 }
 
 export type TreeEvents = {
@@ -73,6 +65,9 @@ export type TreeEvents = {
 
   // 문자 검색
   TYPE_CHARACTER: { character: string }
+
+  // DOM 이벤트 (effect에서 send로 호출, Shell에서 action override)
+  FOCUS_ITEM: undefined
 }
 
 export type TreeComputed = {
@@ -97,6 +92,10 @@ export type TreeActions =
   | 'handleArrowLeft'
   | 'handleActivate'
   | 'highlightByCharacter'
+  // DOM actions (Shell에서 override)
+  | 'focusItem'
+
+export type TreeGuards = 'isMultiSelect'
 
 // ============================================
 // Machine
@@ -129,9 +128,14 @@ export const treeMachine = createMachine<{
   events: TreeEvents
   computed: TreeComputed
   actions: TreeActions
+  guards: TreeGuards
 }>({
   computed: {
     highlightedValue: (ctx) => ctx.highlightedValue,
+    isMultiSelect: (ctx) => ctx.selectionMode === 'multiple',
+  },
+
+  guards: {
     isMultiSelect: (ctx) => ctx.selectionMode === 'multiple',
   },
 
@@ -145,7 +149,7 @@ export const treeMachine = createMachine<{
     // 선택
     SELECT: 'select',
     TOGGLE_SELECT: [
-      { when: (ctx) => ctx.selectionMode === 'multiple', do: 'toggleSelect' },
+      { when: 'isMultiSelect', do: 'toggleSelect' },
       { do: 'select' }, // single mode에서는 그냥 선택
     ],
 
@@ -163,15 +167,18 @@ export const treeMachine = createMachine<{
 
     // 문자 검색
     TYPE_CHARACTER: 'highlightByCharacter',
+
+    // DOM 이벤트
+    FOCUS_ITEM: 'focusItem',
   },
 
   effects: [
     {
       // 하이라이트 변경 시 DOM 포커스
       watch: (ctx) => ctx.highlightedValue,
-      change: (ctx) => {
+      change: (ctx, _prev, _curr, { send }) => {
         if (ctx.highlightedValue) {
-          ctx.dom.focusItem(ctx.highlightedValue)
+          send('FOCUS_ITEM')
         }
       },
     },
@@ -457,6 +464,9 @@ export const treeMachine = createMachine<{
         }
       }
     },
+
+    // DOM actions (Shell에서 override)
+    focusItem: () => {},
   },
 })
 

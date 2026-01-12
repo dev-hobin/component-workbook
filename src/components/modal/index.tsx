@@ -132,15 +132,18 @@ export function Root({
   }, [])
 
   const { send, computed } = useMachine(modalMachine, {
-    open,
-    onOpenChange: setOpen,
-    closeOnEscape,
-    closeOnBackdropClick,
-    dom: {
-      activateFocusTrap,
-      deactivateFocusTrap,
+    input: {
+      open,
+      onOpenChange: setOpen,
+      closeOnEscape,
+      closeOnBackdropClick,
+    },
+    actions: {
+      // DOM actions override
       lockScroll,
       unlockScroll,
+      activateFocusTrap,
+      deactivateFocusTrap,
     },
   })
 

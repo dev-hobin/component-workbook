@@ -7,13 +7,6 @@ import { createMachine } from 'controlled-machine'
 export type MenuId = string
 export type ItemId = string
 
-export type MenuDom = {
-  // 포커스 관리 (Shell이 타이밍 처리)
-  focusContent: () => void
-  focusTrigger: () => void
-  focusItem: (itemId: ItemId) => void
-}
-
 export type MenuInput = {
   // 열린 메뉴 경로 (중첩 지원)
   // e.g., ['root-menu', 'sub-menu-1', 'sub-menu-2']
@@ -32,9 +25,6 @@ export type MenuInput = {
   getItemTextValue: (itemId: ItemId) => string
   isSubTrigger: (itemId: ItemId) => MenuId | null // 서브메뉴 ID 반환
   getParentMenuId: (menuId: MenuId) => MenuId | null
-
-  // DOM helpers
-  dom: MenuDom
 }
 
 export type MenuEvents = {
@@ -61,6 +51,11 @@ export type MenuEvents = {
 
   // 문자 검색
   TYPE_CHARACTER: { character: string }
+
+  // DOM 이벤트 (effect에서 send로 호출, Shell에서 action override)
+  FOCUS_CONTENT: undefined
+  FOCUS_TRIGGER: undefined
+  FOCUS_ITEM: undefined
 }
 
 export type MenuComputed = {
@@ -84,6 +79,14 @@ export type MenuActions =
   | 'openSubmenu'
   | 'closeSubmenu'
   | 'highlightByCharacter'
+  // DOM actions (Shell에서 override)
+  | 'focusContent'
+  | 'focusTrigger'
+  | 'focusItem'
+
+export type MenuGuards =
+  | 'isHighlightedSubTrigger'
+  | 'hasOpenedSubmenu'
 
 // ============================================
 // Machine
@@ -119,12 +122,21 @@ export const menuMachine = createMachine<{
   events: MenuEvents
   computed: MenuComputed
   actions: MenuActions
+  guards: MenuGuards
 }>({
   computed: {
     isOpen: (ctx) => ctx.openedPath.length > 0,
     activeMenuId: (ctx) => ctx.openedPath[ctx.openedPath.length - 1] ?? null,
     rootMenuId: (ctx) => ctx.openedPath[0] ?? null,
     highlightedId: (ctx) => ctx.highlightedId,
+  },
+
+  guards: {
+    isHighlightedSubTrigger: (ctx) => {
+      if (!ctx.highlightedId) return false
+      return ctx.isSubTrigger(ctx.highlightedId) !== null
+    },
+    hasOpenedSubmenu: (ctx) => ctx.openedPath.length > 1,
   },
 
   on: {
@@ -141,43 +153,41 @@ export const menuMachine = createMachine<{
 
     // 서브메뉴: 하이라이트된 아이템이 서브트리거인 경우만
     OPEN_SUBMENU: [
-      {
-        when: (ctx) => {
-          if (!ctx.highlightedId) return false
-          return ctx.isSubTrigger(ctx.highlightedId) !== null
-        },
-        do: 'openSubmenu',
-      },
+      { when: 'isHighlightedSubTrigger', do: 'openSubmenu' },
       { do: 'noop' },
     ],
 
     // 서브메뉴 닫기: 서브메뉴가 열려있는 경우만
     CLOSE_SUBMENU: [
-      { when: (ctx) => ctx.openedPath.length > 1, do: 'closeSubmenu' },
+      { when: 'hasOpenedSubmenu', do: 'closeSubmenu' },
       { do: 'noop' },
     ],
 
     TYPE_CHARACTER: 'highlightByCharacter',
+
+    // DOM 이벤트
+    FOCUS_CONTENT: 'focusContent',
+    FOCUS_TRIGGER: 'focusTrigger',
+    FOCUS_ITEM: 'focusItem',
   },
 
   effects: [
     {
-      // 메뉴 열림/닫힘 시 포커스 관리
+      // 메뉴 열림 시 Content 포커스, 닫힘 시 Trigger 포커스
       watch: (ctx) => ctx.openedPath.length > 0,
-      enter: (ctx) => {
-        ctx.dom.focusContent()
-
+      enter: (_ctx, { send }) => {
+        send('FOCUS_CONTENT')
         return () => {
-          ctx.dom.focusTrigger()
+          send('FOCUS_TRIGGER')
         }
       },
     },
     {
       // 하이라이트 변경 시 DOM 포커스
       watch: (ctx) => ctx.highlightedId,
-      change: (ctx) => {
+      change: (ctx, _prev, _curr, { send }) => {
         if (ctx.highlightedId) {
-          ctx.dom.focusItem(ctx.highlightedId)
+          send('FOCUS_ITEM')
         }
       },
     },
@@ -386,6 +396,11 @@ export const menuMachine = createMachine<{
         }
       }
     },
+
+    // DOM actions (Shell에서 override)
+    focusContent: () => {},
+    focusTrigger: () => {},
+    focusItem: () => {},
   },
 })
 

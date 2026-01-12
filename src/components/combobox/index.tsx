@@ -161,77 +161,53 @@ function RootInner({
     }))
   }, [store])
 
-  // Helper: Get filtered options
-  const getFilteredOptions = useCallback((): ComboboxOption[] => {
-    const options = getOptionsFromStore()
-    return filterOptions(options, inputValue ?? '', autocomplete)
-  }, [getOptionsFromStore, inputValue, autocomplete])
-
-  // Helper: Get option by ID
-  const getOptionById = useCallback(
-    (id: OptionId): ComboboxOption | null => {
-      const node = store.getNode(id, 'option')
-      if (!node) return null
-      return {
-        id: node.id,
-        value: node.meta.value,
-        label: node.meta.label,
-        disabled: node.meta.disabled,
-      }
-    },
-    [store],
+  // Filtered options getter (지연 렌더링으로 인해 getter 필요)
+  const getFilteredOptions = useCallback(
+    () => filterOptions(getOptionsFromStore(), inputValue ?? '', autocomplete),
+    [getOptionsFromStore, inputValue, autocomplete],
   )
-
-  // DOM helpers
-  const scrollOptionIntoView = useCallback(
-    (optionId: OptionId) => {
-      requestAnimationFrame(() => {
-        const element = store.getElement(optionId, 'option')
-        element?.scrollIntoView({ block: 'nearest' })
-      })
-    },
-    [store],
-  )
-
-  const focusInput = useCallback(() => {
-    requestAnimationFrame(() => {
-      const element = store.getElement(comboboxId, 'input')
-      ;(element as HTMLInputElement | null)?.focus()
-    })
-  }, [store, comboboxId])
 
   // Machine
   const { send } = useMachine(comboboxMachine, {
-    // State
-    isOpen: isOpen ?? false,
-    inputValue: inputValue ?? '',
-    selectedValue: selectedValue ?? null,
-    highlightedOptionId,
+    input: {
+      // State
+      isOpen: isOpen ?? false,
+      inputValue: inputValue ?? '',
+      selectedValue: selectedValue ?? null,
+      highlightedOptionId,
 
-    // State change callbacks (선언적)
-    onOpenChange: setIsOpen,
-    onInputValueChange: setInputValue,
-    onSelectedValueChange: setSelectedValue,
-    onHighlightedOptionIdChange: setHighlightedOptionId,
+      // State change callbacks (선언적)
+      onOpenChange: setIsOpen,
+      onInputValueChange: setInputValue,
+      onSelectedValueChange: setSelectedValue,
+      onHighlightedOptionIdChange: setHighlightedOptionId,
 
-    // Options
-    autocomplete,
-    openOnFocus,
-    closeOnSelect,
-    clearOnSelect,
-    loop,
+      // Options
+      autocomplete,
+      openOnFocus,
+      closeOnSelect,
+      clearOnSelect,
+      loop,
 
-    // Callback
-    onSelect,
-
-    // Helpers
-    getFilteredOptions,
-    getOptionById,
-
-    // DOM
-    dom: {
-      scrollOptionIntoView,
-      focusInput,
+      // Callback
+      onSelect,
+    },
+    actions: {
+      // DOM actions override
+      scrollOptionIntoView: () => {
+        if (highlightedOptionId) {
+          requestAnimationFrame(() => {
+            const element = store.getElement(highlightedOptionId, 'option')
+            element?.scrollIntoView({ block: 'nearest' })
+          })
+        }
+      },
+      focusInput: () => {
+        requestAnimationFrame(() => {
+          const element = store.getElement(comboboxId, 'input')
+          ;(element as HTMLInputElement | null)?.focus()
+        })
+      },
     },
   })
 
@@ -336,6 +312,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
       autocomplete,
       store,
       send,
+      getFilteredOptions,
     } = useComboboxContext()
 
     const { ref, domId } = useNode<ComboboxRole>({
@@ -357,20 +334,21 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
 
     // Keyboard handler
     const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+      const options = getFilteredOptions()
       switch (event.key) {
         case 'ArrowDown':
           event.preventDefault()
-          send('HIGHLIGHT_NEXT')
+          send('HIGHLIGHT_NEXT', { options })
           break
         case 'ArrowUp':
           event.preventDefault()
-          send('HIGHLIGHT_PREV')
+          send('HIGHLIGHT_PREV', { options })
           break
         case 'Enter':
           if (isOpen) {
             event.preventDefault()
           }
-          send('SELECT_HIGHLIGHTED')
+          send('SELECT_HIGHLIGHTED', { options })
           break
         case 'Escape':
           // DismissableLayer에서 처리
@@ -378,13 +356,13 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
         case 'Home':
           if (isOpen) {
             event.preventDefault()
-            send('HIGHLIGHT_FIRST')
+            send('HIGHLIGHT_FIRST', { options })
           }
           break
         case 'End':
           if (isOpen) {
             event.preventDefault()
-            send('HIGHLIGHT_LAST')
+            send('HIGHLIGHT_LAST', { options })
           }
           break
         case 'Tab':
@@ -397,12 +375,14 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
 
     // Input handler
     const handleChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-      send('INPUT_CHANGE', { value: event.target.value })
+      // INPUT_CHANGE 시점에는 새로운 inputValue로 필터링된 옵션이 필요
+      // 하지만 아직 inputValue가 업데이트되지 않았으므로 새 값으로 필터링
+      send('INPUT_CHANGE', { value: event.target.value, options: getFilteredOptions() })
     }
 
     // Focus handler
     const handleFocus = () => {
-      send('INPUT_FOCUS')
+      send('INPUT_FOCUS', { options: getFilteredOptions() })
     }
 
     return (
@@ -440,7 +420,8 @@ export type TriggerProps = ComponentPropsWithoutRef<'button'>
 
 export const Trigger = forwardRef<HTMLButtonElement, TriggerProps>(
   ({ children, ...rest }, forwardedRef) => {
-    const { comboboxId, isOpen, store, send } = useComboboxContext()
+    const { comboboxId, isOpen, store, send, getFilteredOptions } =
+      useComboboxContext()
 
     const { ref, domId } = useNode<ComboboxRole>({
       role: 'trigger',
@@ -448,7 +429,7 @@ export const Trigger = forwardRef<HTMLButtonElement, TriggerProps>(
     })
 
     const handleClick = () => {
-      send('TOGGLE')
+      send('TOGGLE', { options: getFilteredOptions() })
       // Toggle 후 input으로 포커스
       const inputEl = store.getElement(comboboxId, 'input')
       ;(inputEl as HTMLInputElement | null)?.focus()
@@ -623,14 +604,22 @@ export const Option = forwardRef<HTMLLIElement, OptionProps>(
     const highlighted = isHighlighted(highlightedOptionId, optionId)
     const selected = isSelected(selectedValue, value)
 
+    // Option 객체 생성 (event payload로 전달)
+    const option: ComboboxOption = {
+      id: optionId,
+      value,
+      label: displayLabel,
+      disabled,
+    }
+
     const handleClick = () => {
       if (disabled) return
-      send('SELECT_OPTION', { optionId })
+      send('SELECT_OPTION', { option })
     }
 
     const handleMouseEnter = () => {
       if (disabled) return
-      send('HIGHLIGHT', { optionId })
+      send('HIGHLIGHT', { option })
     }
 
     // mousedown에서 preventDefault로 input blur 방지
@@ -674,9 +663,7 @@ export type NoResultsProps = {
 export function NoResults({ children }: NoResultsProps) {
   const { isOpen, getFilteredOptions } = useComboboxContext()
 
-  const filteredOptions = getFilteredOptions()
-
-  if (!isOpen || filteredOptions.length > 0) {
+  if (!isOpen || getFilteredOptions().length > 0) {
     return null
   }
 

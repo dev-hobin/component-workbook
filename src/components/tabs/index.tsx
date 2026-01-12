@@ -134,13 +134,15 @@ const RootInner = forwardRef<HTMLDivElement, RootProps>(
 
     // Machine
     const { send, computed } = useMachine(tabsMachine, {
-      value,
-      onValueChange: setValue,
-      focusedValue,
-      onFocusedValueChange: setFocusedValue,
-      activationMode,
-      loop,
-      getEnabledValues,
+      input: {
+        value,
+        onValueChange: setValue,
+        focusedValue,
+        onFocusedValueChange: setFocusedValue,
+        activationMode,
+        loop,
+        getEnabledValues,
+      },
     })
 
     const contextValue: TabsContextValue = {

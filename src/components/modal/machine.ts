@@ -4,17 +4,6 @@ import { createMachine } from 'controlled-machine'
 // Types
 // ============================================
 
-export type ModalDom = {
-  // 포커스 트랩 활성화 (Shell이 타이밍 처리)
-  activateFocusTrap: () => void
-  // 포커스 트랩 해제 및 포커스 복귀
-  deactivateFocusTrap: () => void
-  // 스크롤 잠금
-  lockScroll: () => void
-  // 스크롤 복원
-  unlockScroll: () => void
-}
-
 export type ModalInput = {
   // 핵심 상태
   open: boolean
@@ -23,9 +12,6 @@ export type ModalInput = {
   // 닫기 옵션
   closeOnEscape: boolean
   closeOnBackdropClick: boolean
-
-  // DOM helpers
-  dom: ModalDom
 }
 
 export type ModalEvents = {
@@ -36,13 +22,28 @@ export type ModalEvents = {
   // 사용자 인터랙션 (조건부 닫기)
   ESCAPE_KEY: undefined
   BACKDROP_CLICK: undefined
+
+  // DOM 이벤트 (effect에서 send로 호출, Shell에서 action override)
+  LOCK_SCROLL: undefined
+  UNLOCK_SCROLL: undefined
+  ACTIVATE_FOCUS_TRAP: undefined
+  DEACTIVATE_FOCUS_TRAP: undefined
 }
 
 export type ModalComputed = {
   isOpen: boolean
 }
 
-export type ModalActions = 'open' | 'close'
+export type ModalActions =
+  | 'open'
+  | 'close'
+  // DOM actions (Shell에서 override)
+  | 'lockScroll'
+  | 'unlockScroll'
+  | 'activateFocusTrap'
+  | 'deactivateFocusTrap'
+
+export type ModalGuards = 'shouldCloseOnEscape' | 'shouldCloseOnBackdrop'
 
 // ============================================
 // Machine
@@ -68,9 +69,15 @@ export const modalMachine = createMachine<{
   events: ModalEvents
   computed: ModalComputed
   actions: ModalActions
+  guards: ModalGuards
 }>({
   computed: {
-    isOpen: (context) => context.open,
+    isOpen: (ctx) => ctx.open,
+  },
+
+  guards: {
+    shouldCloseOnEscape: (ctx) => ctx.closeOnEscape,
+    shouldCloseOnBackdrop: (ctx) => ctx.closeOnBackdropClick,
   },
 
   on: {
@@ -78,25 +85,29 @@ export const modalMachine = createMachine<{
     CLOSE: 'close',
 
     // Escape 키: closeOnEscape 옵션이 true일 때만 닫기
-    ESCAPE_KEY: [{ when: (context) => context.closeOnEscape, do: 'close' }],
+    ESCAPE_KEY: [{ when: 'shouldCloseOnEscape', do: 'close' }],
 
     // 백드롭 클릭: closeOnBackdropClick 옵션이 true일 때만 닫기
-    BACKDROP_CLICK: [
-      { when: (context) => context.closeOnBackdropClick, do: 'close' },
-    ],
+    BACKDROP_CLICK: [{ when: 'shouldCloseOnBackdrop', do: 'close' }],
+
+    // DOM 이벤트
+    LOCK_SCROLL: 'lockScroll',
+    UNLOCK_SCROLL: 'unlockScroll',
+    ACTIVATE_FOCUS_TRAP: 'activateFocusTrap',
+    DEACTIVATE_FOCUS_TRAP: 'deactivateFocusTrap',
   },
 
   effects: [
     {
       // 포커스 트랩 및 스크롤 잠금
-      watch: (context) => context.open,
-      enter: (context) => {
-        context.dom.lockScroll()
-        context.dom.activateFocusTrap()
+      watch: (ctx) => ctx.open,
+      enter: (_ctx, { send }) => {
+        send('LOCK_SCROLL')
+        send('ACTIVATE_FOCUS_TRAP')
 
         return () => {
-          context.dom.deactivateFocusTrap()
-          context.dom.unlockScroll()
+          send('DEACTIVATE_FOCUS_TRAP')
+          send('UNLOCK_SCROLL')
         }
       },
     },
@@ -105,16 +116,22 @@ export const modalMachine = createMachine<{
   ],
 
   actions: {
-    open: (context) => {
-      if (!context.open) {
-        context.onOpenChange(true)
+    open: (ctx) => {
+      if (!ctx.open) {
+        ctx.onOpenChange(true)
       }
     },
 
-    close: (context) => {
-      if (context.open) {
-        context.onOpenChange(false)
+    close: (ctx) => {
+      if (ctx.open) {
+        ctx.onOpenChange(false)
       }
     },
+
+    // DOM actions (Shell에서 override)
+    lockScroll: () => {},
+    unlockScroll: () => {},
+    activateFocusTrap: () => {},
+    deactivateFocusTrap: () => {},
   },
 })

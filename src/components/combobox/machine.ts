@@ -15,11 +15,6 @@ export type ComboboxOption = {
   disabled: boolean
 }
 
-export type ComboboxDom = {
-  scrollOptionIntoView: (optionId: OptionId) => void
-  focusInput: () => void
-}
-
 export type ComboboxInput = {
   // 핵심 상태
   isOpen: boolean
@@ -42,39 +37,35 @@ export type ComboboxInput = {
 
   // 콜백
   onSelect?: (value: string) => void
-
-  // 지연 헬퍼 (NodeStore에서 계산)
-  getFilteredOptions: () => ComboboxOption[]
-  getOptionById: (id: OptionId) => ComboboxOption | null
-
-  // DOM helpers
-  dom: ComboboxDom
 }
 
 export type ComboboxEvents = {
   // 팝업
-  OPEN: undefined
+  OPEN: { options: ComboboxOption[] }
   CLOSE: undefined
-  TOGGLE: undefined
+  TOGGLE: { options: ComboboxOption[] }
 
   // 입력
-  INPUT_CHANGE: { value: string }
-  INPUT_FOCUS: undefined
+  INPUT_CHANGE: { value: string; options: ComboboxOption[] }
+  INPUT_FOCUS: { options: ComboboxOption[] }
   INPUT_BLUR: undefined
 
   // 키보드 네비게이션
-  HIGHLIGHT_NEXT: undefined
-  HIGHLIGHT_PREV: undefined
-  HIGHLIGHT_FIRST: undefined
-  HIGHLIGHT_LAST: undefined
+  HIGHLIGHT_NEXT: { options: ComboboxOption[] }
+  HIGHLIGHT_PREV: { options: ComboboxOption[] }
+  HIGHLIGHT_FIRST: { options: ComboboxOption[] }
+  HIGHLIGHT_LAST: { options: ComboboxOption[] }
 
   // 선택
-  SELECT_HIGHLIGHTED: undefined
-  SELECT_OPTION: { optionId: OptionId }
+  SELECT_HIGHLIGHTED: { options: ComboboxOption[] }
+  SELECT_OPTION: { option: ComboboxOption }
 
   // 하이라이트
-  HIGHLIGHT: { optionId: OptionId }
+  HIGHLIGHT: { option: ComboboxOption }
   CLEAR_HIGHLIGHT: undefined
+
+  // DOM 이벤트 (effect에서 send로 호출, Shell에서 action override)
+  SCROLL_INTO_VIEW: undefined
 }
 
 export type ComboboxComputed = {
@@ -96,6 +87,16 @@ export type ComboboxActions =
   | 'clearHighlight'
   | 'selectHighlighted'
   | 'selectOption'
+  // DOM actions (Shell에서 override)
+  | 'scrollOptionIntoView'
+  | 'focusInput'
+
+export type ComboboxGuards =
+  | 'isOpen'
+  | 'isClosed'
+  | 'shouldOpenOnFocus'
+  | 'hasHighlight'
+  | 'noHighlight'
 
 // ============================================
 // Machine
@@ -128,62 +129,74 @@ export const comboboxMachine = createMachine<{
   events: ComboboxEvents
   computed: ComboboxComputed
   actions: ComboboxActions
+  guards: ComboboxGuards
 }>({
   computed: {
     isOpen: (ctx) => ctx.isOpen,
     highlightedOptionId: (ctx) => ctx.highlightedOptionId,
   },
 
+  guards: {
+    isOpen: (ctx) => ctx.isOpen,
+    isClosed: (ctx) => !ctx.isOpen,
+    shouldOpenOnFocus: (ctx) => ctx.openOnFocus && !ctx.isOpen,
+    hasHighlight: (ctx) => ctx.highlightedOptionId !== null,
+    noHighlight: (ctx) => ctx.highlightedOptionId === null,
+  },
+
   on: {
     OPEN: 'open',
     CLOSE: 'close',
     TOGGLE: [
-      { when: (ctx) => ctx.isOpen, do: 'close' },
+      { when: 'isOpen', do: 'close' },
       { do: 'open' },
     ],
 
     INPUT_CHANGE: 'handleInputChange',
     INPUT_FOCUS: [
-      { when: (ctx) => ctx.openOnFocus && !ctx.isOpen, do: 'open' },
+      { when: 'shouldOpenOnFocus', do: 'open' },
       { do: 'noop' },
     ],
     INPUT_BLUR: 'handleInputBlur',
 
     HIGHLIGHT_NEXT: [
-      { when: (ctx) => !ctx.isOpen, do: ['open', 'highlightFirst'] },
+      { when: 'isClosed', do: ['open', 'highlightFirst'] },
       { do: 'highlightNext' },
     ],
     HIGHLIGHT_PREV: [
-      { when: (ctx) => !ctx.isOpen, do: ['open', 'highlightLast'] },
+      { when: 'isClosed', do: ['open', 'highlightLast'] },
       { do: 'highlightPrev' },
     ],
     HIGHLIGHT_FIRST: [
-      { when: (ctx) => ctx.isOpen, do: 'highlightFirst' },
+      { when: 'isOpen', do: 'highlightFirst' },
       { do: 'noop' },
     ],
     HIGHLIGHT_LAST: [
-      { when: (ctx) => ctx.isOpen, do: 'highlightLast' },
+      { when: 'isOpen', do: 'highlightLast' },
       { do: 'noop' },
     ],
 
     SELECT_HIGHLIGHTED: [
-      { when: (ctx) => !ctx.isOpen, do: 'noop' },
-      { when: (ctx) => ctx.highlightedOptionId === null, do: 'close' },
+      { when: 'isClosed', do: 'noop' },
+      { when: 'noHighlight', do: 'close' },
       { do: 'selectHighlighted' },
     ],
-    SELECT_OPTION: 'selectOption',
+    SELECT_OPTION: ['selectOption', 'focusInput'],
 
     HIGHLIGHT: 'highlightOption',
     CLEAR_HIGHLIGHT: 'clearHighlight',
+
+    // DOM 이벤트 (effect에서 send로 호출)
+    SCROLL_INTO_VIEW: 'scrollOptionIntoView',
   },
 
   effects: [
     {
       // 하이라이트 변경 시 스크롤
       watch: (ctx) => ctx.highlightedOptionId,
-      change: (ctx) => {
+      change: (ctx, _prev, _curr, { send }) => {
         if (ctx.highlightedOptionId) {
-          ctx.dom.scrollOptionIntoView(ctx.highlightedOptionId)
+          send('SCROLL_INTO_VIEW')
         }
       },
     },
@@ -202,9 +215,9 @@ export const comboboxMachine = createMachine<{
     },
 
     handleInputChange: (ctx, event) => {
-      if (!('value' in event)) return
+      if (!('value' in event) || !('options' in event)) return
 
-      const { value } = event
+      const { value, options } = event
       ctx.onInputValueChange(value)
 
       // 입력 시 팝업 열기
@@ -214,8 +227,7 @@ export const comboboxMachine = createMachine<{
 
       // 첫 번째 필터된 옵션 하이라이트 (list 모드)
       if (ctx.autocomplete === 'list' || ctx.autocomplete === 'both') {
-        const options = ctx.getFilteredOptions()
-        const enabled = options.filter((o) => !o.disabled)
+        const enabled = options.filter((o: ComboboxOption) => !o.disabled)
         if (enabled.length > 0) {
           ctx.onHighlightedOptionIdChange(enabled[0].id)
         } else {
@@ -232,25 +244,25 @@ export const comboboxMachine = createMachine<{
       ctx.onHighlightedOptionIdChange(null)
     },
 
-    highlightFirst: (ctx) => {
-      const options = ctx.getFilteredOptions()
-      const enabled = options.filter((o) => !o.disabled)
+    highlightFirst: (ctx, event) => {
+      if (!('options' in event)) return
+      const enabled = event.options.filter((o: ComboboxOption) => !o.disabled)
       if (enabled.length > 0) {
         ctx.onHighlightedOptionIdChange(enabled[0].id)
       }
     },
 
-    highlightLast: (ctx) => {
-      const options = ctx.getFilteredOptions()
-      const enabled = options.filter((o) => !o.disabled)
+    highlightLast: (ctx, event) => {
+      if (!('options' in event)) return
+      const enabled = event.options.filter((o: ComboboxOption) => !o.disabled)
       if (enabled.length > 0) {
         ctx.onHighlightedOptionIdChange(enabled[enabled.length - 1].id)
       }
     },
 
-    highlightNext: (ctx) => {
-      const options = ctx.getFilteredOptions()
-      const enabled = options.filter((o) => !o.disabled)
+    highlightNext: (ctx, event) => {
+      if (!('options' in event)) return
+      const enabled = event.options.filter((o: ComboboxOption) => !o.disabled)
       if (enabled.length === 0) return
 
       if (ctx.highlightedOptionId === null) {
@@ -259,7 +271,7 @@ export const comboboxMachine = createMachine<{
       }
 
       const currentIndex = enabled.findIndex(
-        (o) => o.id === ctx.highlightedOptionId,
+        (o: ComboboxOption) => o.id === ctx.highlightedOptionId,
       )
       if (currentIndex === -1) {
         ctx.onHighlightedOptionIdChange(enabled[0].id)
@@ -275,9 +287,9 @@ export const comboboxMachine = createMachine<{
       }
     },
 
-    highlightPrev: (ctx) => {
-      const options = ctx.getFilteredOptions()
-      const enabled = options.filter((o) => !o.disabled)
+    highlightPrev: (ctx, event) => {
+      if (!('options' in event)) return
+      const enabled = event.options.filter((o: ComboboxOption) => !o.disabled)
       if (enabled.length === 0) return
 
       if (ctx.highlightedOptionId === null) {
@@ -286,7 +298,7 @@ export const comboboxMachine = createMachine<{
       }
 
       const currentIndex = enabled.findIndex(
-        (o) => o.id === ctx.highlightedOptionId,
+        (o: ComboboxOption) => o.id === ctx.highlightedOptionId,
       )
       if (currentIndex === -1) {
         ctx.onHighlightedOptionIdChange(enabled[enabled.length - 1].id)
@@ -303,11 +315,10 @@ export const comboboxMachine = createMachine<{
     },
 
     highlightOption: (ctx, event) => {
-      if ('optionId' in event) {
-        const option = ctx.getOptionById(event.optionId)
-        if (option && !option.disabled) {
-          ctx.onHighlightedOptionIdChange(event.optionId)
-        }
+      if (!('option' in event)) return
+      const { option } = event
+      if (!option.disabled) {
+        ctx.onHighlightedOptionIdChange(option.id)
       }
     },
 
@@ -315,10 +326,13 @@ export const comboboxMachine = createMachine<{
       ctx.onHighlightedOptionIdChange(null)
     },
 
-    selectHighlighted: (ctx) => {
+    selectHighlighted: (ctx, event) => {
       if (!ctx.highlightedOptionId) return
+      if (!('options' in event)) return
 
-      const option = ctx.getOptionById(ctx.highlightedOptionId)
+      const option = event.options.find(
+        (o: ComboboxOption) => o.id === ctx.highlightedOptionId,
+      )
       if (!option || option.disabled) return
 
       ctx.onSelectedValueChange(option.value)
@@ -338,10 +352,10 @@ export const comboboxMachine = createMachine<{
     },
 
     selectOption: (ctx, event) => {
-      if (!('optionId' in event)) return
+      if (!('option' in event)) return
 
-      const option = ctx.getOptionById(event.optionId)
-      if (!option || option.disabled) return
+      const { option } = event
+      if (option.disabled) return
 
       ctx.onSelectedValueChange(option.value)
       ctx.onSelect?.(option.value)
@@ -357,8 +371,11 @@ export const comboboxMachine = createMachine<{
       }
 
       ctx.onHighlightedOptionIdChange(null)
-      ctx.dom.focusInput()
     },
+
+    // DOM actions (Shell에서 override)
+    scrollOptionIntoView: () => {},
+    focusInput: () => {},
   },
 })
 

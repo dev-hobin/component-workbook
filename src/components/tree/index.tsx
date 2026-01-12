@@ -190,23 +190,6 @@ const RootImpl = forwardRef<HTMLDivElement, RootProps>(
     const expandedValuesRef = useRef(expandedValues)
     expandedValuesRef.current = expandedValues
 
-    // DOM helpers
-    const focusItem = useCallback(
-      (value: ItemValue) => {
-        requestAnimationFrame(() => {
-          const labelElement = store.getElement(value, 'label')
-          labelElement?.focus()
-        })
-      },
-      [store],
-    )
-
-    const focusTree = useCallback(() => {
-      requestAnimationFrame(() => {
-        treeRef.current?.focus()
-      })
-    }, [])
-
     // Machine helpers using NodeStore - real-time queries
     const getVisibleItemValues = useCallback(() => {
       const result: ItemValue[] = []
@@ -332,23 +315,31 @@ const RootImpl = forwardRef<HTMLDivElement, RootProps>(
 
     // Machine
     const { send, computed } = useMachine(treeMachine, {
-      expandedValues: expandedValues ?? [],
-      onExpandedValuesChange: setExpandedValues,
-      selectedValues: selectedValues ?? [],
-      onSelectedValuesChange: setSelectedValues,
-      highlightedValue,
-      onHighlightedValueChange: setHighlightedValue,
-      selectionMode,
-      getVisibleItemValues,
-      getItemMeta,
-      getParentValue,
-      getFirstChildValue,
-      getSiblingValues,
-      getItemTextValue,
-      getHasChildren,
-      dom: {
-        focusItem,
-        focusTree,
+      input: {
+        expandedValues: expandedValues ?? [],
+        onExpandedValuesChange: setExpandedValues,
+        selectedValues: selectedValues ?? [],
+        onSelectedValuesChange: setSelectedValues,
+        highlightedValue,
+        onHighlightedValueChange: setHighlightedValue,
+        selectionMode,
+        getVisibleItemValues,
+        getItemMeta,
+        getParentValue,
+        getFirstChildValue,
+        getSiblingValues,
+        getItemTextValue,
+        getHasChildren,
+      },
+      actions: {
+        focusItem: () => {
+          if (highlightedValue) {
+            requestAnimationFrame(() => {
+              const labelElement = store.getElement(highlightedValue, 'label')
+              labelElement?.focus()
+            })
+          }
+        },
       },
     })
 

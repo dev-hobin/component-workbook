@@ -200,7 +200,7 @@ function RootImpl({
     })
   }, [store])
 
-  const focusItem = useCallback(
+  const focusItemById = useCallback(
     (itemId: ItemId) => {
       requestAnimationFrame(() => {
         // Item or SubTrigger
@@ -262,19 +262,26 @@ function RootImpl({
 
   // Machine
   const { send, computed } = useMachine(menuMachine, {
-    openedPath,
-    onOpenedPathChange: handleOpenedPathChange,
-    highlightedId,
-    onHighlightedIdChange: setHighlightedId,
-    loop,
-    getEnabledItemIds,
-    getItemTextValue,
-    isSubTrigger,
-    getParentMenuId,
-    dom: {
+    input: {
+      openedPath,
+      onOpenedPathChange: handleOpenedPathChange,
+      highlightedId,
+      onHighlightedIdChange: setHighlightedId,
+      loop,
+      getEnabledItemIds,
+      getItemTextValue,
+      isSubTrigger,
+      getParentMenuId,
+    },
+    actions: {
+      // DOM actions override
       focusContent,
       focusTrigger,
-      focusItem,
+      focusItem: () => {
+        if (highlightedId) {
+          focusItemById(highlightedId)
+        }
+      },
     },
   })
 
