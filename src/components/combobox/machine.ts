@@ -27,11 +27,11 @@ export type ComboboxInput = {
   selectedValue: string | null
   highlightedOptionId: OptionId | null
 
-  // 상태 변경 핸들러
-  setIsOpen: (open: boolean) => void
-  setInputValue: (value: string) => void
-  setSelectedValue: (value: string | null) => void
-  setHighlightedOptionId: (id: OptionId | null) => void
+  // 상태 변경 콜백 (선언적)
+  onOpenChange: (open: boolean) => void
+  onInputValueChange: (value: string) => void
+  onSelectedValueChange: (value: string | null) => void
+  onHighlightedOptionIdChange: (id: OptionId | null) => void
 
   // 옵션
   autocomplete: AutocompleteMode
@@ -193,23 +193,23 @@ export const comboboxMachine = createMachine<{
     noop: () => {},
 
     open: (ctx) => {
-      ctx.setIsOpen(true)
+      ctx.onOpenChange(true)
     },
 
     close: (ctx) => {
-      ctx.setIsOpen(false)
-      ctx.setHighlightedOptionId(null)
+      ctx.onOpenChange(false)
+      ctx.onHighlightedOptionIdChange(null)
     },
 
     handleInputChange: (ctx, event) => {
       if (!('value' in event)) return
 
       const { value } = event
-      ctx.setInputValue(value)
+      ctx.onInputValueChange(value)
 
       // 입력 시 팝업 열기
       if (!ctx.isOpen) {
-        ctx.setIsOpen(true)
+        ctx.onOpenChange(true)
       }
 
       // 첫 번째 필터된 옵션 하이라이트 (list 모드)
@@ -217,26 +217,26 @@ export const comboboxMachine = createMachine<{
         const options = ctx.getFilteredOptions()
         const enabled = options.filter((o) => !o.disabled)
         if (enabled.length > 0) {
-          ctx.setHighlightedOptionId(enabled[0].id)
+          ctx.onHighlightedOptionIdChange(enabled[0].id)
         } else {
-          ctx.setHighlightedOptionId(null)
+          ctx.onHighlightedOptionIdChange(null)
         }
       } else {
-        ctx.setHighlightedOptionId(null)
+        ctx.onHighlightedOptionIdChange(null)
       }
     },
 
     handleInputBlur: (ctx) => {
       // Shell에서 relatedTarget 체크 후 호출
-      ctx.setIsOpen(false)
-      ctx.setHighlightedOptionId(null)
+      ctx.onOpenChange(false)
+      ctx.onHighlightedOptionIdChange(null)
     },
 
     highlightFirst: (ctx) => {
       const options = ctx.getFilteredOptions()
       const enabled = options.filter((o) => !o.disabled)
       if (enabled.length > 0) {
-        ctx.setHighlightedOptionId(enabled[0].id)
+        ctx.onHighlightedOptionIdChange(enabled[0].id)
       }
     },
 
@@ -244,7 +244,7 @@ export const comboboxMachine = createMachine<{
       const options = ctx.getFilteredOptions()
       const enabled = options.filter((o) => !o.disabled)
       if (enabled.length > 0) {
-        ctx.setHighlightedOptionId(enabled[enabled.length - 1].id)
+        ctx.onHighlightedOptionIdChange(enabled[enabled.length - 1].id)
       }
     },
 
@@ -254,7 +254,7 @@ export const comboboxMachine = createMachine<{
       if (enabled.length === 0) return
 
       if (ctx.highlightedOptionId === null) {
-        ctx.setHighlightedOptionId(enabled[0].id)
+        ctx.onHighlightedOptionIdChange(enabled[0].id)
         return
       }
 
@@ -262,7 +262,7 @@ export const comboboxMachine = createMachine<{
         (o) => o.id === ctx.highlightedOptionId,
       )
       if (currentIndex === -1) {
-        ctx.setHighlightedOptionId(enabled[0].id)
+        ctx.onHighlightedOptionIdChange(enabled[0].id)
         return
       }
 
@@ -271,7 +271,7 @@ export const comboboxMachine = createMachine<{
         : Math.min(currentIndex + 1, enabled.length - 1)
 
       if (nextIndex !== currentIndex) {
-        ctx.setHighlightedOptionId(enabled[nextIndex].id)
+        ctx.onHighlightedOptionIdChange(enabled[nextIndex].id)
       }
     },
 
@@ -281,7 +281,7 @@ export const comboboxMachine = createMachine<{
       if (enabled.length === 0) return
 
       if (ctx.highlightedOptionId === null) {
-        ctx.setHighlightedOptionId(enabled[enabled.length - 1].id)
+        ctx.onHighlightedOptionIdChange(enabled[enabled.length - 1].id)
         return
       }
 
@@ -289,7 +289,7 @@ export const comboboxMachine = createMachine<{
         (o) => o.id === ctx.highlightedOptionId,
       )
       if (currentIndex === -1) {
-        ctx.setHighlightedOptionId(enabled[enabled.length - 1].id)
+        ctx.onHighlightedOptionIdChange(enabled[enabled.length - 1].id)
         return
       }
 
@@ -298,7 +298,7 @@ export const comboboxMachine = createMachine<{
         : Math.max(currentIndex - 1, 0)
 
       if (prevIndex !== currentIndex) {
-        ctx.setHighlightedOptionId(enabled[prevIndex].id)
+        ctx.onHighlightedOptionIdChange(enabled[prevIndex].id)
       }
     },
 
@@ -306,13 +306,13 @@ export const comboboxMachine = createMachine<{
       if ('optionId' in event) {
         const option = ctx.getOptionById(event.optionId)
         if (option && !option.disabled) {
-          ctx.setHighlightedOptionId(event.optionId)
+          ctx.onHighlightedOptionIdChange(event.optionId)
         }
       }
     },
 
     clearHighlight: (ctx) => {
-      ctx.setHighlightedOptionId(null)
+      ctx.onHighlightedOptionIdChange(null)
     },
 
     selectHighlighted: (ctx) => {
@@ -321,20 +321,20 @@ export const comboboxMachine = createMachine<{
       const option = ctx.getOptionById(ctx.highlightedOptionId)
       if (!option || option.disabled) return
 
-      ctx.setSelectedValue(option.value)
+      ctx.onSelectedValueChange(option.value)
       ctx.onSelect?.(option.value)
 
       if (ctx.clearOnSelect) {
-        ctx.setInputValue('')
+        ctx.onInputValueChange('')
       } else {
-        ctx.setInputValue(option.label)
+        ctx.onInputValueChange(option.label)
       }
 
       if (ctx.closeOnSelect) {
-        ctx.setIsOpen(false)
+        ctx.onOpenChange(false)
       }
 
-      ctx.setHighlightedOptionId(null)
+      ctx.onHighlightedOptionIdChange(null)
     },
 
     selectOption: (ctx, event) => {
@@ -343,20 +343,20 @@ export const comboboxMachine = createMachine<{
       const option = ctx.getOptionById(event.optionId)
       if (!option || option.disabled) return
 
-      ctx.setSelectedValue(option.value)
+      ctx.onSelectedValueChange(option.value)
       ctx.onSelect?.(option.value)
 
       if (ctx.clearOnSelect) {
-        ctx.setInputValue('')
+        ctx.onInputValueChange('')
       } else {
-        ctx.setInputValue(option.label)
+        ctx.onInputValueChange(option.label)
       }
 
       if (ctx.closeOnSelect) {
-        ctx.setIsOpen(false)
+        ctx.onOpenChange(false)
       }
 
-      ctx.setHighlightedOptionId(null)
+      ctx.onHighlightedOptionIdChange(null)
       ctx.dom.focusInput()
     },
   },

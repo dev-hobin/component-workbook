@@ -208,11 +208,11 @@ function RootInner({
     selectedValue: selectedValue ?? null,
     highlightedOptionId,
 
-    // Handlers
-    setIsOpen: (open: boolean) => setIsOpen(open),
-    setInputValue: (value: string) => setInputValue(value),
-    setSelectedValue: (value: string | null) => setSelectedValue(value),
-    setHighlightedOptionId,
+    // State change callbacks (선언적)
+    onOpenChange: setIsOpen,
+    onInputValueChange: setInputValue,
+    onSelectedValueChange: setSelectedValue,
+    onHighlightedOptionIdChange: setHighlightedOptionId,
 
     // Options
     autocomplete,
