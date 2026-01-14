@@ -9,11 +9,7 @@ export type TabValue = string
 export type TabsInput = {
   // State
   value: TabValue
-  onValueChange: (value: TabValue) => void
-
-  // Focus tracking for keyboard navigation
-  focusedValue: TabValue | null
-  onFocusedValueChange: (value: TabValue | null) => void
+  onValueChange?: (value: TabValue) => void
 
   // Options
   activationMode: 'automatic' | 'manual'
@@ -21,6 +17,11 @@ export type TabsInput = {
 
   // Lazy helpers (computed from NodeStore in shell)
   getEnabledValues: () => TabValue[]
+}
+
+export type TabsInternal = {
+  // Focus tracking for keyboard navigation (internal state)
+  focusedValue: TabValue | null
 }
 
 export type TabsEvents = {
@@ -65,10 +66,15 @@ export type TabsActions =
 
 export const tabsMachine = createMachine<{
   input: TabsInput
+  internal: TabsInternal
   events: TabsEvents
   computed: TabsComputed
   actions: TabsActions
 }>({
+  internal: {
+    focusedValue: null,
+  },
+
   computed: {
     enabledValues: (context) => context.getEnabledValues(),
 
@@ -133,18 +139,18 @@ export const tabsMachine = createMachine<{
   actions: {
     select: (context, payload: { value: TabValue }) => {
       if (payload.value !== context.value) {
-        context.onValueChange(payload.value)
+        context.onValueChange?.(payload.value)
       }
     },
 
-    focus: (context, payload: { value: TabValue }) => {
+    focus: (context, payload: { value: TabValue }, assign) => {
       // Sync focusedValue when trigger receives focus (click, programmatic focus, etc.)
       if (payload.value !== context.focusedValue) {
-        context.onFocusedValueChange(payload.value)
+        assign({ focusedValue: payload.value })
       }
     },
 
-    focusNext: (context) => {
+    focusNext: (context, _, assign) => {
       const enabledValues = context.getEnabledValues()
       if (enabledValues.length === 0) return
 
@@ -160,15 +166,15 @@ export const tabsMachine = createMachine<{
       }
 
       const nextValue = enabledValues[nextIndex]
-      context.onFocusedValueChange(nextValue)
+      assign({ focusedValue: nextValue })
 
       // Automatic mode: also activate
       if (context.activationMode === 'automatic' && nextValue !== context.value) {
-        context.onValueChange(nextValue)
+        context.onValueChange?.(nextValue)
       }
     },
 
-    focusPrev: (context) => {
+    focusPrev: (context, _, assign) => {
       const enabledValues = context.getEnabledValues()
       if (enabledValues.length === 0) return
 
@@ -184,44 +190,44 @@ export const tabsMachine = createMachine<{
       }
 
       const prevValue = enabledValues[prevIndex]
-      context.onFocusedValueChange(prevValue)
+      assign({ focusedValue: prevValue })
 
       // Automatic mode: also activate
       if (context.activationMode === 'automatic' && prevValue !== context.value) {
-        context.onValueChange(prevValue)
+        context.onValueChange?.(prevValue)
       }
     },
 
-    focusFirst: (context) => {
+    focusFirst: (context, _, assign) => {
       const enabledValues = context.getEnabledValues()
       if (enabledValues.length === 0) return
 
       const firstValue = enabledValues[0]
-      context.onFocusedValueChange(firstValue)
+      assign({ focusedValue: firstValue })
 
       // Automatic mode: also activate
       if (context.activationMode === 'automatic' && firstValue !== context.value) {
-        context.onValueChange(firstValue)
+        context.onValueChange?.(firstValue)
       }
     },
 
-    focusLast: (context) => {
+    focusLast: (context, _, assign) => {
       const enabledValues = context.getEnabledValues()
       if (enabledValues.length === 0) return
 
       const lastValue = enabledValues[enabledValues.length - 1]
-      context.onFocusedValueChange(lastValue)
+      assign({ focusedValue: lastValue })
 
       // Automatic mode: also activate
       if (context.activationMode === 'automatic' && lastValue !== context.value) {
-        context.onValueChange(lastValue)
+        context.onValueChange?.(lastValue)
       }
     },
 
     activateFocused: (context) => {
       // Manual mode: Enter/Space to activate focused tab
       if (context.focusedValue && context.focusedValue !== context.value) {
-        context.onValueChange(context.focusedValue)
+        context.onValueChange?.(context.focusedValue)
       }
     },
   },

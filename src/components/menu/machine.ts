@@ -8,14 +8,12 @@ export type MenuId = string
 export type ItemId = string
 
 export type MenuInput = {
-  // 열린 메뉴 경로 (중첩 지원)
-  // e.g., ['root-menu', 'sub-menu-1', 'sub-menu-2']
-  openedPath: MenuId[]
-  onOpenedPathChange: (path: MenuId[]) => void
+  // 외부 제어 상태
+  open: boolean
+  onOpenChange?: (open: boolean) => void
 
-  // 하이라이트된 아이템 (포커스와 별개)
-  highlightedId: ItemId | null
-  onHighlightedIdChange: (id: ItemId | null) => void
+  // 루트 메뉴 ID
+  rootMenuId: MenuId
 
   // 옵션
   loop: boolean
@@ -25,6 +23,15 @@ export type MenuInput = {
   getItemTextValue: (itemId: ItemId) => string
   isSubTrigger: (itemId: ItemId) => MenuId | null // 서브메뉴 ID 반환
   getParentMenuId: (menuId: MenuId) => MenuId | null
+}
+
+export type MenuInternal = {
+  // 열린 메뉴 경로 (중첩 지원) - internal state
+  // e.g., ['root-menu', 'sub-menu-1', 'sub-menu-2']
+  openedPath: MenuId[]
+
+  // 하이라이트된 아이템 (포커스와 별개) - internal state
+  highlightedId: ItemId | null
 }
 
 export type MenuEvents = {
@@ -58,33 +65,48 @@ export type MenuEvents = {
   FOCUS_ITEM: undefined
 }
 
+// Input/Internal과 키가 겹치면 안 됨
+// rootMenuId는 Input에서, highlightedId는 Internal에서 직접 접근
 export type MenuComputed = {
   isOpen: boolean
   activeMenuId: MenuId | null
-  rootMenuId: MenuId | null
-  highlightedId: ItemId | null
 }
 
 export type MenuActions =
   | 'noop'
+  // 메뉴 열기/닫기 (작은 단위)
+  | 'buildOpenedPath'
+  | 'highlightFirstInMenu'
+  | 'highlightLastInMenu'
+  | 'syncExternalOpenTrue'
+  | 'syncExternalOpenFalse'
+  | 'clearInternalState'
+  // 복합 액션
   | 'openMenu'
   | 'closeMenu'
   | 'closeAll'
+  // 하이라이트
   | 'highlightById'
   | 'highlightFirst'
   | 'highlightLast'
   | 'highlightNext'
   | 'highlightPrev'
   | 'clearHighlight'
+  // 서브메뉴
   | 'openSubmenu'
   | 'closeSubmenu'
+  // 검색
   | 'highlightByCharacter'
   // DOM actions (Shell에서 override)
   | 'focusContent'
   | 'focusTrigger'
   | 'focusItem'
 
-export type MenuGuards = 'isHighlightedSubTrigger' | 'hasOpenedSubmenu'
+export type MenuGuards =
+  | 'isHighlightedSubTrigger'
+  | 'hasOpenedSubmenu'
+  | 'noHighlight'
+  | 'hasActiveMenu'
 
 // ============================================
 // Machine
@@ -117,16 +139,20 @@ export type MenuGuards = 'isHighlightedSubTrigger' | 'hasOpenedSubmenu'
  */
 export const menuMachine = createMachine<{
   input: MenuInput
+  internal: MenuInternal
   events: MenuEvents
   computed: MenuComputed
   actions: MenuActions
   guards: MenuGuards
 }>({
+  internal: {
+    openedPath: [],
+    highlightedId: null,
+  },
+
   computed: {
-    isOpen: (ctx) => ctx.openedPath.length > 0,
+    isOpen: (ctx) => ctx.open,
     activeMenuId: (ctx) => ctx.openedPath[ctx.openedPath.length - 1] ?? null,
-    rootMenuId: (ctx) => ctx.openedPath[0] ?? null,
-    highlightedId: (ctx) => ctx.highlightedId,
   },
 
   guards: {
@@ -135,33 +161,48 @@ export const menuMachine = createMachine<{
       return ctx.isSubTrigger(ctx.highlightedId) !== null
     },
     hasOpenedSubmenu: (ctx) => ctx.openedPath.length > 1,
+    noHighlight: (ctx) => ctx.highlightedId === null,
+    hasActiveMenu: (ctx) => ctx.openedPath.length > 0,
   },
+
+  // Sync external open state with internal openedPath
+  always: [
+    {
+      // open=true but openedPath empty → initialize with rootMenuId
+      when: (ctx) => ctx.open && ctx.openedPath.length === 0,
+      do: (ctx, _, assign) => {
+        assign({ openedPath: [ctx.rootMenuId] })
+      },
+    },
+    {
+      // open=false but openedPath not empty → clear internal state
+      when: (ctx) => !ctx.open && ctx.openedPath.length > 0,
+      do: (_, __, assign) => {
+        assign({ openedPath: [], highlightedId: null })
+      },
+    },
+  ],
 
   on: {
     OPEN: 'openMenu',
     CLOSE: 'closeMenu',
-    CLOSE_ALL: 'closeAll',
+    CLOSE_ALL: ['clearInternalState', 'syncExternalOpenFalse'],
 
     HIGHLIGHT: 'highlightById',
-    HIGHLIGHT_FIRST: 'highlightFirst',
-    HIGHLIGHT_LAST: 'highlightLast',
-    HIGHLIGHT_NEXT: 'highlightNext',
-    HIGHLIGHT_PREV: 'highlightPrev',
+    // 하이라이트: 활성 메뉴가 있을 때만
+    HIGHLIGHT_FIRST: [{ when: 'hasActiveMenu', do: 'highlightFirst' }],
+    HIGHLIGHT_LAST: [{ when: 'hasActiveMenu', do: 'highlightLast' }],
+    HIGHLIGHT_NEXT: [{ when: 'hasActiveMenu', do: 'highlightNext' }],
+    HIGHLIGHT_PREV: [{ when: 'hasActiveMenu', do: 'highlightPrev' }],
     CLEAR_HIGHLIGHT: 'clearHighlight',
 
     // 서브메뉴: 하이라이트된 아이템이 서브트리거인 경우만
-    OPEN_SUBMENU: [
-      { when: 'isHighlightedSubTrigger', do: 'openSubmenu' },
-      { do: 'noop' },
-    ],
+    OPEN_SUBMENU: [{ when: 'isHighlightedSubTrigger', do: 'openSubmenu' }],
 
     // 서브메뉴 닫기: 서브메뉴가 열려있는 경우만
-    CLOSE_SUBMENU: [
-      { when: 'hasOpenedSubmenu', do: 'closeSubmenu' },
-      { do: 'noop' },
-    ],
+    CLOSE_SUBMENU: [{ when: 'hasOpenedSubmenu', do: 'closeSubmenu' }],
 
-    TYPE_CHARACTER: 'highlightByCharacter',
+    TYPE_CHARACTER: [{ when: 'hasActiveMenu', do: 'highlightByCharacter' }],
 
     // DOM 이벤트
     FOCUS_CONTENT: 'focusContent',
@@ -194,6 +235,57 @@ export const menuMachine = createMachine<{
   actions: {
     noop: () => {},
 
+    // === 작은 단위 액션 ===
+    syncExternalOpenTrue: (ctx) => {
+      if (!ctx.open) {
+        ctx.onOpenChange?.(true)
+      }
+    },
+
+    syncExternalOpenFalse: (ctx) => {
+      if (ctx.open) {
+        ctx.onOpenChange?.(false)
+      }
+    },
+
+    clearInternalState: (_ctx, _, assign) => {
+      assign({ openedPath: [], highlightedId: null })
+    },
+
+    buildOpenedPath: (
+      ctx,
+      payload: { menuId: MenuId; parentMenuId: MenuId | null },
+      assign,
+    ) => {
+      const { menuId, parentMenuId } = payload
+
+      let newPath: MenuId[]
+      if (parentMenuId === null) {
+        newPath = [menuId]
+      } else {
+        const parentIndex = ctx.openedPath.indexOf(parentMenuId)
+        if (parentIndex === -1) {
+          newPath = [parentMenuId, menuId]
+        } else {
+          const basePath = ctx.openedPath.slice(0, parentIndex + 1)
+          newPath = [...basePath, menuId]
+        }
+      }
+
+      assign({ openedPath: newPath })
+    },
+
+    highlightFirstInMenu: (ctx, payload: { menuId: MenuId }, assign) => {
+      const items = ctx.getEnabledItemIds(payload.menuId)
+      assign({ highlightedId: items[0] ?? null })
+    },
+
+    highlightLastInMenu: (ctx, payload: { menuId: MenuId }, assign) => {
+      const items = ctx.getEnabledItemIds(payload.menuId)
+      assign({ highlightedId: items[items.length - 1] ?? null })
+    },
+
+    // === 복합 액션 (기존 호환) ===
     openMenu: (
       ctx,
       payload: {
@@ -201,194 +293,158 @@ export const menuMachine = createMachine<{
         parentMenuId: MenuId | null
         highlightFirst?: boolean
       },
+      assign,
     ) => {
       const { menuId, parentMenuId, highlightFirst = true } = payload
 
+      let newPath: MenuId[]
       if (parentMenuId === null) {
-        // 루트 메뉴
-        ctx.onOpenedPathChange([menuId])
+        newPath = [menuId]
       } else {
-        // 서브메뉴: 부모까지의 경로 유지 + 새 메뉴 추가
         const parentIndex = ctx.openedPath.indexOf(parentMenuId)
         if (parentIndex === -1) {
-          ctx.onOpenedPathChange([parentMenuId, menuId])
+          newPath = [parentMenuId, menuId]
         } else {
           const basePath = ctx.openedPath.slice(0, parentIndex + 1)
-          ctx.onOpenedPathChange([...basePath, menuId])
+          newPath = [...basePath, menuId]
         }
       }
 
-      // 첫/마지막 아이템 하이라이트
-      // Note: 실제 하이라이트는 Content 마운트 후 Shell에서 처리
-      if (highlightFirst) {
-        const items = ctx.getEnabledItemIds(menuId)
-        if (items.length > 0) {
-          ctx.onHighlightedIdChange(items[0])
-        }
-      } else {
-        const items = ctx.getEnabledItemIds(menuId)
-        if (items.length > 0) {
-          ctx.onHighlightedIdChange(items[items.length - 1])
-        }
+      const items = ctx.getEnabledItemIds(menuId)
+      const highlightId = highlightFirst
+        ? items[0] ?? null
+        : items[items.length - 1] ?? null
+
+      assign({ openedPath: newPath, highlightedId: highlightId })
+
+      if (newPath.length > 0 && !ctx.open) {
+        ctx.onOpenChange?.(true)
       }
     },
 
-    closeMenu: (ctx, payload: { menuId: MenuId }) => {
+    closeMenu: (ctx, payload: { menuId: MenuId }, assign) => {
       const { menuId } = payload
       const index = ctx.openedPath.indexOf(menuId)
 
       if (index !== -1) {
-        ctx.onOpenedPathChange(ctx.openedPath.slice(0, index))
-        ctx.onHighlightedIdChange(null)
+        const newPath = ctx.openedPath.slice(0, index)
+        assign({ openedPath: newPath, highlightedId: null })
+
+        if (newPath.length === 0 && ctx.open) {
+          ctx.onOpenChange?.(false)
+        }
       }
     },
 
-    closeAll: (ctx) => {
-      ctx.onOpenedPathChange([])
-      ctx.onHighlightedIdChange(null)
+    closeAll: (ctx, _, assign) => {
+      assign({ openedPath: [], highlightedId: null })
+
+      if (ctx.open) {
+        ctx.onOpenChange?.(false)
+      }
     },
 
-    highlightById: (ctx, payload: { id: ItemId }) => {
-      ctx.onHighlightedIdChange(payload.id)
+    highlightById: (_ctx, payload: { id: ItemId }, assign) => {
+      assign({ highlightedId: payload.id })
     },
 
-    highlightFirst: (ctx) => {
-      const activeMenuId = ctx.openedPath[ctx.openedPath.length - 1]
-      if (!activeMenuId) return
-
+    highlightFirst: (ctx, _, assign) => {
+      // guard: hasActiveMenu ensures activeMenuId exists
+      const activeMenuId = ctx.openedPath[ctx.openedPath.length - 1]!
       const items = ctx.getEnabledItemIds(activeMenuId)
-      if (items.length > 0) {
-        ctx.onHighlightedIdChange(items[0])
-      }
+      assign({ highlightedId: items[0] ?? null })
     },
 
-    highlightLast: (ctx) => {
-      const activeMenuId = ctx.openedPath[ctx.openedPath.length - 1]
-      if (!activeMenuId) return
-
+    highlightLast: (ctx, _, assign) => {
+      const activeMenuId = ctx.openedPath[ctx.openedPath.length - 1]!
       const items = ctx.getEnabledItemIds(activeMenuId)
-      if (items.length > 0) {
-        ctx.onHighlightedIdChange(items[items.length - 1])
-      }
+      assign({ highlightedId: items[items.length - 1] ?? null })
     },
 
-    highlightNext: (ctx) => {
-      const activeMenuId = ctx.openedPath[ctx.openedPath.length - 1]
-      if (!activeMenuId) return
-
+    highlightNext: (ctx, _, assign) => {
+      const activeMenuId = ctx.openedPath[ctx.openedPath.length - 1]!
       const items = ctx.getEnabledItemIds(activeMenuId)
       if (items.length === 0) return
 
+      // 하이라이트 없으면 첫 아이템
       if (ctx.highlightedId === null) {
-        ctx.onHighlightedIdChange(items[0])
+        assign({ highlightedId: items[0] })
         return
       }
 
       const currentIndex = items.indexOf(ctx.highlightedId)
-      if (currentIndex === -1) {
-        ctx.onHighlightedIdChange(items[0])
-        return
-      }
+      const startIndex = currentIndex === -1 ? -1 : currentIndex
 
       const nextIndex = ctx.loop
-        ? (currentIndex + 1) % items.length
-        : Math.min(currentIndex + 1, items.length - 1)
+        ? (startIndex + 1) % items.length
+        : Math.min(startIndex + 1, items.length - 1)
 
-      if (nextIndex !== currentIndex) {
-        ctx.onHighlightedIdChange(items[nextIndex])
-      }
+      assign({ highlightedId: items[nextIndex] })
     },
 
-    highlightPrev: (ctx) => {
-      const activeMenuId = ctx.openedPath[ctx.openedPath.length - 1]
-      if (!activeMenuId) return
-
+    highlightPrev: (ctx, _, assign) => {
+      const activeMenuId = ctx.openedPath[ctx.openedPath.length - 1]!
       const items = ctx.getEnabledItemIds(activeMenuId)
       if (items.length === 0) return
 
+      // 하이라이트 없으면 마지막 아이템
       if (ctx.highlightedId === null) {
-        ctx.onHighlightedIdChange(items[items.length - 1])
+        assign({ highlightedId: items[items.length - 1] })
         return
       }
 
       const currentIndex = items.indexOf(ctx.highlightedId)
-      if (currentIndex === -1) {
-        ctx.onHighlightedIdChange(items[items.length - 1])
-        return
-      }
+      const startIndex = currentIndex === -1 ? items.length : currentIndex
 
       const prevIndex = ctx.loop
-        ? (currentIndex - 1 + items.length) % items.length
-        : Math.max(currentIndex - 1, 0)
+        ? (startIndex - 1 + items.length) % items.length
+        : Math.max(startIndex - 1, 0)
 
-      if (prevIndex !== currentIndex) {
-        ctx.onHighlightedIdChange(items[prevIndex])
-      }
+      assign({ highlightedId: items[prevIndex] })
     },
 
-    clearHighlight: (ctx) => {
-      ctx.onHighlightedIdChange(null)
+    clearHighlight: (_ctx, _, assign) => {
+      assign({ highlightedId: null })
     },
 
-    openSubmenu: (ctx) => {
-      if (!ctx.highlightedId) return
-
-      const subMenuId = ctx.isSubTrigger(ctx.highlightedId)
-      if (!subMenuId) return
-
-      const activeMenuId = ctx.openedPath[ctx.openedPath.length - 1]
-      if (!activeMenuId) return
-
-      // 서브메뉴 열기
-      const basePath = ctx.openedPath
-      ctx.onOpenedPathChange([...basePath, subMenuId])
-
-      // 첫 아이템 하이라이트
+    openSubmenu: (ctx, _, assign) => {
+      // guard: isHighlightedSubTrigger ensures highlightedId is a sub-trigger
+      const subMenuId = ctx.isSubTrigger(ctx.highlightedId!)!
+      const newPath = [...ctx.openedPath, subMenuId]
       const items = ctx.getEnabledItemIds(subMenuId)
-      if (items.length > 0) {
-        ctx.onHighlightedIdChange(items[0])
-      }
+
+      assign({ openedPath: newPath, highlightedId: items[0] ?? null })
     },
 
-    closeSubmenu: (ctx) => {
-      if (ctx.openedPath.length <= 1) return
-
-      // 현재 서브메뉴 닫기
+    closeSubmenu: (ctx, _, assign) => {
+      // guard: hasOpenedSubmenu ensures openedPath.length > 1
       const closingMenuId = ctx.openedPath[ctx.openedPath.length - 1]
-      ctx.onOpenedPathChange(ctx.openedPath.slice(0, -1))
+      const newPath = ctx.openedPath.slice(0, -1)
 
-      // 닫히는 메뉴의 SubTrigger를 하이라이트
-      // closingMenuId가 SubTrigger의 ID이기도 함
-      ctx.onHighlightedIdChange(closingMenuId)
+      // 닫히는 메뉴의 SubTrigger를 하이라이트 (closingMenuId === subTriggerId)
+      assign({ openedPath: newPath, highlightedId: closingMenuId })
     },
 
-    highlightByCharacter: (ctx, payload: { character: string }) => {
-      const activeMenuId = ctx.openedPath[ctx.openedPath.length - 1]
-      if (!activeMenuId) return
-
+    highlightByCharacter: (ctx, payload: { character: string }, assign) => {
+      // guard: hasActiveMenu ensures activeMenuId exists
+      const activeMenuId = ctx.openedPath[ctx.openedPath.length - 1]!
       const char = payload.character.toLowerCase()
       const items = ctx.getEnabledItemIds(activeMenuId)
 
-      // 현재 하이라이트 이후부터 검색
       const currentIndex = ctx.highlightedId
         ? items.indexOf(ctx.highlightedId)
         : -1
       const startIndex = currentIndex === -1 ? 0 : currentIndex + 1
 
-      // 현재 위치 이후 검색
-      for (let i = startIndex; i < items.length; i++) {
-        const textValue = ctx.getItemTextValue(items[i])
-        if (textValue.toLowerCase().startsWith(char)) {
-          ctx.onHighlightedIdChange(items[i])
-          return
-        }
-      }
+      // 현재 위치 이후 검색 → 처음부터 wrap around
+      const searchOrder = [
+        ...items.slice(startIndex),
+        ...items.slice(0, startIndex),
+      ]
 
-      // 처음부터 현재 위치까지 검색 (wrap around)
-      for (let i = 0; i < startIndex; i++) {
-        const textValue = ctx.getItemTextValue(items[i])
-        if (textValue.toLowerCase().startsWith(char)) {
-          ctx.onHighlightedIdChange(items[i])
+      for (const itemId of searchOrder) {
+        if (ctx.getItemTextValue(itemId).toLowerCase().startsWith(char)) {
+          assign({ highlightedId: itemId })
           return
         }
       }

@@ -10,7 +10,7 @@ export type AccordionInput = {
   value: ItemId[]
   multiple: boolean
   collapsible: boolean
-  onValueChange: (value: ItemId[]) => void
+  onValueChange?: (value: ItemId[]) => void
 }
 
 export type AccordionEvents = {
@@ -56,13 +56,13 @@ export const accordionMachine = createMachine<{
           return // Cannot collapse the only expanded item
         }
         const next = context.value.filter((id) => id !== itemId)
-        context.onValueChange(next)
+        context.onValueChange?.(next)
       } else {
         // Expand
         if (context.multiple) {
-          context.onValueChange([...context.value, itemId])
+          context.onValueChange?.([...context.value, itemId])
         } else {
-          context.onValueChange([itemId])
+          context.onValueChange?.([itemId])
         }
       }
     },
@@ -72,9 +72,9 @@ export const accordionMachine = createMachine<{
       if (context.value.includes(itemId)) return
 
       if (context.multiple) {
-        context.onValueChange([...context.value, itemId])
+        context.onValueChange?.([...context.value, itemId])
       } else {
-        context.onValueChange([itemId])
+        context.onValueChange?.([itemId])
       }
     },
 
@@ -86,7 +86,7 @@ export const accordionMachine = createMachine<{
         return // Cannot collapse the only expanded item
       }
       const next = context.value.filter((id) => id !== itemId)
-      context.onValueChange(next)
+      context.onValueChange?.(next)
     },
   },
 })

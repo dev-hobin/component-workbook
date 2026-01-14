@@ -5,8 +5,8 @@ import {
   useState,
   type ComponentPropsWithoutRef,
 } from 'react'
-import { useControllableState } from '@radix-ui/react-use-controllable-state'
 import { useMachine, type Send } from 'controlled-machine/react'
+import { useControllableState } from '@radix-ui/react-use-controllable-state'
 
 import {
   accordionMachine,
@@ -37,7 +37,7 @@ type AccordionMeta = {
 
 type AccordionContextValue = {
   value: ItemId[]
-  computed: AccordionComputed
+  snapshot: AccordionComputed
   store: NodeStore<AccordionRole, AccordionMeta>
   send: Send<AccordionEvents>
   disabled: boolean
@@ -121,20 +121,20 @@ const RootInner = forwardRef<HTMLDivElement, RootProps>(
       role: 'root',
     })
 
-    // Controllable value state
-    const [value = [], setValue] = useControllableState({
+    // Controllable state
+    const [value = [], setValueState] = useControllableState({
       prop: valueProp,
       defaultProp: defaultValue,
       onChange: onValueChange,
     })
 
     // Machine
-    const { send, computed } = useMachine(accordionMachine, {
+    const [snapshot, send] = useMachine(accordionMachine, {
       input: {
         value,
         multiple,
         collapsible,
-        onValueChange: setValue,
+        onValueChange: setValueState,
       },
     })
 
@@ -196,7 +196,7 @@ const RootInner = forwardRef<HTMLDivElement, RootProps>(
 
     const contextValue: AccordionContextValue = {
       value,
-      computed,
+      snapshot,
       store,
       send,
       disabled,
@@ -237,7 +237,7 @@ export type ItemProps = {
 
 export const Item = forwardRef<HTMLDivElement, ItemProps>(
   ({ children, value: itemId, disabled = false, ...rest }, forwardedRef) => {
-    const { computed, disabled: rootDisabled } = useAccordionContext()
+    const { snapshot, disabled: rootDisabled } = useAccordionContext()
 
     const isDisabled = rootDisabled || disabled
 
@@ -246,7 +246,7 @@ export const Item = forwardRef<HTMLDivElement, ItemProps>(
       id: itemId,
       meta: { disabled: isDisabled },
     })
-    const isExpanded = computed.expandedSet.has(itemId)
+    const isExpanded = snapshot.expandedSet.has(itemId)
 
     const itemContextValue: ItemContextValue = {
       itemId,

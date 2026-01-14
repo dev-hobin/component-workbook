@@ -10,9 +10,9 @@ import {
   type RefObject,
 } from 'react'
 import { createPortal } from 'react-dom'
-import { useControllableState } from '@radix-ui/react-use-controllable-state'
 import { createFocusTrap, type FocusTrap } from 'focus-trap'
 import { useMachine, type Send } from 'controlled-machine/react'
+import { useControllableState } from '@radix-ui/react-use-controllable-state'
 
 import { modalMachine, type ModalEvents, type ModalComputed } from './machine'
 import { usePresence } from '../../hooks/use-presence'
@@ -27,7 +27,7 @@ import { DismissableLayer } from '../../primitives/dismissable-layer'
 type ModalContextValue = {
   open: boolean
   send: Send<ModalEvents>
-  computed: ModalComputed
+  snapshot: ModalComputed
   triggerRef: RefObject<HTMLButtonElement | null>
   contentRef: RefObject<HTMLDivElement | null>
   initialFocusRef: RefObject<HTMLElement | null>
@@ -86,6 +86,7 @@ export function Root({
   const trapRef = useRef<FocusTrap | null>(null)
   const prevOverflowRef = useRef<string>('')
 
+  // Controllable state
   const [open = false, setOpen] = useControllableState({
     prop: openProp,
     defaultProp: defaultOpen,
@@ -131,7 +132,7 @@ export function Root({
     document.body.style.overflow = prevOverflowRef.current
   }, [])
 
-  const { send, computed } = useMachine(modalMachine, {
+  const [snapshot, send] = useMachine(modalMachine, {
     input: {
       open,
       onOpenChange: setOpen,
@@ -154,7 +155,7 @@ export function Root({
   const contextValue: ModalContextValue = {
     open,
     send,
-    computed,
+    snapshot,
     triggerRef,
     contentRef,
     initialFocusRef: initialFocusRefState.current,

@@ -7,7 +7,7 @@ import { createMachine } from 'controlled-machine'
 export type ModalInput = {
   // 핵심 상태
   open: boolean
-  onOpenChange: (open: boolean) => void
+  onOpenChange?: (open: boolean) => void
 
   // 닫기 옵션
   closeOnEscape: boolean
@@ -118,13 +118,13 @@ export const modalMachine = createMachine<{
   actions: {
     open: (ctx) => {
       if (!ctx.open) {
-        ctx.onOpenChange(true)
+        ctx.onOpenChange?.(true)
       }
     },
 
     close: (ctx) => {
       if (ctx.open) {
-        ctx.onOpenChange(false)
+        ctx.onOpenChange?.(false)
       }
     },
 

@@ -5,11 +5,10 @@ import React, {
   useContext,
   useId,
   useRef,
-  useState,
   type ComponentPropsWithoutRef,
 } from 'react'
-import { useControllableState } from '@radix-ui/react-use-controllable-state'
 import { useMachine, type Send } from 'controlled-machine/react'
+import { useControllableState } from '@radix-ui/react-use-controllable-state'
 
 import {
   comboboxMachine,
@@ -45,12 +44,18 @@ type ComboboxOptionMeta = {
   disabled: boolean
 }
 
+// snapshot = internal (highlightedOptionId만 포함)
+// isOpen은 input이므로 context에서 직접 접근
+type ComboboxSnapshot = {
+  highlightedOptionId: OptionId | null
+}
+
 type ComboboxContextValue = {
   comboboxId: string
   isOpen: boolean
   inputValue: string
   selectedValue: string | null
-  highlightedOptionId: OptionId | null
+  snapshot: ComboboxSnapshot
   autocomplete: AutocompleteMode
   store: NodeStore<ComboboxRole, ComboboxOptionMeta>
   send: Send<ComboboxEvents>
@@ -127,28 +132,22 @@ function RootInner({
   const store = useNodeStore<ComboboxRole, ComboboxOptionMeta>()
   const comboboxId = useId()
 
-  // Controllable state
-  const [selectedValue, setSelectedValue] = useControllableState({
+  // Controllable states
+  const [selectedValue, setSelectedValue] = useControllableState<string | null>({
     prop: valueProp,
-    onChange: onValueChange,
     defaultProp: defaultValue,
+    onChange: onValueChange,
   })
-
-  const [inputValue, setInputValue] = useControllableState({
+  const [inputValue = '', setInputValue] = useControllableState({
     prop: inputValueProp,
-    onChange: onInputValueChange,
     defaultProp: defaultInputValue,
+    onChange: onInputValueChange,
   })
-
-  const [isOpen, setIsOpen] = useControllableState({
+  const [isOpen = false, setIsOpen] = useControllableState({
     prop: openProp,
-    onChange: onOpenChange,
     defaultProp: defaultOpen,
+    onChange: onOpenChange,
   })
-
-  // Internal state
-  const [highlightedOptionId, setHighlightedOptionId] =
-    useState<OptionId | null>(null)
 
   // Helper: Get options from NodeStore meta
   const getOptionsFromStore = useCallback((): ComboboxOption[] => {
@@ -168,19 +167,17 @@ function RootInner({
   )
 
   // Machine
-  const { send } = useMachine(comboboxMachine, {
+  const [snapshot, send] = useMachine(comboboxMachine, {
     input: {
       // State
-      isOpen: isOpen ?? false,
-      inputValue: inputValue ?? '',
+      isOpen,
+      inputValue,
       selectedValue: selectedValue ?? null,
-      highlightedOptionId,
 
       // State change callbacks (선언적)
       onOpenChange: setIsOpen,
       onInputValueChange: setInputValue,
       onSelectedValueChange: setSelectedValue,
-      onHighlightedOptionIdChange: setHighlightedOptionId,
 
       // Options
       autocomplete,
@@ -195,9 +192,9 @@ function RootInner({
     actions: {
       // DOM actions override
       scrollOptionIntoView: () => {
-        if (highlightedOptionId) {
+        if (snapshot.highlightedOptionId) {
           requestAnimationFrame(() => {
-            const element = store.getElement(highlightedOptionId, 'option')
+            const element = store.getElement(snapshot.highlightedOptionId!, 'option')
             element?.scrollIntoView({ block: 'nearest' })
           })
         }
@@ -213,10 +210,10 @@ function RootInner({
 
   const contextValue: ComboboxContextValue = {
     comboboxId,
-    isOpen: isOpen ?? false,
-    inputValue: inputValue ?? '',
-    selectedValue: selectedValue ?? null,
-    highlightedOptionId,
+    isOpen,
+    inputValue,
+    selectedValue,
+    snapshot,
     autocomplete,
     store,
     send,
@@ -308,7 +305,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
       comboboxId,
       isOpen,
       inputValue,
-      highlightedOptionId,
+      snapshot,
       autocomplete,
       store,
       send,
@@ -328,8 +325,8 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
 
     // Highlighted option의 domId 구독
     const activeDescendantId = useStoreSubscribe(store, (s) => {
-      if (!highlightedOptionId) return null
-      return s.getNode(highlightedOptionId, 'option')?.domId ?? null
+      if (!snapshot.highlightedOptionId) return null
+      return s.getNode(snapshot.highlightedOptionId, 'option')?.domId ?? null
     })
 
     // Keyboard handler
@@ -588,7 +585,7 @@ export type OptionProps = {
 
 export const Option = forwardRef<HTMLLIElement, OptionProps>(
   ({ children, value, label, disabled = false, ...rest }, forwardedRef) => {
-    const { selectedValue, highlightedOptionId, send } = useComboboxContext()
+    const { selectedValue, snapshot, send } = useComboboxContext()
 
     const optionId = useId()
     const displayLabel =
@@ -601,7 +598,7 @@ export const Option = forwardRef<HTMLLIElement, OptionProps>(
       meta: { value, label: displayLabel, disabled },
     })
 
-    const highlighted = isHighlighted(highlightedOptionId, optionId)
+    const highlighted = isHighlighted(snapshot.highlightedOptionId, optionId)
     const selected = isSelected(selectedValue, value)
 
     // Option 객체 생성 (event payload로 전달)

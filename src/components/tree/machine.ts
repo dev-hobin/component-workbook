@@ -1,4 +1,4 @@
-import { createMachine } from 'controlled-machine'
+import { createMachine, and, not } from 'controlled-machine'
 
 // ============================================
 // Types
@@ -17,15 +17,11 @@ export type TreeItemMeta = {
 export type TreeInput = {
   // 확장 상태
   expandedValues: ItemValue[]
-  onExpandedValuesChange: (values: ItemValue[]) => void
+  onExpandedValuesChange?: (values: ItemValue[]) => void
 
   // 선택 상태
   selectedValues: ItemValue[]
-  onSelectedValuesChange: (values: ItemValue[]) => void
-
-  // 하이라이트 (포커스)
-  highlightedValue: ItemValue | null
-  onHighlightedValueChange: (value: ItemValue | null) => void
+  onSelectedValuesChange?: (values: ItemValue[]) => void
 
   // 옵션
   selectionMode: 'single' | 'multiple'
@@ -38,6 +34,11 @@ export type TreeInput = {
   getSiblingValues: (value: ItemValue) => ItemValue[]
   getItemTextValue: (value: ItemValue) => string
   getHasChildren: (value: ItemValue) => boolean
+}
+
+export type TreeInternal = {
+  // 하이라이트 (포커스) - internal state
+  highlightedValue: ItemValue | null
 }
 
 export type TreeEvents = {
@@ -70,32 +71,42 @@ export type TreeEvents = {
   FOCUS_ITEM: undefined
 }
 
+// highlightedValue는 Internal에서 직접 접근
 export type TreeComputed = {
-  highlightedValue: ItemValue | null
   isMultiSelect: boolean
 }
 
 export type TreeActions =
   | 'noop'
+  // 확장/축소
   | 'expand'
   | 'collapse'
   | 'toggleExpand'
   | 'expandSiblings'
+  // 선택
   | 'select'
   | 'toggleSelect'
+  // 하이라이트
   | 'highlightById'
   | 'highlightNext'
   | 'highlightPrev'
   | 'highlightFirst'
   | 'highlightLast'
+  | 'highlightToFirstChild'
+  | 'highlightToParent'
+  | 'highlightByCharacter'
+  // 복합 키보드 액션
   | 'handleArrowRight'
   | 'handleArrowLeft'
   | 'handleActivate'
-  | 'highlightByCharacter'
   // DOM actions (Shell에서 override)
   | 'focusItem'
 
-export type TreeGuards = 'isMultiSelect'
+export type TreeGuards =
+  | 'isMultiSelect'
+  | 'hasHighlight'
+  | 'highlightedHasChildren'
+  | 'highlightedIsInExpanded'
 
 // ============================================
 // Machine
@@ -125,32 +136,42 @@ export type TreeGuards = 'isMultiSelect'
  */
 export const treeMachine = createMachine<{
   input: TreeInput
+  internal: TreeInternal
   events: TreeEvents
   computed: TreeComputed
   actions: TreeActions
   guards: TreeGuards
 }>({
+  internal: {
+    highlightedValue: null,
+  },
+
   computed: {
-    highlightedValue: (ctx) => ctx.highlightedValue,
     isMultiSelect: (ctx) => ctx.selectionMode === 'multiple',
   },
 
   guards: {
     isMultiSelect: (ctx) => ctx.selectionMode === 'multiple',
+    hasHighlight: (ctx) => ctx.highlightedValue !== null,
+    highlightedHasChildren: (ctx) =>
+      ctx.highlightedValue !== null && ctx.getHasChildren(ctx.highlightedValue),
+    highlightedIsInExpanded: (ctx) =>
+      ctx.highlightedValue !== null &&
+      ctx.expandedValues.includes(ctx.highlightedValue),
   },
 
   on: {
     // 확장/축소
     EXPAND: 'expand',
     COLLAPSE: 'collapse',
-    TOGGLE_EXPAND: 'toggleExpand',
-    EXPAND_SIBLINGS: 'expandSiblings',
+    TOGGLE_EXPAND: [{ when: 'highlightedHasChildren', do: 'toggleExpand' }],
+    EXPAND_SIBLINGS: [{ when: 'hasHighlight', do: 'expandSiblings' }],
 
     // 선택
     SELECT: 'select',
     TOGGLE_SELECT: [
       { when: 'isMultiSelect', do: 'toggleSelect' },
-      { do: 'select' }, // single mode에서는 그냥 선택
+      { do: 'select' },
     ],
 
     // 하이라이트
@@ -160,10 +181,24 @@ export const treeMachine = createMachine<{
     HIGHLIGHT_FIRST: 'highlightFirst',
     HIGHLIGHT_LAST: 'highlightLast',
 
-    // 복합 키보드 액션
-    ARROW_RIGHT: 'handleArrowRight',
-    ARROW_LEFT: 'handleArrowLeft',
-    ACTIVATE: 'handleActivate',
+    // ArrowRight: 닫힌 부모 → 열기, 열린 부모 → 첫 자식으로
+    ARROW_RIGHT: [
+      { when: and(['highlightedHasChildren', not('highlightedIsInExpanded')]), do: 'expand' },
+      { when: and(['highlightedHasChildren', 'highlightedIsInExpanded']), do: 'highlightToFirstChild' },
+    ],
+
+    // ArrowLeft: 열린 부모 → 닫기, 그 외 → 부모로
+    ARROW_LEFT: [
+      { when: and(['highlightedHasChildren', 'highlightedIsInExpanded']), do: 'collapse' },
+      { when: 'hasHighlight', do: 'highlightToParent' },
+    ],
+
+    // Enter: 부모 → 토글, 끝 노드 → 선택/토글선택
+    ACTIVATE: [
+      { when: 'highlightedHasChildren', do: 'toggleExpand' },
+      { when: ['hasHighlight', 'isMultiSelect'], do: 'toggleSelect' },
+      { when: 'hasHighlight', do: 'select' },
+    ],
 
     // 문자 검색
     TYPE_CHARACTER: 'highlightByCharacter',
@@ -187,182 +222,178 @@ export const treeMachine = createMachine<{
   actions: {
     noop: () => {},
 
-    expand: (ctx, payload: { value: ItemValue }) => {
-
-      const { value } = payload
+    // value가 payload에 있으면 사용, 없으면 highlightedValue 사용
+    expand: (ctx, payload: { value?: ItemValue }) => {
+      const value = payload?.value ?? ctx.highlightedValue
+      if (!value) return
       if (!ctx.getHasChildren(value)) return
       if (ctx.expandedValues.includes(value)) return
 
-      ctx.onExpandedValuesChange([...ctx.expandedValues, value])
+      ctx.onExpandedValuesChange?.([...ctx.expandedValues, value])
     },
 
-    collapse: (ctx, payload: { value: ItemValue }) => {
-
-      const { value } = payload
+    collapse: (ctx, payload: { value?: ItemValue }) => {
+      const value = payload?.value ?? ctx.highlightedValue
+      if (!value) return
       if (!ctx.expandedValues.includes(value)) return
 
-      ctx.onExpandedValuesChange(ctx.expandedValues.filter((v) => v !== value))
+      ctx.onExpandedValuesChange?.(ctx.expandedValues.filter((v) => v !== value))
     },
 
-    toggleExpand: (ctx, payload: { value: ItemValue }) => {
-
-      const { value } = payload
+    toggleExpand: (ctx, payload: { value?: ItemValue }) => {
+      const value = payload?.value ?? ctx.highlightedValue
+      if (!value) return
       if (!ctx.getHasChildren(value)) return
 
       if (ctx.expandedValues.includes(value)) {
-        ctx.onExpandedValuesChange(
+        ctx.onExpandedValuesChange?.(
           ctx.expandedValues.filter((v) => v !== value),
         )
       } else {
-        ctx.onExpandedValuesChange([...ctx.expandedValues, value])
+        ctx.onExpandedValuesChange?.([...ctx.expandedValues, value])
       }
     },
 
     expandSiblings: (ctx) => {
-      if (!ctx.highlightedValue) return
-
-      const siblings = ctx.getSiblingValues(ctx.highlightedValue)
+      // guard: hasHighlight ensures highlightedValue exists
+      const siblings = ctx.getSiblingValues(ctx.highlightedValue!)
       const toExpand = siblings.filter((v) => {
         return ctx.getHasChildren(v) && !ctx.expandedValues.includes(v)
       })
 
       if (toExpand.length > 0) {
-        ctx.onExpandedValuesChange([...ctx.expandedValues, ...toExpand])
+        ctx.onExpandedValuesChange?.([...ctx.expandedValues, ...toExpand])
       }
     },
 
     select: (ctx, payload: { value: ItemValue }) => {
-
       const { value } = payload
       const meta = ctx.getItemMeta(value)
       if (meta?.disabled) return
 
       if (ctx.selectionMode === 'single') {
-        ctx.onSelectedValuesChange([value])
+        ctx.onSelectedValuesChange?.([value])
       } else {
         // multi-select: 추가
         if (!ctx.selectedValues.includes(value)) {
-          ctx.onSelectedValuesChange([...ctx.selectedValues, value])
+          ctx.onSelectedValuesChange?.([...ctx.selectedValues, value])
         }
       }
     },
 
     toggleSelect: (ctx, payload: { value: ItemValue }) => {
-
       const { value } = payload
       const meta = ctx.getItemMeta(value)
       if (meta?.disabled) return
 
       if (ctx.selectedValues.includes(value)) {
-        ctx.onSelectedValuesChange(
+        ctx.onSelectedValuesChange?.(
           ctx.selectedValues.filter((v) => v !== value),
         )
       } else {
-        ctx.onSelectedValuesChange([...ctx.selectedValues, value])
+        ctx.onSelectedValuesChange?.([...ctx.selectedValues, value])
       }
     },
 
-    highlightById: (ctx, payload: { value: ItemValue }) => {
-
+    highlightById: (ctx, payload: { value: ItemValue }, assign) => {
       const meta = ctx.getItemMeta(payload.value)
       if (meta && !meta.disabled) {
-        ctx.onHighlightedValueChange(payload.value)
+        assign({ highlightedValue: payload.value })
       }
     },
 
-    highlightNext: (ctx) => {
+    highlightNext: (ctx, _, assign) => {
       const visibleValues = ctx.getVisibleItemValues()
       if (visibleValues.length === 0) return
 
       if (ctx.highlightedValue === null) {
-        ctx.onHighlightedValueChange(visibleValues[0])
+        assign({ highlightedValue: visibleValues[0] })
         return
       }
 
       const currentIndex = visibleValues.indexOf(ctx.highlightedValue)
       if (currentIndex === -1) {
-        ctx.onHighlightedValueChange(visibleValues[0])
+        assign({ highlightedValue: visibleValues[0] })
         return
       }
 
       // 다음 노드 (끝에서 멈춤)
       if (currentIndex < visibleValues.length - 1) {
-        ctx.onHighlightedValueChange(visibleValues[currentIndex + 1])
+        assign({ highlightedValue: visibleValues[currentIndex + 1] })
       }
     },
 
-    highlightPrev: (ctx) => {
+    highlightPrev: (ctx, _, assign) => {
       const visibleValues = ctx.getVisibleItemValues()
       if (visibleValues.length === 0) return
 
       if (ctx.highlightedValue === null) {
-        ctx.onHighlightedValueChange(visibleValues[visibleValues.length - 1])
+        assign({ highlightedValue: visibleValues[visibleValues.length - 1] })
         return
       }
 
       const currentIndex = visibleValues.indexOf(ctx.highlightedValue)
       if (currentIndex === -1) {
-        ctx.onHighlightedValueChange(visibleValues[visibleValues.length - 1])
+        assign({ highlightedValue: visibleValues[visibleValues.length - 1] })
         return
       }
 
       // 이전 노드 (처음에서 멈춤)
       if (currentIndex > 0) {
-        ctx.onHighlightedValueChange(visibleValues[currentIndex - 1])
+        assign({ highlightedValue: visibleValues[currentIndex - 1] })
       }
     },
 
-    highlightFirst: (ctx) => {
+    highlightFirst: (ctx, _, assign) => {
       const visibleValues = ctx.getVisibleItemValues()
       if (visibleValues.length > 0) {
-        ctx.onHighlightedValueChange(visibleValues[0])
+        assign({ highlightedValue: visibleValues[0] })
       }
     },
 
-    highlightLast: (ctx) => {
+    highlightLast: (ctx, _, assign) => {
       const visibleValues = ctx.getVisibleItemValues()
       if (visibleValues.length > 0) {
-        ctx.onHighlightedValueChange(visibleValues[visibleValues.length - 1])
+        assign({ highlightedValue: visibleValues[visibleValues.length - 1] })
       }
     },
 
-    /**
-     * ArrowRight 처리:
-     * 1. 닫힌 부모 노드 → 열기
-     * 2. 열린 부모 노드 → 첫 자식으로 이동
-     * 3. 끝 노드 → 무동작
-     */
-    handleArrowRight: (ctx) => {
+    highlightToFirstChild: (ctx, _, assign) => {
+      // guard: highlightedIsExpanded ensures highlightedValue is expanded parent
+      const firstChild = ctx.getFirstChildValue(ctx.highlightedValue!)
+      if (firstChild) {
+        assign({ highlightedValue: firstChild })
+      }
+    },
+
+    highlightToParent: (ctx, _, assign) => {
+      // guard: hasHighlight ensures highlightedValue exists
+      const parentValue = ctx.getParentValue(ctx.highlightedValue!)
+      if (parentValue) {
+        assign({ highlightedValue: parentValue })
+      }
+    },
+
+    // 기존 복합 액션 (하위 호환)
+    handleArrowRight: (ctx, _, assign) => {
       if (!ctx.highlightedValue) return
 
       const hasChildren = ctx.getHasChildren(ctx.highlightedValue)
-
-      if (!hasChildren) {
-        // 끝 노드: 무동작
-        return
-      }
+      if (!hasChildren) return
 
       const isExpanded = ctx.expandedValues.includes(ctx.highlightedValue)
 
       if (!isExpanded) {
-        // 닫힌 부모: 열기
-        ctx.onExpandedValuesChange([...ctx.expandedValues, ctx.highlightedValue])
+        ctx.onExpandedValuesChange?.([...ctx.expandedValues, ctx.highlightedValue])
       } else {
-        // 열린 부모: 첫 자식으로 이동
         const firstChild = ctx.getFirstChildValue(ctx.highlightedValue)
         if (firstChild) {
-          ctx.onHighlightedValueChange(firstChild)
+          assign({ highlightedValue: firstChild })
         }
       }
     },
 
-    /**
-     * ArrowLeft 처리:
-     * 1. 열린 부모 노드 → 닫기
-     * 2. 닫힌 노드 또는 끝 노드 → 부모로 이동
-     * 3. 루트 노드 → 무동작
-     */
-    handleArrowLeft: (ctx) => {
+    handleArrowLeft: (ctx, _, assign) => {
       if (!ctx.highlightedValue) return
 
       const hasChildren = ctx.getHasChildren(ctx.highlightedValue)
@@ -370,24 +401,17 @@ export const treeMachine = createMachine<{
         hasChildren && ctx.expandedValues.includes(ctx.highlightedValue)
 
       if (isExpanded) {
-        // 열린 부모: 닫기
-        ctx.onExpandedValuesChange(
+        ctx.onExpandedValuesChange?.(
           ctx.expandedValues.filter((v) => v !== ctx.highlightedValue),
         )
       } else {
-        // 닫힌 노드 또는 끝 노드: 부모로 이동
         const parentValue = ctx.getParentValue(ctx.highlightedValue)
         if (parentValue) {
-          ctx.onHighlightedValueChange(parentValue)
+          assign({ highlightedValue: parentValue })
         }
       }
     },
 
-    /**
-     * Enter 키 처리:
-     * 1. 부모 노드 → 확장/축소 토글
-     * 2. 끝 노드 → 선택
-     */
     handleActivate: (ctx) => {
       if (!ctx.highlightedValue) return
 
@@ -397,29 +421,26 @@ export const treeMachine = createMachine<{
       const hasChildren = ctx.getHasChildren(ctx.highlightedValue)
 
       if (hasChildren) {
-        // 부모 노드: 토글
         if (ctx.expandedValues.includes(ctx.highlightedValue)) {
-          ctx.onExpandedValuesChange(
+          ctx.onExpandedValuesChange?.(
             ctx.expandedValues.filter((v) => v !== ctx.highlightedValue),
           )
         } else {
-          ctx.onExpandedValuesChange([
+          ctx.onExpandedValuesChange?.([
             ...ctx.expandedValues,
             ctx.highlightedValue,
           ])
         }
       } else {
-        // 끝 노드: 선택
         if (ctx.selectionMode === 'single') {
-          ctx.onSelectedValuesChange([ctx.highlightedValue])
+          ctx.onSelectedValuesChange?.([ctx.highlightedValue])
         } else {
-          // multi: 토글
           if (ctx.selectedValues.includes(ctx.highlightedValue)) {
-            ctx.onSelectedValuesChange(
+            ctx.onSelectedValuesChange?.(
               ctx.selectedValues.filter((v) => v !== ctx.highlightedValue),
             )
           } else {
-            ctx.onSelectedValuesChange([
+            ctx.onSelectedValuesChange?.([
               ...ctx.selectedValues,
               ctx.highlightedValue,
             ])
@@ -428,8 +449,7 @@ export const treeMachine = createMachine<{
       }
     },
 
-    highlightByCharacter: (ctx, payload: { character: string }) => {
-
+    highlightByCharacter: (ctx, payload: { character: string }, assign) => {
       const char = payload.character.toLowerCase()
       const visibleValues = ctx.getVisibleItemValues()
 
@@ -443,7 +463,7 @@ export const treeMachine = createMachine<{
       for (let i = startIndex; i < visibleValues.length; i++) {
         const textValue = ctx.getItemTextValue(visibleValues[i])
         if (textValue.toLowerCase().startsWith(char)) {
-          ctx.onHighlightedValueChange(visibleValues[i])
+          assign({ highlightedValue: visibleValues[i] })
           return
         }
       }
@@ -452,7 +472,7 @@ export const treeMachine = createMachine<{
       for (let i = 0; i < startIndex; i++) {
         const textValue = ctx.getItemTextValue(visibleValues[i])
         if (textValue.toLowerCase().startsWith(char)) {
-          ctx.onHighlightedValueChange(visibleValues[i])
+          assign({ highlightedValue: visibleValues[i] })
           return
         }
       }

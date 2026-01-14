@@ -9,8 +9,8 @@ import {
   useEffect,
   type ComponentPropsWithoutRef,
 } from 'react'
-import { useControllableState } from '@radix-ui/react-use-controllable-state'
 import { useMachine, type Send } from 'controlled-machine/react'
+import { useControllableState } from '@radix-ui/react-use-controllable-state'
 
 import { tabsMachine, type TabsEvents, type TabValue, type TabsComputed } from './machine'
 import { usePresence } from '../../hooks/use-presence'
@@ -34,11 +34,12 @@ type TabsMeta = {
   disabled?: boolean
 }
 
+type TabsSnapshot = TabsComputed & { focusedValue: TabValue | null }
+
 type TabsContextValue = {
   value: TabValue
-  focusedValue: TabValue | null
   send: Send<TabsEvents>
-  computed: TabsComputed
+  snapshot: TabsSnapshot
   store: NodeStore<TabsRole, TabsMeta>
   disabled: boolean
   orientation: 'horizontal' | 'vertical'
@@ -106,15 +107,13 @@ const RootInner = forwardRef<HTMLDivElement, RootProps>(
       role: 'root',
     })
 
-    // Controllable value state
-    const [value = '', setValue] = useControllableState({
+    // Controllable state
+    const [valueState, setValueState] = useControllableState<string>({
       prop: valueProp,
       defaultProp: defaultValue ?? '',
       onChange: onValueChange,
     })
-
-    // Focus tracking for keyboard navigation
-    const [focusedValue, setFocusedValue] = useState<TabValue | null>(null)
+    const value = valueState ?? ''
 
     // Helper to get enabled trigger values (for machine)
     const getEnabledValues = useCallback(() => {
@@ -133,12 +132,10 @@ const RootInner = forwardRef<HTMLDivElement, RootProps>(
     )
 
     // Machine
-    const { send, computed } = useMachine(tabsMachine, {
+    const [snapshot, send] = useMachine(tabsMachine, {
       input: {
         value,
-        onValueChange: setValue,
-        focusedValue,
-        onFocusedValueChange: setFocusedValue,
+        onValueChange: setValueState,
         activationMode,
         loop,
         getEnabledValues,
@@ -147,9 +144,8 @@ const RootInner = forwardRef<HTMLDivElement, RootProps>(
 
     const contextValue: TabsContextValue = {
       value,
-      focusedValue,
       send,
-      computed,
+      snapshot,
       store,
       disabled,
       orientation,
@@ -188,9 +184,9 @@ export const List = forwardRef<HTMLDivElement, ListProps>(
   ({ children, ...rest }, forwardedRef) => {
     const {
       send,
+      snapshot,
       orientation,
       disabled,
-      focusedValue,
       getTriggerElement,
       listRef,
     } = useTabsContext()
@@ -201,11 +197,11 @@ export const List = forwardRef<HTMLDivElement, ListProps>(
 
     // Focus DOM element when focusedValue changes
     useEffect(() => {
-      if (focusedValue) {
-        const element = getTriggerElement(focusedValue)
+      if (snapshot.focusedValue) {
+        const element = getTriggerElement(snapshot.focusedValue)
         element?.focus()
       }
-    }, [focusedValue, getTriggerElement])
+    }, [snapshot.focusedValue, getTriggerElement])
 
     // Keyboard navigation - just send events, machine handles logic
     const handleKeyDown = (e: React.KeyboardEvent) => {

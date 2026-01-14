@@ -6,11 +6,9 @@ import {
   useId,
   useLayoutEffect,
   useRef,
-  useState,
   type ComponentPropsWithoutRef,
 } from 'react'
 import { createPortal } from 'react-dom'
-import { useControllableState } from '@radix-ui/react-use-controllable-state'
 import {
   computePosition,
   flip,
@@ -20,6 +18,7 @@ import {
   type Placement,
 } from '@floating-ui/dom'
 import { useMachine, type Send } from 'controlled-machine/react'
+import { useControllableState } from '@radix-ui/react-use-controllable-state'
 
 import {
   menuMachine,
@@ -38,6 +37,7 @@ import {
   useNodeStore,
 } from '../../primitives/use-node-store'
 import { useNode } from '../../primitives/use-node'
+import { useStoreSubscribe } from '../../primitives/use-store-subscribe'
 import { ParentProvider } from '../../primitives/use-parent-context'
 import type { NodeStore } from '../../primitives/node-store'
 
@@ -63,12 +63,15 @@ type MenuContentMeta = {
 
 type MenuMeta = MenuItemMeta | MenuContentMeta | object
 
-type MenuContextValue = {
-  // State
+type MenuSnapshot = MenuComputed & {
   openedPath: MenuId[]
   highlightedId: ItemId | null
+}
+
+type MenuContextValue = {
+  // State
   send: Send<MenuEvents>
-  computed: MenuComputed
+  snapshot: MenuSnapshot
 
   // NodeStore (replaces manual registries)
   store: NodeStore<MenuRole, MenuMeta>
@@ -155,35 +158,20 @@ function RootImpl({
   const rootMenuId = useId()
   const store = useNodeStore<MenuRole, MenuMeta>()
 
-  // Controlled open state → openedPath
-  const [controlledOpen, setControlledOpen] = useControllableState({
+  // Controllable state
+  const [open = false, setOpen] = useControllableState({
     prop: openProp,
     defaultProp: defaultOpen,
     onChange: onOpenChange,
   })
 
-  const [openedPath, setOpenedPath] = useState<MenuId[]>(() =>
-    controlledOpen ? [rootMenuId] : [],
-  )
-  const [highlightedId, setHighlightedId] = useState<ItemId | null>(null)
-
-  // Sync controlledOpen with openedPath
-  const handleOpenedPathChange = useCallback(
-    (path: MenuId[]) => {
-      setOpenedPath(path)
-      setControlledOpen(path.length > 0)
-    },
-    [setControlledOpen],
-  )
-
-  // Refs for latest values (avoids stale closure in machine effects)
-  const openedPathRef = useRef(openedPath)
-  openedPathRef.current = openedPath
+  // Ref for machine snapshot (used in callbacks)
+  const snapshotRef = useRef<MenuSnapshot | null>(null)
 
   // DOM helpers using NodeStore
   const focusContent = useCallback(() => {
     requestAnimationFrame(() => {
-      const currentPath = openedPathRef.current
+      const currentPath = snapshotRef.current?.openedPath ?? []
       const activeMenuId = currentPath[currentPath.length - 1]
       if (!activeMenuId) return
 
@@ -226,6 +214,16 @@ function RootImpl({
           return itemMeta.menuId === menuId && !itemMeta.disabled
         },
       )
+
+      // Sort by DOM order
+      items.sort((a, b) => {
+        if (!a.element || !b.element) return 0
+        const position = a.element.compareDocumentPosition(b.element)
+        if (position & Node.DOCUMENT_POSITION_FOLLOWING) return -1
+        if (position & Node.DOCUMENT_POSITION_PRECEDING) return 1
+        return 0
+      })
+
       return items.map((node) => node.id)
     },
     [store],
@@ -256,22 +254,22 @@ function RootImpl({
 
   const getParentMenuId = useCallback(
     (menuId: MenuId) => {
-      const index = openedPath.indexOf(menuId)
+      const currentPath = snapshotRef.current?.openedPath ?? []
+      const index = currentPath.indexOf(menuId)
       if (index > 0) {
-        return openedPath[index - 1]
+        return currentPath[index - 1]
       }
       return null
     },
-    [openedPath],
+    [],
   )
 
   // Machine
-  const { send, computed } = useMachine(menuMachine, {
+  const [snapshot, send] = useMachine(menuMachine, {
     input: {
-      openedPath,
-      onOpenedPathChange: handleOpenedPathChange,
-      highlightedId,
-      onHighlightedIdChange: setHighlightedId,
+      open,
+      onOpenChange: setOpen,
+      rootMenuId,
       loop,
       getEnabledItemIds,
       getItemTextValue,
@@ -283,18 +281,19 @@ function RootImpl({
       focusContent,
       focusTrigger,
       focusItem: () => {
-        if (highlightedId) {
-          focusItemById(highlightedId)
+        if (snapshot.highlightedId) {
+          focusItemById(snapshot.highlightedId)
         }
       },
     },
   })
 
+  // Keep snapshot ref updated for callbacks
+  snapshotRef.current = snapshot
+
   const contextValue: MenuContextValue = {
-    openedPath,
-    highlightedId,
     send,
-    computed,
+    snapshot,
     store,
     loop,
     onItemSelect,
@@ -322,7 +321,7 @@ export type TriggerProps = ComponentPropsWithoutRef<'button'>
 
 export const Trigger = forwardRef<HTMLButtonElement, TriggerProps>(
   ({ children, ...rest }, forwardedRef) => {
-    const { openedPath, send } = useMenuContext()
+    const { snapshot, send, store } = useMenuContext()
     const { menuId, parentMenuId } = useMenuIdContext()
 
     // useNode for automatic ID and ref management
@@ -331,8 +330,13 @@ export const Trigger = forwardRef<HTMLButtonElement, TriggerProps>(
       id: menuId,
     })
 
-    const isOpen = isMenuOpen(openedPath, menuId)
-    const contentDomId = `content::${menuId}`
+    const isOpen = isMenuOpen(snapshot.openedPath, menuId)
+
+    // Subscribe to content's domId dynamically
+    const contentDomId = useStoreSubscribe(
+      store,
+      (s) => s.getNode(menuId, 'content')?.domId ?? null,
+    )
 
     const handleClick = () => {
       if (isOpen) {
@@ -368,7 +372,7 @@ export const Trigger = forwardRef<HTMLButtonElement, TriggerProps>(
             id: domId,
             'aria-haspopup': 'menu' as const,
             'aria-expanded': isOpen,
-            'aria-controls': isOpen ? contentDomId : undefined,
+            'aria-controls': isOpen ? contentDomId ?? undefined : undefined,
             'data-part': 'trigger',
             'data-state': isOpen ? 'open' : 'closed',
             onClick: handleClick,
@@ -411,7 +415,7 @@ export const Content = forwardRef<HTMLDivElement, ContentProps>(
     { children, placement = 'bottom-start', sideOffset = 4, ...rest },
     forwardedRef,
   ) => {
-    const { openedPath, highlightedId, send, store, onItemSelect } =
+    const { snapshot, send, store, onItemSelect } =
       useMenuContext()
     const { menuId } = useMenuIdContext()
 
@@ -424,8 +428,12 @@ export const Content = forwardRef<HTMLDivElement, ContentProps>(
       meta: { menuId },
     })
 
-    const triggerDomId = `trigger::${menuId}`
-    const isOpen = isMenuOpen(openedPath, menuId)
+    // Subscribe to trigger's domId dynamically
+    const triggerDomId = useStoreSubscribe(
+      store,
+      (s) => s.getNode(menuId, 'trigger')?.domId ?? null,
+    )
+    const isOpen = isMenuOpen(snapshot.openedPath, menuId)
 
     const { isPresent, transitionState } = usePresence({
       isVisible: isOpen,
@@ -473,8 +481,11 @@ export const Content = forwardRef<HTMLDivElement, ContentProps>(
       [store],
     )
 
-    // Keyboard handler
+    // Keyboard handler - only process when this menu is the active (topmost) menu
     const handleKeyDown = (e: React.KeyboardEvent) => {
+      // State-based topmost check: only handle events when this menu is active
+      if (snapshot.activeMenuId !== menuId) return
+
       switch (e.key) {
         case 'ArrowDown':
           e.preventDefault()
@@ -503,13 +514,13 @@ export const Content = forwardRef<HTMLDivElement, ContentProps>(
         case 'Enter':
         case ' ':
           e.preventDefault()
-          if (highlightedId) {
-            const meta = getItemMeta(highlightedId)
+          if (snapshot.highlightedId) {
+            const meta = getItemMeta(snapshot.highlightedId)
             if (meta?.isSubTrigger) {
               send('OPEN_SUBMENU')
             } else {
               meta?.onSelect?.()
-              onItemSelect?.(highlightedId)
+              onItemSelect?.(snapshot.highlightedId)
               send('CLOSE_ALL')
             }
           }
@@ -596,7 +607,7 @@ export const Content = forwardRef<HTMLDivElement, ContentProps>(
                 {
                   role: 'menu',
                   id: domId,
-                  'aria-labelledby': triggerDomId,
+                  'aria-labelledby': triggerDomId ?? undefined,
                   tabIndex: -1,
                   'data-part': 'content',
                   'data-state': isOpen ? 'open' : 'closed',
@@ -630,7 +641,7 @@ export const Item = forwardRef<HTMLDivElement, ItemProps>(
     { children, disabled = false, textValue, onSelect, ...rest },
     forwardedRef,
   ) => {
-    const { highlightedId, send, onItemSelect } = useMenuContext()
+    const { snapshot, send, onItemSelect } = useMenuContext()
     const { menuId } = useMenuIdContext()
 
     // Derive textValue from children if not provided
@@ -649,7 +660,7 @@ export const Item = forwardRef<HTMLDivElement, ItemProps>(
       },
     })
 
-    const isHighlighted = highlightedId === itemId
+    const isHighlighted = snapshot.highlightedId === itemId
 
     const handleClick = () => {
       if (disabled) return
@@ -749,7 +760,7 @@ export type SubTriggerProps = {
 
 export const SubTrigger = forwardRef<HTMLDivElement, SubTriggerProps>(
   ({ children, disabled = false, textValue, ...rest }, forwardedRef) => {
-    const { openedPath, highlightedId, send } = useMenuContext()
+    const { snapshot, send } = useMenuContext()
     const { menuId: subMenuId, parentMenuId } = useMenuIdContext()
 
     // Derive textValue from children if not provided
@@ -771,8 +782,8 @@ export const SubTrigger = forwardRef<HTMLDivElement, SubTriggerProps>(
     })
 
     const itemId = subMenuId
-    const isHighlighted = highlightedId === itemId
-    const isOpen = isMenuOpen(openedPath, subMenuId)
+    const isHighlighted = snapshot.highlightedId === itemId
+    const isOpen = isMenuOpen(snapshot.openedPath, subMenuId)
 
     const handleClick = () => {
       if (disabled) return
@@ -828,7 +839,7 @@ export const SubContent = forwardRef<HTMLDivElement, SubContentProps>(
     { children, placement = 'right-start', sideOffset = 4, ...rest },
     forwardedRef,
   ) => {
-    const { openedPath, highlightedId, send, store, onItemSelect } =
+    const { snapshot, send, store, onItemSelect } =
       useMenuContext()
     const { menuId: subMenuId } = useMenuIdContext()
 
@@ -841,20 +852,31 @@ export const SubContent = forwardRef<HTMLDivElement, SubContentProps>(
       meta: { menuId: subMenuId },
     })
 
-    const isOpen = isMenuOpen(openedPath, subMenuId)
+    // Subscribe to sub-trigger's domId dynamically
+    const subTriggerDomId = useStoreSubscribe(
+      store,
+      (s) => s.getNode(subMenuId, 'sub-trigger')?.domId ?? null,
+    )
+
+    const isOpen = isMenuOpen(snapshot.openedPath, subMenuId)
 
     const { isPresent, transitionState } = usePresence({
       isVisible: isOpen,
       resolveElement: () => elementRef.current,
     })
 
-    // Auto-focus content when it becomes present
+    // Auto-focus content and highlight first item when submenu becomes present
     useLayoutEffect(() => {
       if (!isPresent) return
+      // This submenu just became visible - highlight first item after items are registered
       requestAnimationFrame(() => {
         elementRef.current?.focus()
+        // Only highlight if this submenu is the active one
+        if (snapshot.activeMenuId === subMenuId) {
+          send('HIGHLIGHT_FIRST')
+        }
       })
-    }, [isPresent, elementRef])
+    }, [isPresent, elementRef, snapshot.activeMenuId, subMenuId, send])
 
     // Positioning with floating-ui (on Positioner, relative to SubTrigger)
     useLayoutEffect(() => {
@@ -890,8 +912,11 @@ export const SubContent = forwardRef<HTMLDivElement, SubContentProps>(
       [store],
     )
 
-    // Keyboard handler
+    // Keyboard handler - only process when this submenu is the active (topmost) menu
     const handleKeyDown = (e: React.KeyboardEvent) => {
+      // State-based topmost check: only handle events when this submenu is active
+      if (snapshot.activeMenuId !== subMenuId) return
+
       switch (e.key) {
         case 'ArrowDown':
           e.preventDefault()
@@ -920,13 +945,13 @@ export const SubContent = forwardRef<HTMLDivElement, SubContentProps>(
         case 'Enter':
         case ' ':
           e.preventDefault()
-          if (highlightedId) {
-            const meta = getItemMeta(highlightedId)
+          if (snapshot.highlightedId) {
+            const meta = getItemMeta(snapshot.highlightedId)
             if (meta?.isSubTrigger) {
               send('OPEN_SUBMENU')
             } else {
               meta?.onSelect?.()
-              onItemSelect?.(highlightedId)
+              onItemSelect?.(snapshot.highlightedId)
               send('CLOSE_ALL')
             }
           }
@@ -1013,7 +1038,7 @@ export const SubContent = forwardRef<HTMLDivElement, SubContentProps>(
                 {
                   role: 'menu',
                   id: domId,
-                  'aria-labelledby': `sub-trigger::${subMenuId}`,
+                  'aria-labelledby': subTriggerDomId ?? undefined,
                   tabIndex: -1,
                   'data-part': 'sub-content',
                   'data-state': isOpen ? 'open' : 'closed',

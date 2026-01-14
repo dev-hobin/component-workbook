@@ -5,12 +5,11 @@ import React, {
   useContext,
   useId,
   useRef,
-  useState,
   type ComponentPropsWithoutRef,
   type ReactNode,
 } from 'react'
-import { useControllableState } from '@radix-ui/react-use-controllable-state'
 import { useMachine, type Send } from 'controlled-machine/react'
+import { useControllableState } from '@radix-ui/react-use-controllable-state'
 
 import {
   treeMachine,
@@ -49,13 +48,14 @@ type TreeGroupMeta = {
 
 type TreeMeta = TreeItemMeta | TreeGroupMeta | object
 
+type TreeSnapshot = TreeComputed & { highlightedValue: ItemValue | null }
+
 type TreeContextValue = {
   // State
   expandedValues: ItemValue[]
   selectedValues: ItemValue[]
-  highlightedValue: ItemValue | null
   send: Send<TreeEvents>
-  computed: TreeComputed
+  snapshot: TreeSnapshot
 
   // NodeStore
   store: NodeStore<TreeRole, TreeMeta>
@@ -169,22 +169,17 @@ const RootImpl = forwardRef<HTMLDivElement, RootProps>(
     const store = useNodeStore<TreeRole, TreeMeta>()
     const treeRef = useRef<HTMLDivElement>(null)
 
-    // Controllable state
-    const [expandedValues, setExpandedValues] = useControllableState({
+    // Controllable states
+    const [expandedValues = [], setExpandedValues] = useControllableState({
       prop: expandedValuesProp,
       defaultProp: defaultExpandedValues,
       onChange: onExpandedValuesChange,
     })
-
-    const [selectedValues, setSelectedValues] = useControllableState({
+    const [selectedValues = [], setSelectedValues] = useControllableState({
       prop: selectedValuesProp,
       defaultProp: defaultSelectedValues,
       onChange: onSelectedValuesChange,
     })
-
-    const [highlightedValue, setHighlightedValue] = useState<ItemValue | null>(
-      null,
-    )
 
     // Refs for latest values
     const expandedValuesRef = useRef(expandedValues)
@@ -314,14 +309,12 @@ const RootImpl = forwardRef<HTMLDivElement, RootProps>(
     )
 
     // Machine
-    const { send, computed } = useMachine(treeMachine, {
+    const [snapshot, send] = useMachine(treeMachine, {
       input: {
-        expandedValues: expandedValues ?? [],
+        expandedValues,
         onExpandedValuesChange: setExpandedValues,
-        selectedValues: selectedValues ?? [],
+        selectedValues,
         onSelectedValuesChange: setSelectedValues,
-        highlightedValue,
-        onHighlightedValueChange: setHighlightedValue,
         selectionMode,
         getVisibleItemValues,
         getItemMeta,
@@ -333,9 +326,9 @@ const RootImpl = forwardRef<HTMLDivElement, RootProps>(
       },
       actions: {
         focusItem: () => {
-          if (highlightedValue) {
+          if (snapshot.highlightedValue) {
             requestAnimationFrame(() => {
-              const labelElement = store.getElement(highlightedValue, 'label')
+              const labelElement = store.getElement(snapshot.highlightedValue!, 'label')
               labelElement?.focus()
             })
           }
@@ -376,8 +369,8 @@ const RootImpl = forwardRef<HTMLDivElement, RootProps>(
           break
         case ' ':
           e.preventDefault()
-          if (highlightedValue) {
-            send('TOGGLE_SELECT', { value: highlightedValue })
+          if (snapshot.highlightedValue) {
+            send('TOGGLE_SELECT', { value: snapshot.highlightedValue })
           }
           break
         case '*':
@@ -394,11 +387,10 @@ const RootImpl = forwardRef<HTMLDivElement, RootProps>(
     }
 
     const contextValue: TreeContextValue = {
-      expandedValues: expandedValues ?? [],
-      selectedValues: selectedValues ?? [],
-      highlightedValue,
+      expandedValues,
+      selectedValues,
       send,
-      computed,
+      snapshot,
       store,
       selectionMode,
     }
@@ -443,7 +435,7 @@ export const Item = forwardRef<HTMLDivElement, ItemProps>(
     { value, textValue = '', disabled = false, children, ...rest },
     forwardedRef,
   ) => {
-    const { expandedValues, selectedValues, highlightedValue } =
+    const { expandedValues, selectedValues, snapshot } =
       useTreeContext()
     const parentValue = useParentId() as ItemValue | null
 
@@ -455,7 +447,7 @@ export const Item = forwardRef<HTMLDivElement, ItemProps>(
 
     const isExpanded = isItemExpanded(expandedValues, value)
     const isSelected = isItemSelected(selectedValues, value)
-    const isHighlighted = highlightedValue === value
+    const isHighlighted = snapshot.highlightedValue === value
     const isDisabled = disabled
 
     // useNode for registration
@@ -612,6 +604,7 @@ export type ItemGroupProps = {
 
 export const ItemGroup = forwardRef<HTMLDivElement, ItemGroupProps>(
   ({ children, ...rest }, forwardedRef) => {
+    const { store } = useTreeContext()
     const { value, isExpanded } = useItemContext()
     const elementRef = useRef<HTMLDivElement>(null)
 
@@ -622,6 +615,12 @@ export const ItemGroup = forwardRef<HTMLDivElement, ItemGroupProps>(
         parentValue: value,
       },
     })
+
+    // Subscribe to label's domId dynamically
+    const labelDomId = useStoreSubscribe(
+      store,
+      (s) => s.getNode(value, 'label')?.domId ?? null,
+    )
 
     const { isPresent, transitionState } = usePresence({
       isVisible: isExpanded,
@@ -637,7 +636,7 @@ export const ItemGroup = forwardRef<HTMLDivElement, ItemGroupProps>(
           {
             role: 'group',
             id: domId,
-            'aria-labelledby': `label::${value}`,
+            'aria-labelledby': labelDomId ?? undefined,
             'data-part': 'group',
             'data-state': isExpanded ? 'open' : 'closed',
             'data-transition': transitionState,

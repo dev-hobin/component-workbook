@@ -1,4 +1,4 @@
-import { createMachine } from 'controlled-machine'
+import { createMachine, not } from 'controlled-machine'
 
 // ============================================
 // Types
@@ -20,13 +20,11 @@ export type ComboboxInput = {
   isOpen: boolean
   inputValue: string
   selectedValue: string | null
-  highlightedOptionId: OptionId | null
 
   // 상태 변경 콜백 (선언적)
-  onOpenChange: (open: boolean) => void
-  onInputValueChange: (value: string) => void
-  onSelectedValueChange: (value: string | null) => void
-  onHighlightedOptionIdChange: (id: OptionId | null) => void
+  onOpenChange?: (open: boolean) => void
+  onInputValueChange?: (value: string) => void
+  onSelectedValueChange?: (value: string | null) => void
 
   // 옵션
   autocomplete: AutocompleteMode
@@ -37,6 +35,11 @@ export type ComboboxInput = {
 
   // 콜백
   onSelect?: (value: string) => void
+}
+
+export type ComboboxInternal = {
+  // 하이라이트된 옵션 - internal state
+  highlightedOptionId: OptionId | null
 }
 
 export type ComboboxEvents = {
@@ -68,23 +71,29 @@ export type ComboboxEvents = {
   SCROLL_INTO_VIEW: undefined
 }
 
-export type ComboboxComputed = {
-  isOpen: boolean
-  highlightedOptionId: OptionId | null
-}
+// 모든 상태는 Input/Internal에서 직접 접근하므로 Computed 불필요
 
 export type ComboboxActions =
   | 'noop'
+  // 팝업
   | 'open'
   | 'close'
-  | 'handleInputChange'
-  | 'handleInputBlur'
+  | 'clearHighlight'
+  // 입력
+  | 'updateInputValue'
+  | 'openIfClosed'
+  | 'highlightFirstIfAutocomplete'
+  // 하이라이트 이동
   | 'highlightNext'
   | 'highlightPrev'
   | 'highlightFirst'
   | 'highlightLast'
   | 'highlightOption'
-  | 'clearHighlight'
+  // 선택 (작은 단위)
+  | 'setSelectedValue'
+  | 'updateInputAfterSelect'
+  | 'closeIfCloseOnSelect'
+  // 복합 선택
   | 'selectHighlighted'
   | 'selectOption'
   // DOM actions (Shell에서 override)
@@ -93,10 +102,9 @@ export type ComboboxActions =
 
 export type ComboboxGuards =
   | 'isOpen'
-  | 'isClosed'
-  | 'shouldOpenOnFocus'
+  | 'openOnFocus'
   | 'hasHighlight'
-  | 'noHighlight'
+  | 'isAutocompleteList'
 
 // ============================================
 // Machine
@@ -126,22 +134,21 @@ export type ComboboxGuards =
  */
 export const comboboxMachine = createMachine<{
   input: ComboboxInput
+  internal: ComboboxInternal
   events: ComboboxEvents
-  computed: ComboboxComputed
   actions: ComboboxActions
   guards: ComboboxGuards
 }>({
-  computed: {
-    isOpen: (ctx) => ctx.isOpen,
-    highlightedOptionId: (ctx) => ctx.highlightedOptionId,
+  internal: {
+    highlightedOptionId: null,
   },
 
   guards: {
     isOpen: (ctx) => ctx.isOpen,
-    isClosed: (ctx) => !ctx.isOpen,
-    shouldOpenOnFocus: (ctx) => ctx.openOnFocus && !ctx.isOpen,
+    openOnFocus: (ctx) => ctx.openOnFocus,
     hasHighlight: (ctx) => ctx.highlightedOptionId !== null,
-    noHighlight: (ctx) => ctx.highlightedOptionId === null,
+    isAutocompleteList: (ctx) =>
+      ctx.autocomplete === 'list' || ctx.autocomplete === 'both',
   },
 
   on: {
@@ -149,27 +156,28 @@ export const comboboxMachine = createMachine<{
     CLOSE: 'close',
     TOGGLE: [{ when: 'isOpen', do: 'close' }, { do: 'open' }],
 
-    INPUT_CHANGE: 'handleInputChange',
-    INPUT_FOCUS: [{ when: 'shouldOpenOnFocus', do: 'open' }, { do: 'noop' }],
-    INPUT_BLUR: 'handleInputBlur',
+    // 입력: 값 변경 → 팝업 열기 → 자동완성 모드면 첫 옵션 하이라이트
+    INPUT_CHANGE: ['updateInputValue', 'openIfClosed', 'highlightFirstIfAutocomplete'],
+    INPUT_FOCUS: [{ when: ['openOnFocus', not('isOpen')], do: 'open' }, { do: 'noop' }],
+    INPUT_BLUR: ['close', 'clearHighlight'],
 
     HIGHLIGHT_NEXT: [
-      { when: 'isClosed', do: ['open', 'highlightFirst'] },
+      { when: not('isOpen'), do: ['open', 'highlightFirst'] },
       { do: 'highlightNext' },
     ],
     HIGHLIGHT_PREV: [
-      { when: 'isClosed', do: ['open', 'highlightLast'] },
+      { when: not('isOpen'), do: ['open', 'highlightLast'] },
       { do: 'highlightPrev' },
     ],
     HIGHLIGHT_FIRST: [{ when: 'isOpen', do: 'highlightFirst' }, { do: 'noop' }],
     HIGHLIGHT_LAST: [{ when: 'isOpen', do: 'highlightLast' }, { do: 'noop' }],
 
     SELECT_HIGHLIGHTED: [
-      { when: 'isClosed', do: 'noop' },
-      { when: 'noHighlight', do: 'close' },
-      { do: 'selectHighlighted' },
+      { when: not('isOpen'), do: 'noop' },
+      { when: not('hasHighlight'), do: 'close' },
+      { do: ['setSelectedValue', 'updateInputAfterSelect', 'closeIfCloseOnSelect', 'clearHighlight'] },
     ],
-    SELECT_OPTION: ['selectOption', 'focusInput'],
+    SELECT_OPTION: ['setSelectedValue', 'updateInputAfterSelect', 'closeIfCloseOnSelect', 'clearHighlight', 'focusInput'],
 
     HIGHLIGHT: 'highlightOption',
     CLEAR_HIGHLIGHT: 'clearHighlight',
@@ -193,66 +201,63 @@ export const comboboxMachine = createMachine<{
   actions: {
     noop: () => {},
 
+    // === 팝업 ===
     open: (ctx) => {
-      ctx.onOpenChange(true)
+      ctx.onOpenChange?.(true)
     },
 
     close: (ctx) => {
-      ctx.onOpenChange(false)
-      ctx.onHighlightedOptionIdChange(null)
+      ctx.onOpenChange?.(false)
     },
 
-    handleInputChange: (
-      ctx,
-      payload: { value: string; options: ComboboxOption[] },
-    ) => {
-      const { value, options } = payload
-      ctx.onInputValueChange(value)
+    clearHighlight: (_ctx, _, assign) => {
+      assign({ highlightedOptionId: null })
+    },
 
-      // 입력 시 팝업 열기
+    // === 입력 (작은 단위) ===
+    updateInputValue: (ctx, payload: { value: string }) => {
+      ctx.onInputValueChange?.(payload.value)
+    },
+
+    openIfClosed: (ctx) => {
       if (!ctx.isOpen) {
-        ctx.onOpenChange(true)
+        ctx.onOpenChange?.(true)
       }
+    },
 
-      // 첫 번째 필터된 옵션 하이라이트 (list 모드)
+    highlightFirstIfAutocomplete: (
+      ctx,
+      payload: { options: ComboboxOption[] },
+      assign,
+    ) => {
       if (ctx.autocomplete === 'list' || ctx.autocomplete === 'both') {
-        const enabled = options.filter((o) => !o.disabled)
-        if (enabled.length > 0) {
-          ctx.onHighlightedOptionIdChange(enabled[0].id)
-        } else {
-          ctx.onHighlightedOptionIdChange(null)
-        }
+        const enabled = payload.options.filter((o) => !o.disabled)
+        assign({ highlightedOptionId: enabled[0]?.id ?? null })
       } else {
-        ctx.onHighlightedOptionIdChange(null)
+        assign({ highlightedOptionId: null })
       }
     },
 
-    handleInputBlur: (ctx) => {
-      // Shell에서 relatedTarget 체크 후 호출
-      ctx.onOpenChange(false)
-      ctx.onHighlightedOptionIdChange(null)
-    },
-
-    highlightFirst: (ctx, payload: { options: ComboboxOption[] }) => {
+    highlightFirst: (_ctx, payload: { options: ComboboxOption[] }, assign) => {
       const enabled = payload.options.filter((o) => !o.disabled)
       if (enabled.length > 0) {
-        ctx.onHighlightedOptionIdChange(enabled[0].id)
+        assign({ highlightedOptionId: enabled[0].id })
       }
     },
 
-    highlightLast: (ctx, payload: { options: ComboboxOption[] }) => {
+    highlightLast: (_ctx, payload: { options: ComboboxOption[] }, assign) => {
       const enabled = payload.options.filter((o) => !o.disabled)
       if (enabled.length > 0) {
-        ctx.onHighlightedOptionIdChange(enabled[enabled.length - 1].id)
+        assign({ highlightedOptionId: enabled[enabled.length - 1].id })
       }
     },
 
-    highlightNext: (ctx, payload: { options: ComboboxOption[] }) => {
+    highlightNext: (ctx, payload: { options: ComboboxOption[] }, assign) => {
       const enabled = payload.options.filter((o) => !o.disabled)
       if (enabled.length === 0) return
 
       if (ctx.highlightedOptionId === null) {
-        ctx.onHighlightedOptionIdChange(enabled[0].id)
+        assign({ highlightedOptionId: enabled[0].id })
         return
       }
 
@@ -260,7 +265,7 @@ export const comboboxMachine = createMachine<{
         (o) => o.id === ctx.highlightedOptionId,
       )
       if (currentIndex === -1) {
-        ctx.onHighlightedOptionIdChange(enabled[0].id)
+        assign({ highlightedOptionId: enabled[0].id })
         return
       }
 
@@ -269,16 +274,16 @@ export const comboboxMachine = createMachine<{
         : Math.min(currentIndex + 1, enabled.length - 1)
 
       if (nextIndex !== currentIndex) {
-        ctx.onHighlightedOptionIdChange(enabled[nextIndex].id)
+        assign({ highlightedOptionId: enabled[nextIndex].id })
       }
     },
 
-    highlightPrev: (ctx, payload: { options: ComboboxOption[] }) => {
+    highlightPrev: (ctx, payload: { options: ComboboxOption[] }, assign) => {
       const enabled = payload.options.filter((o) => !o.disabled)
       if (enabled.length === 0) return
 
       if (ctx.highlightedOptionId === null) {
-        ctx.onHighlightedOptionIdChange(enabled[enabled.length - 1].id)
+        assign({ highlightedOptionId: enabled[enabled.length - 1].id })
         return
       }
 
@@ -286,7 +291,7 @@ export const comboboxMachine = createMachine<{
         (o) => o.id === ctx.highlightedOptionId,
       )
       if (currentIndex === -1) {
-        ctx.onHighlightedOptionIdChange(enabled[enabled.length - 1].id)
+        assign({ highlightedOptionId: enabled[enabled.length - 1].id })
         return
       }
 
@@ -295,22 +300,50 @@ export const comboboxMachine = createMachine<{
         : Math.max(currentIndex - 1, 0)
 
       if (prevIndex !== currentIndex) {
-        ctx.onHighlightedOptionIdChange(enabled[prevIndex].id)
+        assign({ highlightedOptionId: enabled[prevIndex].id })
       }
     },
 
-    highlightOption: (ctx, payload: { option: ComboboxOption }) => {
+    highlightOption: (_ctx, payload: { option: ComboboxOption }, assign) => {
       const { option } = payload
       if (!option.disabled) {
-        ctx.onHighlightedOptionIdChange(option.id)
+        assign({ highlightedOptionId: option.id })
       }
     },
 
-    clearHighlight: (ctx) => {
-      ctx.onHighlightedOptionIdChange(null)
+    // === 선택 (작은 단위) ===
+    setSelectedValue: (ctx, payload: { option?: ComboboxOption; options?: ComboboxOption[] }) => {
+      // SELECT_OPTION에서는 option, SELECT_HIGHLIGHTED에서는 options에서 찾음
+      const option = payload.option ?? payload.options?.find(
+        (o) => o.id === ctx.highlightedOptionId,
+      )
+      if (!option || option.disabled) return
+
+      ctx.onSelectedValueChange?.(option.value)
+      ctx.onSelect?.(option.value)
     },
 
-    selectHighlighted: (ctx, payload: { options: ComboboxOption[] }) => {
+    updateInputAfterSelect: (ctx, payload: { option?: ComboboxOption; options?: ComboboxOption[] }) => {
+      const option = payload.option ?? payload.options?.find(
+        (o) => o.id === ctx.highlightedOptionId,
+      )
+      if (!option || option.disabled) return
+
+      if (ctx.clearOnSelect) {
+        ctx.onInputValueChange?.('')
+      } else {
+        ctx.onInputValueChange?.(option.label)
+      }
+    },
+
+    closeIfCloseOnSelect: (ctx) => {
+      if (ctx.closeOnSelect) {
+        ctx.onOpenChange?.(false)
+      }
+    },
+
+    // === 복합 선택 (기존 호환) ===
+    selectHighlighted: (ctx, payload: { options: ComboboxOption[] }, assign) => {
       if (!ctx.highlightedOptionId) return
 
       const option = payload.options.find(
@@ -318,40 +351,40 @@ export const comboboxMachine = createMachine<{
       )
       if (!option || option.disabled) return
 
-      ctx.onSelectedValueChange(option.value)
+      ctx.onSelectedValueChange?.(option.value)
       ctx.onSelect?.(option.value)
 
       if (ctx.clearOnSelect) {
-        ctx.onInputValueChange('')
+        ctx.onInputValueChange?.('')
       } else {
-        ctx.onInputValueChange(option.label)
+        ctx.onInputValueChange?.(option.label)
       }
 
       if (ctx.closeOnSelect) {
-        ctx.onOpenChange(false)
+        ctx.onOpenChange?.(false)
       }
 
-      ctx.onHighlightedOptionIdChange(null)
+      assign({ highlightedOptionId: null })
     },
 
-    selectOption: (ctx, payload: { option: ComboboxOption }) => {
+    selectOption: (ctx, payload: { option: ComboboxOption }, assign) => {
       const { option } = payload
       if (option.disabled) return
 
-      ctx.onSelectedValueChange(option.value)
+      ctx.onSelectedValueChange?.(option.value)
       ctx.onSelect?.(option.value)
 
       if (ctx.clearOnSelect) {
-        ctx.onInputValueChange('')
+        ctx.onInputValueChange?.('')
       } else {
-        ctx.onInputValueChange(option.label)
+        ctx.onInputValueChange?.(option.label)
       }
 
       if (ctx.closeOnSelect) {
-        ctx.onOpenChange(false)
+        ctx.onOpenChange?.(false)
       }
 
-      ctx.onHighlightedOptionIdChange(null)
+      assign({ highlightedOptionId: null })
     },
 
     // DOM actions (Shell에서 override)
