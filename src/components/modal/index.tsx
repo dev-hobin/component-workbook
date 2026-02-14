@@ -162,10 +162,6 @@ export const Trigger = forwardRef<HTMLButtonElement, TriggerProps>(
   ({ children, ...rest }, forwardedRef) => {
     const { open, setOpen, triggerRef, contentId } = useModalContext()
 
-    const handleClick = () => {
-      setOpen(true)
-    }
-
     return (
       <button
         ref={composeRefs(forwardedRef, triggerRef)}
@@ -177,7 +173,7 @@ export const Trigger = forwardRef<HTMLButtonElement, TriggerProps>(
             'aria-controls': open ? contentId : undefined,
             'data-part': 'trigger',
             'data-state': open ? 'open' : 'closed',
-            onClick: handleClick,
+            onClick: () => setOpen(true),
           },
           rest,
         )}
@@ -218,12 +214,6 @@ export const Backdrop = forwardRef<HTMLDivElement, BackdropProps>(
       resolveElement: () => elementRef.current,
     })
 
-    const handleClick = () => {
-      if (closeOnBackdropClick) {
-        setOpen(false)
-      }
-    }
-
     if (!isPresent) {
       return null
     }
@@ -237,7 +227,9 @@ export const Backdrop = forwardRef<HTMLDivElement, BackdropProps>(
             'data-part': 'backdrop',
             'data-state': open ? 'open' : 'closed',
             'data-transition': transitionState,
-            onClick: handleClick,
+            onClick: () => {
+              if (closeOnBackdropClick) setOpen(false)
+            },
           },
           rest,
         )}
@@ -384,10 +376,6 @@ export const Close = forwardRef<HTMLButtonElement, CloseProps>(
   ({ children, ...rest }, forwardedRef) => {
     const { setOpen } = useModalContext()
 
-    const handleClick = () => {
-      setOpen(false)
-    }
-
     return (
       <button
         ref={forwardedRef}
@@ -395,7 +383,7 @@ export const Close = forwardRef<HTMLButtonElement, CloseProps>(
           {
             type: 'button',
             'data-part': 'close',
-            onClick: handleClick,
+            onClick: () => setOpen(false),
           },
           rest,
         )}

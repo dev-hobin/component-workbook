@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useRef } from 'react'
+import { useCallback, useId, useLayoutEffect, useRef } from 'react'
 import { useNodeStore } from './use-node-store'
 import { useParentId } from './use-parent-context'
 import type { NodeId } from './node-store'
@@ -12,42 +12,38 @@ export function useNode<
   const parentId = useParentId()
   const store = useNodeStore<Role, Meta>()
   const elementRef = useRef<HTMLElement | null>(null)
+  const metaRef = useRef(options.meta)
+  metaRef.current = options.meta
 
   const domId = options.domId ?? `${options.role}::${id}`
 
   const ref = useCallback(
     (element: HTMLElement | null) => {
-      // 이전 element와 같으면 skip
       if (elementRef.current === element) return
 
-      // 이전 element가 있었으면 해제
       if (elementRef.current) {
         store.unregister(id, options.role)
       }
 
       elementRef.current = element
 
-      // 새 element가 있으면 등록
       if (element) {
         store.register({
           id,
           parentId,
           role: options.role,
           domId,
-          meta: options.meta ?? ({} as Meta),
+          meta: metaRef.current ?? ({} as Meta),
           element,
         })
       }
     },
-    [store, id, options.role, parentId, domId, options.meta],
+    [store, id, options.role, parentId, domId],
   )
 
-  // meta가 바뀌면 store에 반영
-  useEffect(() => {
-    if (elementRef.current && options.meta) {
-      store.updateMeta(id, options.role, options.meta)
-    }
-  }, [store, id, options.role, options.meta])
+  if (elementRef.current && options.meta) {
+    store.updateMeta(id, options.role, options.meta)
+  }
 
   return { id, domId, ref, elementRef }
 }
@@ -60,6 +56,8 @@ export function useLogicalNode<
   const id = options.id ?? generatedId
   const parentId = useParentId()
   const store = useNodeStore<Role, Meta>()
+  const metaRef = useRef(options.meta)
+  metaRef.current = options.meta
 
   const domId = `${options.role}::${id}`
 
@@ -69,19 +67,16 @@ export function useLogicalNode<
       parentId,
       role: options.role,
       domId,
-      meta: options.meta ?? ({} as Meta),
+      meta: metaRef.current ?? ({} as Meta),
       element: null,
     })
 
     return () => store.unregister(id, options.role)
-  }, [id, parentId, options.role, domId, store, options.meta])
+  }, [id, parentId, options.role, domId, store])
 
-  // meta가 바뀌면 store에 반영
-  useEffect(() => {
-    if (options.meta) {
-      store.updateMeta(id, options.role, options.meta)
-    }
-  }, [store, id, options.role, options.meta])
+  if (options.meta) {
+    store.updateMeta(id, options.role, options.meta)
+  }
 
   return { id, domId }
 }

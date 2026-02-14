@@ -793,22 +793,6 @@ export const Item = forwardRef<HTMLDivElement, ItemProps>(
 
     const isHighlighted = highlightedId === itemId
 
-    const handleClick = () => {
-      if (disabled) return
-      onSelect?.()
-      onItemSelect?.(itemId)
-      closeAll()
-    }
-
-    const handlePointerEnter = () => {
-      if (disabled) return
-      setHighlightedId(itemId)
-    }
-
-    const handlePointerLeave = () => {
-      setHighlightedId(null)
-    }
-
     return (
       <div
         ref={composeRefs(forwardedRef, ref as React.Ref<HTMLDivElement>)}
@@ -820,9 +804,17 @@ export const Item = forwardRef<HTMLDivElement, ItemProps>(
             'data-part': 'item',
             'data-disabled': disabled || undefined,
             'data-highlighted': isHighlighted || undefined,
-            onClick: handleClick,
-            onPointerEnter: handlePointerEnter,
-            onPointerLeave: handlePointerLeave,
+            onClick: () => {
+              if (disabled) return
+              onSelect?.()
+              onItemSelect?.(itemId)
+              closeAll()
+            },
+            onPointerEnter: () => {
+              if (disabled) return
+              setHighlightedId(itemId)
+            },
+            onPointerLeave: () => setHighlightedId(null),
           },
           rest,
         )}
@@ -913,20 +905,6 @@ export const SubTrigger = forwardRef<HTMLDivElement, SubTriggerProps>(
     const isHighlighted = highlightedId === itemId
     const isOpen = isMenuOpen(openedPath, subMenuId)
 
-    const handleClick = () => {
-      if (disabled) return
-      if (isOpen) {
-        closeMenu(subMenuId)
-      } else if (parentMenuId) {
-        openMenu(subMenuId, parentMenuId)
-      }
-    }
-
-    const handlePointerEnter = () => {
-      if (disabled) return
-      setHighlightedId(itemId)
-    }
-
     return (
       <div
         ref={composeRefs(forwardedRef, ref as React.Ref<HTMLDivElement>)}
@@ -941,8 +919,18 @@ export const SubTrigger = forwardRef<HTMLDivElement, SubTriggerProps>(
             'data-state': isOpen ? 'open' : 'closed',
             'data-disabled': disabled || undefined,
             'data-highlighted': isHighlighted || undefined,
-            onClick: handleClick,
-            onPointerEnter: handlePointerEnter,
+            onClick: () => {
+              if (disabled) return
+              if (isOpen) {
+                closeMenu(subMenuId)
+              } else if (parentMenuId) {
+                openMenu(subMenuId, parentMenuId)
+              }
+            },
+            onPointerEnter: () => {
+              if (disabled) return
+              setHighlightedId(itemId)
+            },
           },
           rest,
         )}

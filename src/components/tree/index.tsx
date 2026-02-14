@@ -697,21 +697,6 @@ export const ItemLabel = forwardRef<HTMLDivElement, ItemLabelProps>(
       id: value,
     })
 
-    const handleClick = () => {
-      if (isDisabled) return
-      setHighlightedValue(value)
-      if (hasChildren) {
-        toggleExpand(value)
-      } else {
-        toggleSelect(value)
-      }
-    }
-
-    const handleFocus = () => {
-      if (isDisabled) return
-      setHighlightedValue(value)
-    }
-
     return (
       <div
         ref={composeRefs(forwardedRef, ref)}
@@ -727,8 +712,19 @@ export const ItemLabel = forwardRef<HTMLDivElement, ItemLabelProps>(
             'data-selected': isSelected || undefined,
             'data-disabled': isDisabled || undefined,
             'data-highlighted': isHighlighted || undefined,
-            onClick: handleClick,
-            onFocus: handleFocus,
+            onClick: () => {
+              if (isDisabled) return
+              setHighlightedValue(value)
+              if (hasChildren) {
+                toggleExpand(value)
+              } else {
+                toggleSelect(value)
+              }
+            },
+            onFocus: () => {
+              if (isDisabled) return
+              setHighlightedValue(value)
+            },
           },
           rest,
         )}
