@@ -26,9 +26,10 @@ export interface NodeStore<
   Role extends string = string,
   Meta extends object = object,
 > {
-  // 등록/해제
+  // 등록/해제/갱신
   register(node: ComponentNode<Role, Meta>): void
   unregister(id: NodeId, role: Role): void
+  updateMeta(id: NodeId, role: Role, meta: Meta): void
 
   // 구독
   subscribe(listener: StoreListener): () => void
@@ -38,6 +39,7 @@ export interface NodeStore<
   getElement(id: NodeId, role: Role): HTMLElement | null
   getNodes(): Map<StoreKey, ComponentNode<Role, Meta>>
   getNodesByRole(role: Role): ComponentNode<Role, Meta>[]
+  getNodesByRoleInDomOrder(role: Role): ComponentNode<Role, Meta>[]
   getChildren(parentId: NodeId | null): ComponentNode<Role, Meta>[]
   getChildrenByRole(parentId: NodeId | null, role: Role): ComponentNode<Role, Meta>[]
   filterNodesByMeta(
@@ -94,6 +96,15 @@ export function createNodeStore<
       notify()
     },
 
+    updateMeta(id, role, meta) {
+      const storeKey = createStoreKey(id, role)
+      const existing = nodes.get(storeKey)
+      if (!existing) return
+
+      existing.meta = meta
+      notify()
+    },
+
     unregister(id, role) {
       const storeKey = createStoreKey(id, role)
       const node = nodes.get(storeKey)
@@ -131,6 +142,21 @@ export function createNodeStore<
       for (const node of nodes.values()) {
         if (node.role === role) result.push(node)
       }
+      return result
+    },
+
+    getNodesByRoleInDomOrder(role) {
+      const result: ComponentNode<Role, Meta>[] = []
+      for (const node of nodes.values()) {
+        if (node.role === role) result.push(node)
+      }
+      result.sort((a, b) => {
+        if (!a.element || !b.element) return 0
+        const position = a.element.compareDocumentPosition(b.element)
+        if (position & Node.DOCUMENT_POSITION_FOLLOWING) return -1
+        if (position & Node.DOCUMENT_POSITION_PRECEDING) return 1
+        return 0
+      })
       return result
     },
 

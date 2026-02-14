@@ -1,7 +1,4 @@
 import {
-  createContext,
-  useCallback,
-  useContext,
   useEffect,
   useId,
   useRef,
@@ -63,18 +60,7 @@ function createLayerStack(): LayerStack {
 const globalLayerStack = createLayerStack()
 
 // ============================================
-// Context
-// ============================================
-
-interface DismissableLayerContextValue {
-  layerId: LayerId
-  isTopmost: () => boolean
-}
-
-const DismissableLayerContext = createContext<DismissableLayerContextValue | null>(null)
-
-// ============================================
-// Provider
+// DismissableLayer
 // ============================================
 
 export interface DismissableLayerProps {
@@ -185,40 +171,5 @@ export function DismissableLayer({
     return () => document.removeEventListener('pointerdown', handlePointerDown, true)
   }, [isActive, onPointerDownOutside, contentRef, excludeRefs, layerId])
 
-  const isTopmost = useCallback(() => {
-    return globalLayerStack.isTopmost(layerId)
-  }, [layerId])
-
-  const contextValue: DismissableLayerContextValue = {
-    layerId,
-    isTopmost,
-  }
-
-  return (
-    <DismissableLayerContext.Provider value={contextValue}>
-      {children}
-    </DismissableLayerContext.Provider>
-  )
-}
-
-// ============================================
-// Hook
-// ============================================
-
-export function useDismissableLayer() {
-  const context = useContext(DismissableLayerContext)
-  if (!context) {
-    throw new Error('useDismissableLayer must be used within DismissableLayer')
-  }
-  return context
-}
-
-/**
- * 현재 레이어가 최상위인지 확인하는 훅
- * DismissableLayer 외부에서도 사용 가능 (optional context)
- */
-export function useIsTopmostLayer(): boolean {
-  const context = useContext(DismissableLayerContext)
-  if (!context) return true // context 없으면 항상 topmost
-  return context.isTopmost()
+  return <>{children}</>
 }

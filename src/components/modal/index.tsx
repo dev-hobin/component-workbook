@@ -11,10 +11,8 @@ import {
 } from 'react'
 import { createPortal } from 'react-dom'
 import { createFocusTrap, type FocusTrap } from 'focus-trap'
-import { useMachine, type Send } from 'controlled-machine/react'
 import { useControllableState } from '@radix-ui/react-use-controllable-state'
 
-import { modalMachine, type ModalEvents, type ModalComputed } from './machine'
 import { usePresence } from '../../hooks/use-presence'
 import { composeRefs } from '../../utils/compose-refs'
 import { mergeProps } from '../../utils/merge-props'
@@ -26,13 +24,13 @@ import { DismissableLayer } from '../../primitives/dismissable-layer'
 
 type ModalContextValue = {
   open: boolean
-  send: Send<ModalEvents>
-  snapshot: ModalComputed
+  setOpen: (open: boolean) => void
   triggerRef: RefObject<HTMLButtonElement | null>
   contentRef: RefObject<HTMLDivElement | null>
   initialFocusRef: RefObject<HTMLElement | null>
   setInitialFocusRef: (ref: RefObject<HTMLElement | null>) => void
   closeOnEscape: boolean
+  closeOnBackdropClick: boolean
   titleId: string
   descriptionId: string
   contentId: string
@@ -82,21 +80,25 @@ export function Root({
   const contentRef = useRef<HTMLDivElement>(null)
   const initialFocusRefState = useRef<RefObject<HTMLElement | null>>({ current: null })
 
-  // Focus trap & scroll lock state
   const trapRef = useRef<FocusTrap | null>(null)
   const prevOverflowRef = useRef<string>('')
 
-  // Controllable state
   const [open = false, setOpen] = useControllableState({
     prop: openProp,
     defaultProp: defaultOpen,
     onChange: onOpenChange,
   })
 
-  // DOM helpers for machine effects (Shell이 타이밍 책임)
-  const activateFocusTrap = useCallback(() => {
-    // DOM 렌더링 대기 후 포커스 트랩 활성화
-    requestAnimationFrame(() => {
+  // Focus trap + scroll lock as direct useEffect
+  useEffect(() => {
+    if (!open) return
+
+    // Lock scroll
+    prevOverflowRef.current = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+
+    // Activate focus trap after DOM renders
+    const rafId = requestAnimationFrame(() => {
       const contentElement = contentRef.current
       if (!contentElement) return
 
@@ -115,38 +117,15 @@ export function Root({
         // focus-trap 활성화 실패 시 무시 (테스트 환경 등)
       }
     })
-  }, [])
 
-  const deactivateFocusTrap = useCallback(() => {
-    trapRef.current?.deactivate()
-    trapRef.current = null
-    triggerRef.current?.focus()
-  }, [])
-
-  const lockScroll = useCallback(() => {
-    prevOverflowRef.current = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-  }, [])
-
-  const unlockScroll = useCallback(() => {
-    document.body.style.overflow = prevOverflowRef.current
-  }, [])
-
-  const [snapshot, send] = useMachine(modalMachine, {
-    input: {
-      open,
-      onOpenChange: setOpen,
-      closeOnEscape,
-      closeOnBackdropClick,
-    },
-    actions: {
-      // DOM actions override
-      lockScroll,
-      unlockScroll,
-      activateFocusTrap,
-      deactivateFocusTrap,
-    },
-  })
+    return () => {
+      cancelAnimationFrame(rafId)
+      trapRef.current?.deactivate()
+      trapRef.current = null
+      document.body.style.overflow = prevOverflowRef.current
+      triggerRef.current?.focus()
+    }
+  }, [open])
 
   const setInitialFocusRef = useCallback((ref: RefObject<HTMLElement | null>) => {
     initialFocusRefState.current = ref
@@ -154,13 +133,13 @@ export function Root({
 
   const contextValue: ModalContextValue = {
     open,
-    send,
-    snapshot,
+    setOpen,
     triggerRef,
     contentRef,
     initialFocusRef: initialFocusRefState.current,
     setInitialFocusRef,
     closeOnEscape,
+    closeOnBackdropClick,
     titleId,
     descriptionId,
     contentId,
@@ -181,10 +160,10 @@ export type TriggerProps = ComponentPropsWithoutRef<'button'>
 
 export const Trigger = forwardRef<HTMLButtonElement, TriggerProps>(
   ({ children, ...rest }, forwardedRef) => {
-    const { open, send, triggerRef, contentId } = useModalContext()
+    const { open, setOpen, triggerRef, contentId } = useModalContext()
 
     const handleClick = () => {
-      send('OPEN')
+      setOpen(true)
     }
 
     return (
@@ -230,7 +209,7 @@ export type BackdropProps = ComponentPropsWithoutRef<'div'>
 
 export const Backdrop = forwardRef<HTMLDivElement, BackdropProps>(
   ({ ...rest }, forwardedRef) => {
-    const { open, send } = useModalContext()
+    const { open, setOpen, closeOnBackdropClick } = useModalContext()
 
     const elementRef = useRef<HTMLDivElement>(null)
 
@@ -240,7 +219,9 @@ export const Backdrop = forwardRef<HTMLDivElement, BackdropProps>(
     })
 
     const handleClick = () => {
-      send('BACKDROP_CLICK')
+      if (closeOnBackdropClick) {
+        setOpen(false)
+      }
     }
 
     if (!isPresent) {
@@ -277,7 +258,7 @@ export const Content = forwardRef<HTMLDivElement, ContentProps>(
   ({ children, initialFocusRef, ...rest }, forwardedRef) => {
     const {
       open,
-      send,
+      setOpen,
       contentRef,
       setInitialFocusRef,
       closeOnEscape,
@@ -293,17 +274,17 @@ export const Content = forwardRef<HTMLDivElement, ContentProps>(
       resolveElement: () => elementRef.current,
     })
 
-    // initialFocusRef를 Root에 전달하여 machine effects에서 사용
     useEffect(() => {
       if (initialFocusRef) {
         setInitialFocusRef(initialFocusRef)
       }
     }, [initialFocusRef, setInitialFocusRef])
 
-    // Escape 키 핸들러 - DismissableLayer가 topmost일 때만 호출됨
     const handleEscapeKeyDown = useCallback(() => {
-      send('ESCAPE_KEY')
-    }, [send])
+      if (closeOnEscape) {
+        setOpen(false)
+      }
+    }, [closeOnEscape, setOpen])
 
     if (!isPresent) {
       return null
@@ -401,10 +382,10 @@ export type CloseProps = ComponentPropsWithoutRef<'button'>
 
 export const Close = forwardRef<HTMLButtonElement, CloseProps>(
   ({ children, ...rest }, forwardedRef) => {
-    const { send } = useModalContext()
+    const { setOpen } = useModalContext()
 
     const handleClick = () => {
-      send('CLOSE')
+      setOpen(false)
     }
 
     return (

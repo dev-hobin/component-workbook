@@ -3,9 +3,11 @@ import {
   forwardRef,
   useCallback,
   useContext,
+  useEffect,
   useId,
   useLayoutEffect,
   useRef,
+  useState,
   type ComponentPropsWithoutRef,
 } from 'react'
 import { createPortal } from 'react-dom'
@@ -17,17 +19,10 @@ import {
   autoUpdate,
   type Placement,
 } from '@floating-ui/dom'
-import { useMachine, type Send } from 'controlled-machine/react'
 import { useControllableState } from '@radix-ui/react-use-controllable-state'
 
-import {
-  menuMachine,
-  isMenuOpen,
-  type MenuEvents,
-  type MenuComputed,
-  type MenuId,
-  type ItemId,
-} from './machine'
+import { useHighlight, type UseHighlightReturn } from '../../hooks/use-highlight'
+import { useCharacterSearch } from '../../hooks/use-character-search'
 import { usePresence } from '../../hooks/use-presence'
 import { composeRefs } from '../../utils/compose-refs'
 import { mergeProps } from '../../utils/merge-props'
@@ -45,7 +40,9 @@ import type { NodeStore } from '../../primitives/node-store'
 // Types
 // ============================================
 
-// NodeStore Roles & Meta
+export type MenuId = string
+export type ItemId = string
+
 type MenuRole = 'trigger' | 'content' | 'item' | 'sub-trigger' | 'sub-content'
 
 type MenuItemMeta = {
@@ -63,17 +60,17 @@ type MenuContentMeta = {
 
 type MenuMeta = MenuItemMeta | MenuContentMeta | object
 
-type MenuSnapshot = MenuComputed & {
-  openedPath: MenuId[]
-  highlightedId: ItemId | null
+export function isMenuOpen(openedPath: MenuId[], menuId: MenuId): boolean {
+  return openedPath.includes(menuId)
 }
 
 type MenuContextValue = {
   // State
-  send: Send<MenuEvents>
-  snapshot: MenuSnapshot
+  openedPath: MenuId[]
+  highlightedId: ItemId | null
+  activeMenuId: MenuId | null
 
-  // NodeStore (replaces manual registries)
+  // NodeStore
   store: NodeStore<MenuRole, MenuMeta>
 
   // Options
@@ -81,6 +78,23 @@ type MenuContextValue = {
 
   // Callbacks
   onItemSelect?: (id: ItemId) => void
+
+  // Highlight
+  highlight: UseHighlightReturn
+
+  // Actions (행동 단위)
+  setHighlightedId: (id: ItemId | null) => void
+  openMenu: (menuId: MenuId, parentMenuId: MenuId | null, highlightFirst?: boolean) => void
+  closeMenu: (menuId: MenuId) => void
+  closeAll: () => void
+  highlightFirst: () => void
+  highlightLast: () => void
+  openSubmenu: () => void
+  closeSubmenu: () => void
+  typeahead: (char: string) => void
+  getEnabledItemIds: (menuId: MenuId) => ItemId[]
+  handleMenuKeyDown: (e: React.KeyboardEvent) => void
+  handlePointerDownOutside: (event: PointerEvent) => void
 }
 
 type MenuIdContextValue = {
@@ -165,45 +179,23 @@ function RootImpl({
     onChange: onOpenChange,
   })
 
-  // Ref for machine snapshot (used in callbacks)
-  const snapshotRef = useRef<MenuSnapshot | null>(null)
+  // Internal states
+  const [openedPath, setOpenedPath] = useState<MenuId[]>([])
 
-  // DOM helpers using NodeStore
-  const focusContent = useCallback(() => {
-    requestAnimationFrame(() => {
-      const currentPath = snapshotRef.current?.openedPath ?? []
-      const activeMenuId = currentPath[currentPath.length - 1]
-      if (!activeMenuId) return
+  // Derived
+  const activeMenuId = openedPath[openedPath.length - 1] ?? null
 
-      // Query store for content element
-      const contentNodes = store.filterNodesByRolesAndMeta(
-        ['content', 'sub-content'],
-        (meta) => 'menuId' in meta && meta.menuId === activeMenuId,
-      )
-      contentNodes[0]?.element?.focus()
-    })
-  }, [store])
+  // Sync external open → internal openedPath (always bridge replacement)
+  useLayoutEffect(() => {
+    if (open) {
+      setOpenedPath((prev) => (prev.length === 0 ? [rootMenuId] : prev))
+    } else {
+      setOpenedPath([])
+      highlight.clear()
+    }
+  }, [open, rootMenuId])
 
-  const focusTrigger = useCallback(() => {
-    requestAnimationFrame(() => {
-      const triggerNode = store.getNodesByRole('trigger')[0]
-      triggerNode?.element?.focus()
-    })
-  }, [store])
-
-  const focusItemById = useCallback(
-    (itemId: ItemId) => {
-      requestAnimationFrame(() => {
-        // Item or SubTrigger
-        const itemNode =
-          store.getNode(itemId, 'item') ?? store.getNode(itemId, 'sub-trigger')
-        itemNode?.element?.focus()
-      })
-    },
-    [store],
-  )
-
-  // Machine helpers using NodeStore
+  // NodeStore-based helpers
   const getEnabledItemIds = useCallback(
     (menuId: MenuId) => {
       const items = store.filterNodesByRolesAndMeta(
@@ -215,7 +207,6 @@ function RootImpl({
         },
       )
 
-      // Sort by DOM order
       items.sort((a, b) => {
         if (!a.element || !b.element) return 0
         const position = a.element.compareDocumentPosition(b.element)
@@ -241,8 +232,8 @@ function RootImpl({
     [store],
   )
 
-  const isSubTrigger = useCallback(
-    (itemId: ItemId) => {
+  const isSubTriggerCheck = useCallback(
+    (itemId: ItemId): MenuId | null => {
       const node = store.getNode(itemId, 'sub-trigger')
       if (node && 'subMenuId' in node.meta) {
         return (node.meta as MenuItemMeta).subMenuId ?? null
@@ -252,51 +243,299 @@ function RootImpl({
     [store],
   )
 
-  const getParentMenuId = useCallback(
-    (menuId: MenuId) => {
-      const currentPath = snapshotRef.current?.openedPath ?? []
-      const index = currentPath.indexOf(menuId)
-      if (index > 0) {
-        return currentPath[index - 1]
-      }
-      return null
+  // useHighlight: index 기반
+  // count는 action 시점에 lazy 계산하므로 0으로 시작 — 실제 items는 action 내에서 조회
+  // 하지만 count가 필요한 건 safe 보정뿐이므로, activeMenuId 기반 현재 items를 전달
+  const currentItems = activeMenuId ? getEnabledItemIds(activeMenuId) : []
+  const highlight = useHighlight(currentItems.length, { loop })
+
+  // index → ID 파생
+  const highlightedId =
+    highlight.index >= 0 ? (currentItems[highlight.index] ?? null) : null
+
+  // character search
+  const typeahead = useCharacterSearch(
+    () => {
+      if (!activeMenuId) return []
+      const items = getEnabledItemIds(activeMenuId)
+      return items.map((id) => getItemTextValue(id))
     },
-    [],
+    (index) => highlight.set(index),
+    highlight.index >= 0 ? highlight.index : undefined,
   )
 
-  // Machine
-  const [snapshot, send] = useMachine(menuMachine, {
-    input: {
-      open,
-      onOpenChange: setOpen,
-      rootMenuId,
-      loop,
-      getEnabledItemIds,
-      getItemTextValue,
-      isSubTrigger,
-      getParentMenuId,
+  // setHighlightedId: ID로 직접 설정 (pointer enter 등)
+  const setHighlightedId = useCallback(
+    (id: ItemId | null) => {
+      if (id === null) {
+        highlight.clear()
+        return
+      }
+      if (!activeMenuId) return
+      const items = getEnabledItemIds(activeMenuId)
+      const idx = items.indexOf(id)
+      if (idx >= 0) {
+        highlight.set(idx)
+      }
     },
-    actions: {
-      // DOM actions override
-      focusContent,
-      focusTrigger,
-      focusItem: () => {
-        if (snapshot.highlightedId) {
-          focusItemById(snapshot.highlightedId)
-        }
-      },
-    },
-  })
+    [activeMenuId, getEnabledItemIds, highlight],
+  )
 
-  // Keep snapshot ref updated for callbacks
-  snapshotRef.current = snapshot
+  // DOM focus helpers
+  const focusContent = useCallback(() => {
+    requestAnimationFrame(() => {
+      const currentPath = openedPath
+      const activeId = currentPath[currentPath.length - 1]
+      if (!activeId) return
+
+      const contentNodes = store.filterNodesByRolesAndMeta(
+        ['content', 'sub-content'],
+        (meta) => 'menuId' in meta && meta.menuId === activeId,
+      )
+      contentNodes[0]?.element?.focus()
+    })
+  }, [openedPath, store])
+
+  const focusTrigger = useCallback(() => {
+    requestAnimationFrame(() => {
+      const triggerNode = store.getNodesByRole('trigger')[0]
+      triggerNode?.element?.focus()
+    })
+  }, [store])
+
+  const focusItemById = useCallback(
+    (itemId: ItemId) => {
+      requestAnimationFrame(() => {
+        const itemNode =
+          store.getNode(itemId, 'item') ?? store.getNode(itemId, 'sub-trigger')
+        itemNode?.element?.focus()
+      })
+    },
+    [store],
+  )
+
+  // Focus content when menu opens, trigger when it closes
+  const wasOpenRef = useRef(false)
+  useEffect(() => {
+    const isOpen = openedPath.length > 0
+    if (isOpen && !wasOpenRef.current) {
+      focusContent()
+    } else if (!isOpen && wasOpenRef.current) {
+      focusTrigger()
+    }
+    wasOpenRef.current = isOpen
+  }, [openedPath.length > 0, focusContent, focusTrigger])
+
+  // Focus highlighted item when it changes
+  useEffect(() => {
+    if (highlightedId) {
+      focusItemById(highlightedId)
+    }
+  }, [highlightedId, focusItemById])
+
+  // ── 행동 단위 액션 ──
+
+  const highlightFirstFn = useCallback(() => {
+    if (!activeMenuId) return
+    highlight.first()
+  }, [activeMenuId, highlight])
+
+  const highlightLastFn = useCallback(() => {
+    if (!activeMenuId) return
+    highlight.last()
+  }, [activeMenuId, highlight])
+
+  // Action: open a menu
+  const openMenu = useCallback(
+    (menuId: MenuId, parentMenuId: MenuId | null, highlightFirst = true) => {
+      if (parentMenuId === null) {
+        setOpenedPath([menuId])
+      } else {
+        setOpenedPath((prev) => {
+          const parentIndex = prev.indexOf(parentMenuId)
+          if (parentIndex === -1) {
+            return [parentMenuId, menuId]
+          }
+          return [...prev.slice(0, parentIndex + 1), menuId]
+        })
+      }
+
+      // Highlight first/last after open
+      // Note: items may not be available yet if submenu hasn't rendered
+      // So we use requestAnimationFrame to let the DOM settle
+      requestAnimationFrame(() => {
+        if (highlightFirst) {
+          highlight.first()
+        } else {
+          highlight.last()
+        }
+      })
+
+      if (!open) {
+        setOpen(true)
+      }
+    },
+    [open, setOpen, highlight],
+  )
+
+  // Action: close a specific menu
+  const closeMenu = useCallback(
+    (menuId: MenuId) => {
+      setOpenedPath((prev) => {
+        const index = prev.indexOf(menuId)
+        if (index === -1) return prev
+        const newPath = prev.slice(0, index)
+        if (newPath.length === 0 && open) {
+          setOpen(false)
+        }
+        return newPath
+      })
+      highlight.clear()
+    },
+    [open, setOpen, highlight],
+  )
+
+  // Action: close all menus
+  const closeAll = useCallback(() => {
+    setOpenedPath([])
+    highlight.clear()
+    if (open) {
+      setOpen(false)
+    }
+  }, [open, setOpen, highlight])
+
+  // Submenu actions
+  const openSubmenu = useCallback(() => {
+    if (highlight.index < 0 || !activeMenuId) return
+    const items = getEnabledItemIds(activeMenuId)
+    const itemId = items[highlight.index]
+    if (!itemId) return
+
+    const subMenuId = isSubTriggerCheck(itemId)
+    if (!subMenuId) return
+
+    setOpenedPath((prev) => [...prev, subMenuId])
+    // activeMenuId changes → currentItems changes → highlight resets via safe bound
+    requestAnimationFrame(() => {
+      highlight.first()
+    })
+  }, [highlight, activeMenuId, getEnabledItemIds, isSubTriggerCheck])
+
+  const closeSubmenu = useCallback(() => {
+    if (openedPath.length <= 1) return
+    const closingMenuId = openedPath[openedPath.length - 1]
+    setOpenedPath((prev) => prev.slice(0, -1))
+    // Highlight the SubTrigger of the closing menu in parent
+    // closingMenuId is also the sub-trigger's id
+    const parentMenuId = openedPath[openedPath.length - 2]
+    if (parentMenuId) {
+      requestAnimationFrame(() => {
+        const items = getEnabledItemIds(parentMenuId)
+        const idx = items.indexOf(closingMenuId)
+        if (idx >= 0) {
+          highlight.set(idx)
+        }
+      })
+    }
+  }, [openedPath, getEnabledItemIds, highlight])
+
+  // 메뉴 키보드 핸들러 (Content/SubContent 공통)
+  const handleMenuKeyDown = (e: React.KeyboardEvent) => {
+    switch (e.key) {
+      case 'ArrowDown':
+        e.preventDefault()
+        highlight.next()
+        break
+      case 'ArrowUp':
+        e.preventDefault()
+        highlight.prev()
+        break
+      case 'ArrowRight':
+        e.preventDefault()
+        openSubmenu()
+        break
+      case 'ArrowLeft':
+        e.preventDefault()
+        closeSubmenu()
+        break
+      case 'Home':
+        e.preventDefault()
+        highlightFirstFn()
+        break
+      case 'End':
+        e.preventDefault()
+        highlightLastFn()
+        break
+      case 'Enter':
+      case ' ':
+        e.preventDefault()
+        if (highlightedId) {
+          const subMenuId = isSubTriggerCheck(highlightedId)
+          if (subMenuId) {
+            openSubmenu()
+          } else {
+            const node = store.getNode(highlightedId, 'item')
+            const meta = node?.meta as MenuItemMeta | undefined
+            meta?.onSelect?.()
+            onItemSelect?.(highlightedId)
+            closeAll()
+          }
+        }
+        break
+      case 'Tab':
+        e.preventDefault()
+        closeAll()
+        break
+      default:
+        if (e.key.length === 1 && /[a-zA-Z]/.test(e.key)) {
+          typeahead(e.key)
+        }
+        break
+    }
+  }
+
+  // 외부 클릭 핸들러 (Content/SubContent 공통)
+  const handlePointerDownOutside = useCallback(
+    (event: PointerEvent) => {
+      const target = event.target as Node | null
+      if (!target) {
+        closeAll()
+        return
+      }
+
+      const roles: MenuRole[] = ['trigger', 'sub-trigger', 'content', 'sub-content']
+      for (const role of roles) {
+        const nodes = store.getNodesByRole(role)
+        for (const node of nodes) {
+          if (node.element?.contains(target)) return
+        }
+      }
+
+      closeAll()
+    },
+    [closeAll, store],
+  )
 
   const contextValue: MenuContextValue = {
-    send,
-    snapshot,
+    openedPath,
+    highlightedId,
+    activeMenuId,
     store,
     loop,
     onItemSelect,
+    highlight,
+    setHighlightedId,
+    openMenu,
+    closeMenu,
+    closeAll,
+    highlightFirst: highlightFirstFn,
+    highlightLast: highlightLastFn,
+    openSubmenu,
+    closeSubmenu,
+    typeahead,
+    getEnabledItemIds,
+    handleMenuKeyDown,
+    handlePointerDownOutside,
   }
 
   const menuIdContextValue: MenuIdContextValue = {
@@ -321,18 +560,16 @@ export type TriggerProps = ComponentPropsWithoutRef<'button'>
 
 export const Trigger = forwardRef<HTMLButtonElement, TriggerProps>(
   ({ children, ...rest }, forwardedRef) => {
-    const { snapshot, send, store } = useMenuContext()
+    const { openedPath, openMenu, closeMenu, store } = useMenuContext()
     const { menuId, parentMenuId } = useMenuIdContext()
 
-    // useNode for automatic ID and ref management
     const { domId, ref } = useNode<MenuRole>({
       role: 'trigger',
       id: menuId,
     })
 
-    const isOpen = isMenuOpen(snapshot.openedPath, menuId)
+    const isOpen = isMenuOpen(openedPath, menuId)
 
-    // Subscribe to content's domId dynamically
     const contentDomId = useStoreSubscribe(
       store,
       (s) => s.getNode(menuId, 'content')?.domId ?? null,
@@ -340,9 +577,9 @@ export const Trigger = forwardRef<HTMLButtonElement, TriggerProps>(
 
     const handleClick = () => {
       if (isOpen) {
-        send('CLOSE', { menuId })
+        closeMenu(menuId)
       } else {
-        send('OPEN', { menuId, parentMenuId })
+        openMenu(menuId, parentMenuId)
       }
     }
 
@@ -354,11 +591,11 @@ export const Trigger = forwardRef<HTMLButtonElement, TriggerProps>(
         case ' ':
         case 'ArrowDown':
           e.preventDefault()
-          send('OPEN', { menuId, parentMenuId, highlightFirst: true })
+          openMenu(menuId, parentMenuId, true)
           break
         case 'ArrowUp':
           e.preventDefault()
-          send('OPEN', { menuId, parentMenuId, highlightFirst: false })
+          openMenu(menuId, parentMenuId, false)
           break
       }
     }
@@ -415,25 +652,28 @@ export const Content = forwardRef<HTMLDivElement, ContentProps>(
     { children, placement = 'bottom-start', sideOffset = 4, ...rest },
     forwardedRef,
   ) => {
-    const { snapshot, send, store, onItemSelect } =
-      useMenuContext()
+    const {
+      openedPath,
+      store,
+      closeMenu,
+      handleMenuKeyDown,
+      handlePointerDownOutside,
+    } = useMenuContext()
     const { menuId } = useMenuIdContext()
 
     const positionerRef = useRef<HTMLDivElement>(null)
 
-    // useNode for automatic ID and ref management
     const { domId, ref, elementRef } = useNode<MenuRole, MenuContentMeta>({
       role: 'content',
       id: menuId,
       meta: { menuId },
     })
 
-    // Subscribe to trigger's domId dynamically
     const triggerDomId = useStoreSubscribe(
       store,
       (s) => s.getNode(menuId, 'trigger')?.domId ?? null,
     )
-    const isOpen = isMenuOpen(snapshot.openedPath, menuId)
+    const isOpen = isMenuOpen(openedPath, menuId)
 
     const { isPresent, transitionState } = usePresence({
       isVisible: isOpen,
@@ -448,7 +688,7 @@ export const Content = forwardRef<HTMLDivElement, ContentProps>(
       })
     }, [isPresent, elementRef])
 
-    // Positioning with floating-ui (on Positioner, not Content)
+    // Positioning with floating-ui
     useLayoutEffect(() => {
       const triggerNode = store.getNode(menuId, 'trigger')
       const trigger = triggerNode?.element
@@ -471,116 +711,9 @@ export const Content = forwardRef<HTMLDivElement, ContentProps>(
       return cleanup
     }, [placement, sideOffset, menuId, store])
 
-    // Get item meta from store for keyboard handling
-    const getItemMeta = useCallback(
-      (itemId: ItemId) => {
-        const node =
-          store.getNode(itemId, 'item') ?? store.getNode(itemId, 'sub-trigger')
-        return node?.meta as MenuItemMeta | undefined
-      },
-      [store],
-    )
-
-    // Keyboard handler - only process when this menu is the active (topmost) menu
-    const handleKeyDown = (e: React.KeyboardEvent) => {
-      // State-based topmost check: only handle events when this menu is active
-      if (snapshot.activeMenuId !== menuId) return
-
-      switch (e.key) {
-        case 'ArrowDown':
-          e.preventDefault()
-          send('HIGHLIGHT_NEXT')
-          break
-        case 'ArrowUp':
-          e.preventDefault()
-          send('HIGHLIGHT_PREV')
-          break
-        case 'ArrowRight':
-          e.preventDefault()
-          send('OPEN_SUBMENU')
-          break
-        case 'ArrowLeft':
-          e.preventDefault()
-          send('CLOSE_SUBMENU')
-          break
-        case 'Home':
-          e.preventDefault()
-          send('HIGHLIGHT_FIRST')
-          break
-        case 'End':
-          e.preventDefault()
-          send('HIGHLIGHT_LAST')
-          break
-        case 'Enter':
-        case ' ':
-          e.preventDefault()
-          if (snapshot.highlightedId) {
-            const meta = getItemMeta(snapshot.highlightedId)
-            if (meta?.isSubTrigger) {
-              send('OPEN_SUBMENU')
-            } else {
-              meta?.onSelect?.()
-              onItemSelect?.(snapshot.highlightedId)
-              send('CLOSE_ALL')
-            }
-          }
-          break
-        case 'Tab':
-          e.preventDefault()
-          send('CLOSE_ALL')
-          break
-        default:
-          // Character search
-          if (e.key.length === 1 && /[a-zA-Z]/.test(e.key)) {
-            send('TYPE_CHARACTER', { character: e.key })
-          }
-          break
-      }
-    }
-
-    // Escape handler for DismissableLayer
     const handleEscapeKeyDown = useCallback(() => {
-      // 현재 메뉴만 닫기
-      send('CLOSE', { menuId })
-    }, [send, menuId])
-
-    // Outside click handler - check against store directly for fresh data
-    const handlePointerDownOutside = useCallback(
-      (event: PointerEvent) => {
-        const target = event.target as Node | null
-        if (!target) {
-          send('CLOSE_ALL')
-          return
-        }
-
-        // Check if click is on trigger
-        const triggerNode = store.getNode(menuId, 'trigger')
-        if (triggerNode?.element?.contains(target)) {
-          return // Don't close - trigger handles its own click
-        }
-
-        // Check if click is on any sub-trigger
-        const subTriggerNodes = store.getNodesByRole('sub-trigger')
-        for (const node of subTriggerNodes) {
-          if (node.element?.contains(target)) {
-            return // Don't close - sub-trigger handles its own click
-          }
-        }
-
-        // Check if click is on any content/sub-content
-        const contentNodes = store.getNodesByRole('content')
-        const subContentNodes = store.getNodesByRole('sub-content')
-        for (const node of [...contentNodes, ...subContentNodes]) {
-          if (node.element?.contains(target)) {
-            return // Click is inside menu tree
-          }
-        }
-
-        // Truly outside click
-        send('CLOSE_ALL')
-      },
-      [send, store, menuId],
-    )
+      closeMenu(menuId)
+    }, [closeMenu, menuId])
 
     return (
       <div
@@ -612,7 +745,7 @@ export const Content = forwardRef<HTMLDivElement, ContentProps>(
                   'data-part': 'content',
                   'data-state': isOpen ? 'open' : 'closed',
                   'data-transition': transitionState,
-                  onKeyDown: handleKeyDown,
+                  onKeyDown: handleMenuKeyDown,
                 },
                 rest,
               )}
@@ -641,14 +774,12 @@ export const Item = forwardRef<HTMLDivElement, ItemProps>(
     { children, disabled = false, textValue, onSelect, ...rest },
     forwardedRef,
   ) => {
-    const { snapshot, send, onItemSelect } = useMenuContext()
+    const { highlightedId, setHighlightedId, closeAll, onItemSelect } = useMenuContext()
     const { menuId } = useMenuIdContext()
 
-    // Derive textValue from children if not provided
     const derivedTextValue =
       textValue ?? (typeof children === 'string' ? children : '')
 
-    // useNode for automatic ID and ref management with meta
     const { id: itemId, ref } = useNode<MenuRole, MenuItemMeta>({
       role: 'item',
       meta: {
@@ -660,22 +791,22 @@ export const Item = forwardRef<HTMLDivElement, ItemProps>(
       },
     })
 
-    const isHighlighted = snapshot.highlightedId === itemId
+    const isHighlighted = highlightedId === itemId
 
     const handleClick = () => {
       if (disabled) return
       onSelect?.()
       onItemSelect?.(itemId)
-      send('CLOSE_ALL')
+      closeAll()
     }
 
     const handlePointerEnter = () => {
       if (disabled) return
-      send('HIGHLIGHT', { id: itemId })
+      setHighlightedId(itemId)
     }
 
     const handlePointerLeave = () => {
-      send('CLEAR_HIGHLIGHT')
+      setHighlightedId(null)
     }
 
     return (
@@ -760,18 +891,15 @@ export type SubTriggerProps = {
 
 export const SubTrigger = forwardRef<HTMLDivElement, SubTriggerProps>(
   ({ children, disabled = false, textValue, ...rest }, forwardedRef) => {
-    const { snapshot, send } = useMenuContext()
+    const { openedPath, highlightedId, setHighlightedId, openMenu, closeMenu } = useMenuContext()
     const { menuId: subMenuId, parentMenuId } = useMenuIdContext()
 
-    // Derive textValue from children if not provided
     const derivedTextValue =
       textValue ?? (typeof children === 'string' ? children : '')
 
-    // useNode for automatic ID and ref management
-    // SubTrigger uses subMenuId as its itemId (so machine can find it)
     const { ref } = useNode<MenuRole, MenuItemMeta>({
       role: 'sub-trigger',
-      id: subMenuId, // Important: Use subMenuId so closeSubmenu can highlight it
+      id: subMenuId,
       meta: {
         menuId: parentMenuId ?? '',
         disabled,
@@ -782,21 +910,21 @@ export const SubTrigger = forwardRef<HTMLDivElement, SubTriggerProps>(
     })
 
     const itemId = subMenuId
-    const isHighlighted = snapshot.highlightedId === itemId
-    const isOpen = isMenuOpen(snapshot.openedPath, subMenuId)
+    const isHighlighted = highlightedId === itemId
+    const isOpen = isMenuOpen(openedPath, subMenuId)
 
     const handleClick = () => {
       if (disabled) return
       if (isOpen) {
-        send('CLOSE', { menuId: subMenuId })
+        closeMenu(subMenuId)
       } else if (parentMenuId) {
-        send('OPEN', { menuId: subMenuId, parentMenuId })
+        openMenu(subMenuId, parentMenuId)
       }
     }
 
     const handlePointerEnter = () => {
       if (disabled) return
-      send('HIGHLIGHT', { id: itemId })
+      setHighlightedId(itemId)
     }
 
     return (
@@ -839,26 +967,31 @@ export const SubContent = forwardRef<HTMLDivElement, SubContentProps>(
     { children, placement = 'right-start', sideOffset = 4, ...rest },
     forwardedRef,
   ) => {
-    const { snapshot, send, store, onItemSelect } =
-      useMenuContext()
+    const {
+      openedPath,
+      activeMenuId,
+      store,
+      closeMenu,
+      highlightFirst,
+      handleMenuKeyDown,
+      handlePointerDownOutside,
+    } = useMenuContext()
     const { menuId: subMenuId } = useMenuIdContext()
 
     const positionerRef = useRef<HTMLDivElement>(null)
 
-    // useNode for automatic ID and ref management
     const { domId, ref, elementRef } = useNode<MenuRole, MenuContentMeta>({
       role: 'sub-content',
       id: subMenuId,
       meta: { menuId: subMenuId },
     })
 
-    // Subscribe to sub-trigger's domId dynamically
     const subTriggerDomId = useStoreSubscribe(
       store,
       (s) => s.getNode(subMenuId, 'sub-trigger')?.domId ?? null,
     )
 
-    const isOpen = isMenuOpen(snapshot.openedPath, subMenuId)
+    const isOpen = isMenuOpen(openedPath, subMenuId)
 
     const { isPresent, transitionState } = usePresence({
       isVisible: isOpen,
@@ -868,19 +1001,16 @@ export const SubContent = forwardRef<HTMLDivElement, SubContentProps>(
     // Auto-focus content and highlight first item when submenu becomes present
     useLayoutEffect(() => {
       if (!isPresent) return
-      // This submenu just became visible - highlight first item after items are registered
       requestAnimationFrame(() => {
         elementRef.current?.focus()
-        // Only highlight if this submenu is the active one
-        if (snapshot.activeMenuId === subMenuId) {
-          send('HIGHLIGHT_FIRST')
+        if (activeMenuId === subMenuId) {
+          highlightFirst()
         }
       })
-    }, [isPresent, elementRef, snapshot.activeMenuId, subMenuId, send])
+    }, [isPresent, elementRef, activeMenuId, subMenuId, highlightFirst])
 
-    // Positioning with floating-ui (on Positioner, relative to SubTrigger)
+    // Positioning with floating-ui
     useLayoutEffect(() => {
-      // SubTrigger element from store
       const subTriggerNode = store.getNode(subMenuId, 'sub-trigger')
       const trigger = subTriggerNode?.element
       const positioner = positionerRef.current
@@ -902,116 +1032,9 @@ export const SubContent = forwardRef<HTMLDivElement, SubContentProps>(
       return cleanup
     }, [placement, sideOffset, subMenuId, store])
 
-    // Get item meta from store for keyboard handling
-    const getItemMeta = useCallback(
-      (itemId: ItemId) => {
-        const node =
-          store.getNode(itemId, 'item') ?? store.getNode(itemId, 'sub-trigger')
-        return node?.meta as MenuItemMeta | undefined
-      },
-      [store],
-    )
-
-    // Keyboard handler - only process when this submenu is the active (topmost) menu
-    const handleKeyDown = (e: React.KeyboardEvent) => {
-      // State-based topmost check: only handle events when this submenu is active
-      if (snapshot.activeMenuId !== subMenuId) return
-
-      switch (e.key) {
-        case 'ArrowDown':
-          e.preventDefault()
-          send('HIGHLIGHT_NEXT')
-          break
-        case 'ArrowUp':
-          e.preventDefault()
-          send('HIGHLIGHT_PREV')
-          break
-        case 'ArrowRight':
-          e.preventDefault()
-          send('OPEN_SUBMENU')
-          break
-        case 'ArrowLeft':
-          e.preventDefault()
-          send('CLOSE_SUBMENU')
-          break
-        case 'Home':
-          e.preventDefault()
-          send('HIGHLIGHT_FIRST')
-          break
-        case 'End':
-          e.preventDefault()
-          send('HIGHLIGHT_LAST')
-          break
-        case 'Enter':
-        case ' ':
-          e.preventDefault()
-          if (snapshot.highlightedId) {
-            const meta = getItemMeta(snapshot.highlightedId)
-            if (meta?.isSubTrigger) {
-              send('OPEN_SUBMENU')
-            } else {
-              meta?.onSelect?.()
-              onItemSelect?.(snapshot.highlightedId)
-              send('CLOSE_ALL')
-            }
-          }
-          break
-        case 'Tab':
-          e.preventDefault()
-          send('CLOSE_ALL')
-          break
-        default:
-          // Character search
-          if (e.key.length === 1 && /[a-zA-Z]/.test(e.key)) {
-            send('TYPE_CHARACTER', { character: e.key })
-          }
-          break
-      }
-    }
-
-    // Escape handler for DismissableLayer
     const handleEscapeKeyDown = useCallback(() => {
-      // Close this submenu only
-      send('CLOSE', { menuId: subMenuId })
-    }, [send, subMenuId])
-
-    // Outside click handler - check against store directly for fresh data
-    const handlePointerDownOutside = useCallback(
-      (event: PointerEvent) => {
-        const target = event.target as Node | null
-        if (!target) {
-          send('CLOSE_ALL')
-          return
-        }
-
-        // Check if click is on trigger
-        const triggerNode = store.getNodesByRole('trigger')[0]
-        if (triggerNode?.element?.contains(target)) {
-          return // Don't close - trigger handles its own click
-        }
-
-        // Check if click is on any sub-trigger
-        const subTriggerNodes = store.getNodesByRole('sub-trigger')
-        for (const node of subTriggerNodes) {
-          if (node.element?.contains(target)) {
-            return // Don't close - sub-trigger handles its own click
-          }
-        }
-
-        // Check if click is on any content/sub-content
-        const contentNodes = store.getNodesByRole('content')
-        const subContentNodes = store.getNodesByRole('sub-content')
-        for (const node of [...contentNodes, ...subContentNodes]) {
-          if (node.element?.contains(target)) {
-            return // Click is inside menu tree
-          }
-        }
-
-        // Truly outside click
-        send('CLOSE_ALL')
-      },
-      [send, store],
-    )
+      closeMenu(subMenuId)
+    }, [closeMenu, subMenuId])
 
     return (
       <div
@@ -1043,7 +1066,7 @@ export const SubContent = forwardRef<HTMLDivElement, SubContentProps>(
                   'data-part': 'sub-content',
                   'data-state': isOpen ? 'open' : 'closed',
                   'data-transition': transitionState,
-                  onKeyDown: handleKeyDown,
+                  onKeyDown: handleMenuKeyDown,
                 },
                 rest,
               )}

@@ -20,9 +20,6 @@ importers:
       clsx:
         specifier: ^2.1.1
         version: 2.1.1
-      controlled-machine:
-        specifier: ^0.4.2
-        version: 0.4.2(react@19.2.0)
       focus-trap:
         specifier: ^7.6.6
         version: 7.6.6
@@ -990,14 +987,6 @@ packages:
 
   concat-map@0.0.1:
     resolution: {integrity: sha512-/Srv4dswyQNBfohGpz9o6Yb3Gz3SrUDqBH5rTuhGR7ahtlbYKnVxw2bCFMRljaA7EXHaXZ8wsHdodFvbkhKmqg==}
-
-  controlled-machine@0.4.2:
-    resolution: {integrity: sha512-uherp/aHxsJrpkVtVXQbOBBNy2+lYWPc51Tfy7GCQfUgbj9DvqzSS5IjQeE2LERrgE135hU7VSeMuXz5W3Zouw==}
-    peerDependencies:
-      react: '>=18.0.0'
-    peerDependenciesMeta:
-      react:
-        optional: true
 
   convert-source-map@2.0.0:
     resolution: {integrity: sha512-Kvp459HrV2FEJ1CAsi1Ku+MY3kasH19TFykTz2xWmMeq6bk2NU3XXvfJ+Q61m0xktWwt+1HSYf3JZsTms3aRJg==}
@@ -2654,10 +2643,6 @@ snapshots:
   color-name@1.1.4: {}
 
   concat-map@0.0.1: {}
-
-  controlled-machine@0.4.2(react@19.2.0):
-    optionalDependencies:
-      react: 19.2.0
 
   convert-source-map@2.0.0: {}
 

@@ -1,7 +1,6 @@
-import { useCallback, useId, useLayoutEffect, useRef } from 'react'
+import { useCallback, useEffect, useId, useLayoutEffect, useRef } from 'react'
 import { useNodeStore } from './use-node-store'
 import { useParentId } from './use-parent-context'
-import { useLatestRef } from '../hooks/use-latest-ref'
 import type { NodeId } from './node-store'
 
 export function useNode<
@@ -13,7 +12,6 @@ export function useNode<
   const parentId = useParentId()
   const store = useNodeStore<Role, Meta>()
   const elementRef = useRef<HTMLElement | null>(null)
-  const metaRef = useLatestRef(options.meta)
 
   const domId = options.domId ?? `${options.role}::${id}`
 
@@ -36,13 +34,20 @@ export function useNode<
           parentId,
           role: options.role,
           domId,
-          meta: metaRef.current ?? ({} as Meta),
+          meta: options.meta ?? ({} as Meta),
           element,
         })
       }
     },
-    [store, id, options.role, parentId, domId, metaRef],
+    [store, id, options.role, parentId, domId, options.meta],
   )
+
+  // meta가 바뀌면 store에 반영
+  useEffect(() => {
+    if (elementRef.current && options.meta) {
+      store.updateMeta(id, options.role, options.meta)
+    }
+  }, [store, id, options.role, options.meta])
 
   return { id, domId, ref, elementRef }
 }
@@ -55,7 +60,6 @@ export function useLogicalNode<
   const id = options.id ?? generatedId
   const parentId = useParentId()
   const store = useNodeStore<Role, Meta>()
-  const metaRef = useLatestRef(options.meta)
 
   const domId = `${options.role}::${id}`
 
@@ -65,12 +69,19 @@ export function useLogicalNode<
       parentId,
       role: options.role,
       domId,
-      meta: metaRef.current ?? ({} as Meta),
+      meta: options.meta ?? ({} as Meta),
       element: null,
     })
 
     return () => store.unregister(id, options.role)
-  }, [id, parentId, options.role, domId, store, metaRef])
+  }, [id, parentId, options.role, domId, store, options.meta])
+
+  // meta가 바뀌면 store에 반영
+  useEffect(() => {
+    if (options.meta) {
+      store.updateMeta(id, options.role, options.meta)
+    }
+  }, [store, id, options.role, options.meta])
 
   return { id, domId }
 }

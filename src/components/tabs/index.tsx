@@ -9,10 +9,8 @@ import {
   useEffect,
   type ComponentPropsWithoutRef,
 } from 'react'
-import { useMachine, type Send } from 'controlled-machine/react'
 import { useControllableState } from '@radix-ui/react-use-controllable-state'
 
-import { tabsMachine, type TabsEvents, type TabValue, type TabsComputed } from './machine'
 import { usePresence } from '../../hooks/use-presence'
 import { composeRefs } from '../../utils/compose-refs'
 import { mergeProps } from '../../utils/merge-props'
@@ -29,21 +27,24 @@ import type { NodeStore } from '../../primitives/node-store'
 // Types
 // ============================================
 
+export type TabValue = string
+
 type TabsRole = 'root' | 'list' | 'trigger' | 'content' | 'indicator'
 type TabsMeta = {
   disabled?: boolean
 }
 
-type TabsSnapshot = TabsComputed & { focusedValue: TabValue | null }
-
 type TabsContextValue = {
   value: TabValue
-  send: Send<TabsEvents>
-  snapshot: TabsSnapshot
+  setValue: (value: TabValue) => void
+  focusedValue: TabValue | null
+  setFocusedValue: (value: TabValue | null) => void
   store: NodeStore<TabsRole, TabsMeta>
   disabled: boolean
   orientation: 'horizontal' | 'vertical'
   activationMode: 'automatic' | 'manual'
+  loop: boolean
+  getEnabledValues: () => TabValue[]
   getTriggerElement: (value: TabValue) => HTMLElement | null
   listRef: React.RefObject<HTMLDivElement | null>
 }
@@ -115,7 +116,10 @@ const RootInner = forwardRef<HTMLDivElement, RootProps>(
     })
     const value = valueState ?? ''
 
-    // Helper to get enabled trigger values (for machine)
+    // Internal state: focus tracking for keyboard navigation
+    const [focusedValue, setFocusedValue] = useState<TabValue | null>(null)
+
+    // Helper to get enabled trigger values
     const getEnabledValues = useCallback(() => {
       const triggers = store.getNodesByRole('trigger')
       return triggers
@@ -131,25 +135,17 @@ const RootInner = forwardRef<HTMLDivElement, RootProps>(
       [store],
     )
 
-    // Machine
-    const [snapshot, send] = useMachine(tabsMachine, {
-      input: {
-        value,
-        onValueChange: setValueState,
-        activationMode,
-        loop,
-        getEnabledValues,
-      },
-    })
-
     const contextValue: TabsContextValue = {
       value,
-      send,
-      snapshot,
+      setValue: setValueState,
+      focusedValue,
+      setFocusedValue,
       store,
       disabled,
       orientation,
       activationMode,
+      loop,
+      getEnabledValues,
       getTriggerElement,
       listRef,
     }
@@ -183,10 +179,15 @@ export type ListProps = ComponentPropsWithoutRef<'div'>
 export const List = forwardRef<HTMLDivElement, ListProps>(
   ({ children, ...rest }, forwardedRef) => {
     const {
-      send,
-      snapshot,
+      value,
+      setValue,
+      focusedValue,
+      setFocusedValue,
       orientation,
       disabled,
+      activationMode,
+      loop,
+      getEnabledValues,
       getTriggerElement,
       listRef,
     } = useTabsContext()
@@ -197,13 +198,21 @@ export const List = forwardRef<HTMLDivElement, ListProps>(
 
     // Focus DOM element when focusedValue changes
     useEffect(() => {
-      if (snapshot.focusedValue) {
-        const element = getTriggerElement(snapshot.focusedValue)
+      if (focusedValue) {
+        const element = getTriggerElement(focusedValue)
         element?.focus()
       }
-    }, [snapshot.focusedValue, getTriggerElement])
+    }, [focusedValue, getTriggerElement])
 
-    // Keyboard navigation - just send events, machine handles logic
+    // Navigate and optionally activate (automatic mode)
+    const navigateTo = (targetValue: TabValue) => {
+      setFocusedValue(targetValue)
+      if (activationMode === 'automatic' && targetValue !== value) {
+        setValue(targetValue)
+      }
+    }
+
+    // Keyboard navigation
     const handleKeyDown = (e: React.KeyboardEvent) => {
       if (disabled) return
 
@@ -212,26 +221,64 @@ export const List = forwardRef<HTMLDivElement, ListProps>(
       const prevKey = isHorizontal ? 'ArrowLeft' : 'ArrowUp'
 
       switch (e.key) {
-        case nextKey:
+        case nextKey: {
           e.preventDefault()
-          send('FOCUS_NEXT')
+          const enabledValues = getEnabledValues()
+          if (enabledValues.length === 0) return
+
+          const currentIndex = enabledValues.indexOf(focusedValue ?? value)
+          let nextIndex: number
+
+          if (currentIndex === -1) {
+            nextIndex = 0
+          } else if (loop) {
+            nextIndex = (currentIndex + 1) % enabledValues.length
+          } else {
+            nextIndex = Math.min(currentIndex + 1, enabledValues.length - 1)
+          }
+
+          navigateTo(enabledValues[nextIndex])
           break
-        case prevKey:
+        }
+        case prevKey: {
           e.preventDefault()
-          send('FOCUS_PREV')
+          const enabledValues = getEnabledValues()
+          if (enabledValues.length === 0) return
+
+          const currentIndex = enabledValues.indexOf(focusedValue ?? value)
+          let prevIndex: number
+
+          if (currentIndex === -1) {
+            prevIndex = enabledValues.length - 1
+          } else if (loop) {
+            prevIndex = (currentIndex - 1 + enabledValues.length) % enabledValues.length
+          } else {
+            prevIndex = Math.max(currentIndex - 1, 0)
+          }
+
+          navigateTo(enabledValues[prevIndex])
           break
-        case 'Home':
+        }
+        case 'Home': {
           e.preventDefault()
-          send('FOCUS_FIRST')
+          const enabledValues = getEnabledValues()
+          if (enabledValues.length === 0) return
+          navigateTo(enabledValues[0])
           break
-        case 'End':
+        }
+        case 'End': {
           e.preventDefault()
-          send('FOCUS_LAST')
+          const enabledValues = getEnabledValues()
+          if (enabledValues.length === 0) return
+          navigateTo(enabledValues[enabledValues.length - 1])
           break
+        }
         case 'Enter':
         case ' ':
           e.preventDefault()
-          send('ACTIVATE_FOCUSED')
+          if (focusedValue && focusedValue !== value) {
+            setValue(focusedValue)
+          }
           break
       }
     }
@@ -270,7 +317,8 @@ export const Trigger = forwardRef<HTMLButtonElement, TriggerProps>(
   ({ children, value: triggerValue, disabled = false, ...rest }, forwardedRef) => {
     const {
       value,
-      send,
+      setValue,
+      setFocusedValue,
       store,
       disabled: rootDisabled,
     } = useTabsContext()
@@ -292,13 +340,12 @@ export const Trigger = forwardRef<HTMLButtonElement, TriggerProps>(
 
     const handleClick = () => {
       if (!isDisabled && triggerValue !== value) {
-        send('SELECT', { value: triggerValue })
+        setValue(triggerValue)
       }
     }
 
     const handleFocus = () => {
-      // Sync focusedValue when trigger receives focus
-      send('FOCUS', { value: triggerValue })
+      setFocusedValue(triggerValue)
     }
 
     return (

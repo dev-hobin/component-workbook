@@ -16,7 +16,7 @@
     "@radix-ui/react-use-controllable-state": "^1.2.2",
     "@tailwindcss/vite": "^4.1.17",
     "clsx": "^2.1.1",
-    "controlled-machine": "^0.4.2",
+
     "focus-trap": "^7.6.6",
     "prettier": "^3.6.2",
     "react": "^19.1.1",
