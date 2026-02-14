@@ -3,23 +3,16 @@ import React, {
   forwardRef,
   useCallback,
   useContext,
+  useEffect,
   useId,
   useRef,
   type ComponentPropsWithoutRef,
   type ReactNode,
 } from 'react'
-import { useMachine, type Send } from 'controlled-machine/react'
 import { useControllableState } from '@radix-ui/react-use-controllable-state'
 
-import {
-  treeMachine,
-  isItemExpanded,
-  isItemSelected,
-  type TreeEvents,
-  type TreeComputed,
-  type ItemValue,
-  type TreeItemMeta,
-} from './machine'
+import { useHighlight, type UseHighlightReturn } from '../../hooks/use-highlight'
+import { useCharacterSearch } from '../../hooks/use-character-search'
 import { usePresence } from '../../hooks/use-presence'
 import { composeRefs } from '../../utils/compose-refs'
 import { mergeProps } from '../../utils/merge-props'
@@ -40,6 +33,16 @@ import type { NodeStore } from '../../primitives/node-store'
 // Types
 // ============================================
 
+export type ItemValue = string
+
+export type TreeItemMeta = {
+  value: ItemValue
+  disabled: boolean
+  parentValue: ItemValue | null
+  depth: number
+  textValue: string
+}
+
 type TreeRole = 'tree' | 'item' | 'label' | 'group'
 
 type TreeGroupMeta = {
@@ -48,20 +51,42 @@ type TreeGroupMeta = {
 
 type TreeMeta = TreeItemMeta | TreeGroupMeta | object
 
-type TreeSnapshot = TreeComputed & { highlightedValue: ItemValue | null }
+export function isItemExpanded(
+  expandedValues: ItemValue[],
+  value: ItemValue,
+): boolean {
+  return expandedValues.includes(value)
+}
+
+export function isItemSelected(
+  selectedValues: ItemValue[],
+  value: ItemValue,
+): boolean {
+  return selectedValues.includes(value)
+}
 
 type TreeContextValue = {
   // State
   expandedValues: ItemValue[]
   selectedValues: ItemValue[]
-  send: Send<TreeEvents>
-  snapshot: TreeSnapshot
+  highlightedValue: ItemValue | null
 
   // NodeStore
   store: NodeStore<TreeRole, TreeMeta>
 
   // Options
   selectionMode: 'single' | 'multiple'
+
+  // Highlight
+  highlight: UseHighlightReturn
+
+  // Actions
+  setHighlightedValue: (value: ItemValue | null) => void
+  expand: (value: ItemValue) => void
+  collapse: (value: ItemValue) => void
+  toggleExpand: (value: ItemValue) => void
+  select: (value: ItemValue) => void
+  toggleSelect: (value: ItemValue) => void
 }
 
 type ItemContextValue = {
@@ -181,19 +206,17 @@ const RootImpl = forwardRef<HTMLDivElement, RootProps>(
       onChange: onSelectedValuesChange,
     })
 
-    // Refs for latest values
+    // Refs for latest values (needed in callbacks)
     const expandedValuesRef = useRef(expandedValues)
     expandedValuesRef.current = expandedValues
 
-    // Machine helpers using NodeStore - real-time queries
+    // NodeStore-based helpers
     const getVisibleItemValues = useCallback(() => {
       const result: ItemValue[] = []
       const currentExpanded = expandedValuesRef.current ?? []
 
-      // Get all items and build visible list
       const allItems = store.getNodesByRole('item')
 
-      // Build hasChildren lookup from groups
       const groups = store.getNodesByRole('group')
       const parentsWithChildren = new Set(
         groups
@@ -201,14 +224,12 @@ const RootImpl = forwardRef<HTMLDivElement, RootProps>(
           .map((node) => (node.meta as { parentValue: ItemValue }).parentValue),
       )
 
-      // Sort by DOM order using depth-first traversal
       function collectVisible(parentValue: ItemValue | null) {
         const children = allItems.filter((node) => {
           const meta = node.meta as TreeItemMeta
           return meta.parentValue === parentValue && !meta.disabled
         })
 
-        // Sort children by their DOM position
         children.sort((a, b) => {
           if (!a.element || !b.element) return 0
           const position = a.element.compareDocumentPosition(b.element)
@@ -221,7 +242,6 @@ const RootImpl = forwardRef<HTMLDivElement, RootProps>(
           const meta = child.meta as TreeItemMeta
           result.push(meta.value)
 
-          // If expanded and has children, recurse
           const hasChildren = parentsWithChildren.has(meta.value)
           if (hasChildren && currentExpanded.includes(meta.value)) {
             collectVisible(meta.value)
@@ -259,7 +279,6 @@ const RootImpl = forwardRef<HTMLDivElement, RootProps>(
 
         if (children.length === 0) return null
 
-        // Sort by DOM order and return first
         children.sort((a, b) => {
           if (!a.element || !b.element) return 0
           const position = a.element.compareDocumentPosition(b.element)
@@ -308,79 +327,207 @@ const RootImpl = forwardRef<HTMLDivElement, RootProps>(
       [store],
     )
 
-    // Machine
-    const [snapshot, send] = useMachine(treeMachine, {
-      input: {
-        expandedValues,
-        onExpandedValuesChange: setExpandedValues,
-        selectedValues,
-        onSelectedValuesChange: setSelectedValues,
-        selectionMode,
-        getVisibleItemValues,
-        getItemMeta,
-        getParentValue,
-        getFirstChildValue,
-        getSiblingValues,
-        getItemTextValue,
-        getHasChildren,
+    // useHighlight: index 기반
+    const visibleItems = getVisibleItemValues()
+    const highlight = useHighlight(visibleItems.length)
+
+    // index → value 파생
+    const highlightedValue =
+      highlight.index >= 0 ? (visibleItems[highlight.index] ?? null) : null
+
+    // character search
+    const typeahead = useCharacterSearch(
+      () => visibleItems.map((v) => getItemTextValue(v)),
+      (index) => highlight.set(index),
+      highlight.index >= 0 ? highlight.index : undefined,
+    )
+
+    // setHighlightedValue: value로 직접 설정 (click, focus 등)
+    const setHighlightedValue = useCallback(
+      (value: ItemValue | null) => {
+        if (value === null) {
+          highlight.clear()
+          return
+        }
+        const items = getVisibleItemValues()
+        const idx = items.indexOf(value)
+        if (idx >= 0) {
+          highlight.set(idx)
+        }
       },
-      actions: {
-        focusItem: () => {
-          if (snapshot.highlightedValue) {
-            requestAnimationFrame(() => {
-              const labelElement = store.getElement(snapshot.highlightedValue!, 'label')
-              labelElement?.focus()
-            })
+      [getVisibleItemValues, highlight],
+    )
+
+    // Focus highlighted item when it changes
+    useEffect(() => {
+      if (highlightedValue) {
+        requestAnimationFrame(() => {
+          const labelElement = store.getElement(highlightedValue, 'label')
+          labelElement?.focus()
+        })
+      }
+    }, [highlightedValue, store])
+
+    // Actions
+    const expand = useCallback(
+      (value: ItemValue) => {
+        if (!getHasChildren(value)) return
+        if (expandedValues.includes(value)) return
+        setExpandedValues([...expandedValues, value])
+      },
+      [expandedValues, setExpandedValues, getHasChildren],
+    )
+
+    const collapse = useCallback(
+      (value: ItemValue) => {
+        if (!expandedValues.includes(value)) return
+        setExpandedValues(expandedValues.filter((v) => v !== value))
+      },
+      [expandedValues, setExpandedValues],
+    )
+
+    const toggleExpand = useCallback(
+      (value: ItemValue) => {
+        if (!getHasChildren(value)) return
+        if (expandedValues.includes(value)) {
+          setExpandedValues(expandedValues.filter((v) => v !== value))
+        } else {
+          setExpandedValues([...expandedValues, value])
+        }
+      },
+      [expandedValues, setExpandedValues, getHasChildren],
+    )
+
+    const select = useCallback(
+      (value: ItemValue) => {
+        const meta = getItemMeta(value)
+        if (meta?.disabled) return
+
+        if (selectionMode === 'single') {
+          setSelectedValues([value])
+        } else {
+          if (!selectedValues.includes(value)) {
+            setSelectedValues([...selectedValues, value])
           }
-        },
+        }
       },
-    })
+      [selectionMode, selectedValues, setSelectedValues, getItemMeta],
+    )
+
+    const toggleSelect = useCallback(
+      (value: ItemValue) => {
+        const meta = getItemMeta(value)
+        if (meta?.disabled) return
+
+        if (selectedValues.includes(value)) {
+          setSelectedValues(selectedValues.filter((v) => v !== value))
+        } else {
+          setSelectedValues([...selectedValues, value])
+        }
+      },
+      [selectedValues, setSelectedValues, getItemMeta],
+    )
 
     // Keyboard handler on tree root
     const handleKeyDown = (e: React.KeyboardEvent) => {
       switch (e.key) {
         case 'ArrowDown':
           e.preventDefault()
-          send('HIGHLIGHT_NEXT')
+          highlight.next()
           break
         case 'ArrowUp':
           e.preventDefault()
-          send('HIGHLIGHT_PREV')
+          highlight.prev()
           break
-        case 'ArrowRight':
+        case 'ArrowRight': {
           e.preventDefault()
-          send('ARROW_RIGHT')
+          if (!highlightedValue) return
+          const hasChildren = getHasChildren(highlightedValue)
+          if (!hasChildren) return
+
+          const isExpanded = expandedValues.includes(highlightedValue)
+          if (!isExpanded) {
+            expand(highlightedValue)
+          } else {
+            // Move to first child
+            const firstChild = getFirstChildValue(highlightedValue)
+            if (firstChild) {
+              // After expand, firstChild is at highlight.index + 1
+              highlight.set(highlight.index + 1)
+            }
+          }
           break
-        case 'ArrowLeft':
+        }
+        case 'ArrowLeft': {
           e.preventDefault()
-          send('ARROW_LEFT')
+          if (!highlightedValue) return
+          const hasChildren = getHasChildren(highlightedValue)
+          const isExpanded = hasChildren && expandedValues.includes(highlightedValue)
+
+          if (isExpanded) {
+            collapse(highlightedValue)
+          } else {
+            // Move to parent
+            const parentVal = getParentValue(highlightedValue)
+            if (parentVal) {
+              const items = getVisibleItemValues()
+              const idx = items.indexOf(parentVal)
+              if (idx >= 0) {
+                highlight.set(idx)
+              }
+            }
+          }
           break
+        }
         case 'Home':
           e.preventDefault()
-          send('HIGHLIGHT_FIRST')
+          highlight.first()
           break
         case 'End':
           e.preventDefault()
-          send('HIGHLIGHT_LAST')
+          highlight.last()
           break
-        case 'Enter':
+        case 'Enter': {
           e.preventDefault()
-          send('ACTIVATE')
-          break
-        case ' ':
-          e.preventDefault()
-          if (snapshot.highlightedValue) {
-            send('TOGGLE_SELECT', { value: snapshot.highlightedValue })
+          if (!highlightedValue) return
+          const meta = getItemMeta(highlightedValue)
+          if (!meta || meta.disabled) return
+
+          const hasChildren = getHasChildren(highlightedValue)
+          if (hasChildren) {
+            toggleExpand(highlightedValue)
+          } else if (selectionMode === 'multiple') {
+            toggleSelect(highlightedValue)
+          } else {
+            select(highlightedValue)
           }
           break
-        case '*':
+        }
+        case ' ': {
           e.preventDefault()
-          send('EXPAND_SIBLINGS')
+          if (!highlightedValue) return
+          if (selectionMode === 'multiple') {
+            toggleSelect(highlightedValue)
+          } else {
+            select(highlightedValue)
+          }
           break
+        }
+        case '*': {
+          e.preventDefault()
+          if (!highlightedValue) return
+          const siblings = getSiblingValues(highlightedValue)
+          const toExpand = siblings.filter((v) => {
+            return getHasChildren(v) && !expandedValues.includes(v)
+          })
+          if (toExpand.length > 0) {
+            setExpandedValues([...expandedValues, ...toExpand])
+          }
+          break
+        }
         default:
-          // Character search
           if (e.key.length === 1 && /[a-zA-Z]/.test(e.key)) {
-            send('TYPE_CHARACTER', { character: e.key })
+            typeahead(e.key)
           }
           break
       }
@@ -389,10 +536,16 @@ const RootImpl = forwardRef<HTMLDivElement, RootProps>(
     const contextValue: TreeContextValue = {
       expandedValues,
       selectedValues,
-      send,
-      snapshot,
+      highlightedValue,
       store,
       selectionMode,
+      highlight,
+      setHighlightedValue,
+      expand,
+      collapse,
+      toggleExpand,
+      select,
+      toggleSelect,
     }
 
     return (
@@ -424,7 +577,6 @@ const RootImpl = forwardRef<HTMLDivElement, RootProps>(
 
 export type ItemProps = {
   value: ItemValue
-  /** 문자 검색에 사용될 텍스트 값 */
   textValue?: string
   disabled?: boolean
   children: ReactNode
@@ -435,22 +587,18 @@ export const Item = forwardRef<HTMLDivElement, ItemProps>(
     { value, textValue = '', disabled = false, children, ...rest },
     forwardedRef,
   ) => {
-    const { expandedValues, selectedValues, snapshot } =
+    const { expandedValues, selectedValues, highlightedValue } =
       useTreeContext()
     const parentValue = useParentId() as ItemValue | null
 
-    // Calculate depth from parent chain
     const depth = useDepth()
-
-    // Check if item has children by querying store for groups with this item as parent
     const hasChildren = useHasChildren(value)
 
     const isExpanded = isItemExpanded(expandedValues, value)
     const isSelected = isItemSelected(selectedValues, value)
-    const isHighlighted = snapshot.highlightedValue === value
+    const isHighlighted = highlightedValue === value
     const isDisabled = disabled
 
-    // useNode for registration
     const { ref } = useNode<TreeRole, TreeItemMeta>({
       role: 'item',
       id: value,
@@ -506,16 +654,13 @@ export const Item = forwardRef<HTMLDivElement, ItemProps>(
   },
 )
 
-// Helper to calculate depth - uses React context instead of store queries
-// Store queries fail on first render because items aren't registered yet
+// Helper to calculate depth
 function useDepth(): number {
   const level = useLevel()
-  // level starts at 1 for items inside Root's ParentProvider
-  // depth should be 0 for root-level items, so depth = level - 1
   return level - 1
 }
 
-// Helper to check if an item has children (ItemGroup registered with this value as parent)
+// Helper to check if an item has children
 function useHasChildren(value: ItemValue): boolean {
   const { store } = useTreeContext()
 
@@ -537,7 +682,7 @@ export type ItemLabelProps = {
 
 export const ItemLabel = forwardRef<HTMLDivElement, ItemLabelProps>(
   ({ children, ...rest }, forwardedRef) => {
-    const { send } = useTreeContext()
+    const { setHighlightedValue, toggleExpand, toggleSelect } = useTreeContext()
     const {
       value,
       hasChildren,
@@ -554,17 +699,17 @@ export const ItemLabel = forwardRef<HTMLDivElement, ItemLabelProps>(
 
     const handleClick = () => {
       if (isDisabled) return
-      send('HIGHLIGHT', { value })
+      setHighlightedValue(value)
       if (hasChildren) {
-        send('TOGGLE_EXPAND', { value })
+        toggleExpand(value)
       } else {
-        send('TOGGLE_SELECT', { value })
+        toggleSelect(value)
       }
     }
 
     const handleFocus = () => {
       if (isDisabled) return
-      send('HIGHLIGHT', { value })
+      setHighlightedValue(value)
     }
 
     return (
@@ -616,7 +761,6 @@ export const ItemGroup = forwardRef<HTMLDivElement, ItemGroupProps>(
       },
     })
 
-    // Subscribe to label's domId dynamically
     const labelDomId = useStoreSubscribe(
       store,
       (s) => s.getNode(value, 'label')?.domId ?? null,

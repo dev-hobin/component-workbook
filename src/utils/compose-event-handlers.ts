@@ -1,67 +1,50 @@
 /**
- * 외부(onClick 같은 prop 핸들러)와 내부(컴포넌트 자체 로직용) 이벤트 핸들러를
- * 합성할 때 사용하는 유틸입니다.
+ * 컴포넌트 내부 핸들러와 사용자 핸들러(prop)를 합성합니다.
  *
- * 기본 동작:
- * - external → internal 순서로 호출
- * - external 에서 event.preventDefault() 를 호출하면 internal 은 실행되지 않음
- *   (브라우저 기본 동작이 preventDefault 로 취소되는 semantics 를 그대로 가져온 것)
+ * 실행 순서: overrideHandler → originalHandler
+ * overrideHandler에서 event.preventDefault()를 호출하면 originalHandler는 실행되지 않음.
  */
 export type EventHandler<E> = ((event: E) => void) | undefined
 
 export interface ComposeEventHandlersOptions {
   /**
-   * true 인 경우, external 핸들러 실행 후 event.defaultPrevented 가 true 이면
-   * internal 핸들러를 실행하지 않습니다. (기본값: true)
+   * true인 경우, overrideHandler 실행 후 event.defaultPrevented가 true이면
+   * originalHandler를 실행하지 않습니다. (기본값: true)
    */
   checkForDefaultPrevented?: boolean
 }
 
 /**
- * 외부 핸들러가 내부 동작을 "cancel" 할 수 있는 compose 함수.
+ * 사용자 핸들러(override)가 내부 동작(original)을 "cancel"할 수 있는 compose 함수.
  *
- * 사용 예:
- *
- *   <button
- *     onClick={composeEventHandlers(props.onClick, (event) => {
- *       // 내부 기본 동작 (예: 메뉴 열기)
- *     })}
- *   />
- *
- *   // 사용자가 이렇게 쓰면:
- *   <MyButton
- *     onClick={(event) => {
- *       event.preventDefault(); // 내부 기본 동작까지 막힘
- *     }}
- *   />
+ * @param originalHandler - 컴포넌트 내부 기본 동작 핸들러
+ * @param overrideHandler - 사용자(외부)가 전달한 prop 핸들러. 먼저 실행됨.
  */
 export function composeEventHandlers<E extends { defaultPrevented?: boolean }>(
-  internal: EventHandler<E>,
-  external: EventHandler<E>,
+  originalHandler: EventHandler<E>,
+  overrideHandler: EventHandler<E>,
   options: ComposeEventHandlersOptions = {},
 ): (event: E) => void {
   const { checkForDefaultPrevented = true } = options
 
-  // 둘 다 없으면 매번 클로저를 새로 만들 필요가 없으니 noop 반환
-  if (!external && !internal) {
+  if (!overrideHandler && !originalHandler) {
     return () => {}
   }
 
-  // 하나만 있으면 그대로 반환해서 불필요한 래핑을 피함
-  if (!external || !internal) {
-    return (external ?? internal) as (event: E) => void
+  if (!overrideHandler || !originalHandler) {
+    return (overrideHandler ?? originalHandler) as (event: E) => void
   }
 
   return (event: E) => {
-    // 1) 외부 핸들러 먼저 실행
-    external(event)
+    // 1) 사용자 핸들러 먼저 실행
+    overrideHandler(event)
 
-    // 2) 외부에서 preventDefault 했다면 내부 동작은 취소
+    // 2) preventDefault 했다면 내부 동작은 취소
     if (checkForDefaultPrevented && event.defaultPrevented) {
       return
     }
 
     // 3) 내부 핸들러 실행
-    internal(event)
+    originalHandler(event)
   }
 }

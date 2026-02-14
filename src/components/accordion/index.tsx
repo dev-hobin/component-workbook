@@ -2,18 +2,12 @@ import {
   createContext,
   forwardRef,
   useContext,
+  useMemo,
   useState,
   type ComponentPropsWithoutRef,
 } from 'react'
-import { useMachine, type Send } from 'controlled-machine/react'
 import { useControllableState } from '@radix-ui/react-use-controllable-state'
 
-import {
-  accordionMachine,
-  type AccordionEvents,
-  type AccordionComputed,
-  type ItemId,
-} from './machine'
 import { usePresence } from '../../hooks/use-presence'
 import { composeRefs } from '../../utils/compose-refs'
 import { mergeProps } from '../../utils/merge-props'
@@ -30,6 +24,8 @@ import type { NodeStore } from '../../primitives/node-store'
 // Types
 // ============================================
 
+export type ItemId = string
+
 type AccordionRole = 'root' | 'item' | 'trigger' | 'content' | 'indicator'
 type AccordionMeta = {
   disabled?: boolean
@@ -37,9 +33,9 @@ type AccordionMeta = {
 
 type AccordionContextValue = {
   value: ItemId[]
-  snapshot: AccordionComputed
+  expandedSet: Set<ItemId>
   store: NodeStore<AccordionRole, AccordionMeta>
-  send: Send<AccordionEvents>
+  toggle: (itemId: ItemId) => void
   disabled: boolean
   orientation: 'vertical' | 'horizontal'
   getEnabledTriggerIds: () => ItemId[]
@@ -121,24 +117,24 @@ const RootInner = forwardRef<HTMLDivElement, RootProps>(
       role: 'root',
     })
 
-    // Controllable state
-    const [value = [], setValueState] = useControllableState({
+    const [value = [], setValue] = useControllableState({
       prop: valueProp,
       defaultProp: defaultValue,
       onChange: onValueChange,
     })
 
-    // Machine
-    const [snapshot, send] = useMachine(accordionMachine, {
-      input: {
-        value,
-        multiple,
-        collapsible,
-        onValueChange: setValueState,
-      },
-    })
+    const expandedSet = useMemo(() => new Set(value), [value])
 
-    // Helpers
+    const toggle = (itemId: ItemId) => {
+      const isExpanded = value.includes(itemId)
+      if (isExpanded) {
+        if (!collapsible && value.length === 1) return
+        setValue(value.filter((id) => id !== itemId))
+      } else {
+        setValue(multiple ? [...value, itemId] : [itemId])
+      }
+    }
+
     const getEnabledTriggerIds = () => {
       const items = store.getNodesByRole('item')
       return items
@@ -150,7 +146,6 @@ const RootInner = forwardRef<HTMLDivElement, RootProps>(
       return store.getElement(itemId, 'trigger')
     }
 
-    // Keyboard handler
     const handleKeyDown = (e: React.KeyboardEvent) => {
       const enabledIds = getEnabledTriggerIds()
       if (enabledIds.length === 0) return
@@ -196,9 +191,9 @@ const RootInner = forwardRef<HTMLDivElement, RootProps>(
 
     const contextValue: AccordionContextValue = {
       value,
-      snapshot,
+      expandedSet,
       store,
-      send,
+      toggle,
       disabled,
       orientation,
       getEnabledTriggerIds,
@@ -237,7 +232,7 @@ export type ItemProps = {
 
 export const Item = forwardRef<HTMLDivElement, ItemProps>(
   ({ children, value: itemId, disabled = false, ...rest }, forwardedRef) => {
-    const { snapshot, disabled: rootDisabled } = useAccordionContext()
+    const { expandedSet, disabled: rootDisabled } = useAccordionContext()
 
     const isDisabled = rootDisabled || disabled
 
@@ -246,7 +241,7 @@ export const Item = forwardRef<HTMLDivElement, ItemProps>(
       id: itemId,
       meta: { disabled: isDisabled },
     })
-    const isExpanded = snapshot.expandedSet.has(itemId)
+    const isExpanded = expandedSet.has(itemId)
 
     const itemContextValue: ItemContextValue = {
       itemId,
@@ -282,7 +277,7 @@ export type ItemTriggerProps = ComponentPropsWithoutRef<'button'>
 
 export const ItemTrigger = forwardRef<HTMLButtonElement, ItemTriggerProps>(
   ({ children, ...rest }, forwardedRef) => {
-    const { store, send } = useAccordionContext()
+    const { store, toggle } = useAccordionContext()
     const { itemId, isDisabled, isExpanded } = useItemContext()
 
     const { ref, domId } = useNode<AccordionRole>({
@@ -290,7 +285,6 @@ export const ItemTrigger = forwardRef<HTMLButtonElement, ItemTriggerProps>(
       id: itemId,
     })
 
-    // Subscribe to content element id
     const contentId = useStoreSubscribe(
       store,
       (s) => s.getElement(itemId, 'content')?.id ?? null,
@@ -298,7 +292,7 @@ export const ItemTrigger = forwardRef<HTMLButtonElement, ItemTriggerProps>(
 
     const handleClick = () => {
       if (!isDisabled) {
-        send('TOGGLE', { itemId })
+        toggle(itemId)
       }
     }
 
@@ -351,25 +345,21 @@ export const ItemContent = forwardRef<HTMLDivElement, ItemContentProps>(
       id: itemId,
     })
 
-    // Track if content was ever expanded (for lazyMount)
     const [wasEverExpanded, setWasEverExpanded] = useState(isExpanded)
     if (isExpanded && !wasEverExpanded) {
       setWasEverExpanded(true)
     }
 
-    // Animation state
     const { isPresent, transitionState } = usePresence({
       isVisible: isExpanded,
       resolveElement: () => elementRef.current,
     })
 
-    // Subscribe to trigger element id
     const triggerId = useStoreSubscribe(
       store,
       (s) => s.getElement(itemId, 'trigger')?.id ?? null,
     )
 
-    // Determine if we should render
     const shouldRender = (() => {
       if (lazyMount && !wasEverExpanded) {
         return false

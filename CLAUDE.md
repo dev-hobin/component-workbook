@@ -14,70 +14,59 @@ pnpm test       # Run Vitest tests
 
 ## Architecture
 
-This is a React component library that implements accessible UI components following W3C APG patterns. The codebase uses a **Machine + Shell** architecture pattern that separates pure state logic from React integration.
+This is a React component library that implements accessible UI components following W3C APG patterns. Each component uses **hooks + direct functions** for state management — no external state machine library.
 
-### Machine + Shell Pattern
+### Component Structure
 
-Each component has two main parts:
+Each component lives in `src/components/*/index.tsx` as a single file:
 
-**Machine** (`src/components/*/machine.ts`)
-- Pure TypeScript with no React dependencies
-- Defines input, events, computed, and action types
-- Uses `createMachine` from `controlled-machine` package
-- Integrates via `useMachine` hook from `controlled-machine/react`
-
-**Shell/Index** (`src/components/*/index.tsx`)
 - React compound components (Root, Item, Trigger, Content, etc.)
-- Integrates machine via `useMachine` hook which returns `{ send, computed }`
-- Handles DOM interactions and accessibility attributes
+- State managed via `useState` + `useControllableState` in Root
+- Logic as inline functions passed through React Context
+- DOM effects via `useEffect`/`useLayoutEffect`
+- ARIA attributes managed directly in component props
 
 ```ts
-// Example: machine.ts
-export const accordionMachine = createMachine<{
-  input: AccordionInput
-  events: AccordionEvents
-  computed: AccordionComputed
-  actions: AccordionActions
-}>({
-  computed: {
-    expandedSet: (input) => new Set(input.value),
-  },
-  on: {
-    TOGGLE: 'toggle',
-    EXPAND: 'expand',
-  },
-  actions: {
-    toggle: (context, payload) => { /* ... */ },
-  },
-})
+// Example: accordion Root pattern
+function Root(props) {
+  const [value, setValue] = useControllableState(...)
+  const expandedSet = useMemo(() => new Set(value), [value])
+
+  const toggle = (itemId: string) => {
+    // direct state mutation logic
+  }
+
+  // Context provides: toggle, expandedSet, etc.
+}
 ```
 
 ### Primitives (`src/primitives/`)
 
 Component infrastructure for tracking nodes across the tree:
 
-- **NodeStore** (`node-store.ts`): Tracks nodes by `id:role` keys with parent-child relationships
-- **useNode** (`use-node.ts`): Registers DOM elements to the store with role and metadata
+- **NodeStore** (`node-store.ts`): Tracks nodes by `id:role` keys with parent-child relationships. Supports `updateMeta` for dynamic meta updates and `getNodesByRoleInDomOrder` for DOM-ordered queries.
+- **useNode** (`use-node.ts`): Registers DOM elements to the store with role and metadata. Auto-syncs meta changes via `useEffect`.
 - **useStoreSubscribe** (`use-store-subscribe.ts`): Subscribe to store changes using `useSyncExternalStore`
 - **ParentProvider/useParentId** (`use-parent-context.tsx`): Tracks parent-child relationships via React context
+- **DismissableLayer** (`dismissable-layer.tsx`): Global layer stack for escape key and outside click handling
 
 ### Utility Functions (`src/utils/`)
 
 - `compose-refs`: Merges multiple refs into one
 - `merge-props`: Merges props with special handling for event handlers (compose), className (concat), and style (merge)
-- `compose-event-handlers`: Chains event handlers, external runs first and can call `preventDefault()` to cancel internal
+- `compose-event-handlers`: Chains event handlers — `overrideHandler` runs first, can call `preventDefault()` to cancel `originalHandler`
 
 ### Hooks (`src/hooks/`)
 
 - `use-latest-ref`: Ref that always holds the latest value
 - `use-presence`: Animation presence tracking with transition states
-- `use-stable-callback`: Stable callback reference that always calls latest version
+- `use-highlight`: Index-based highlight navigation (`useHighlight(count, { loop? })` → `{ index, set, next, prev, first, last, clear }`). Used by Menu, Combobox, Tree. `loop` wraps at boundaries; `index=-1` auto-resolves (`next→0`, `prev→last`).
+- `use-character-search`: Typeahead search with 500ms buffer (`useCharacterSearch(getItems, onMatch, startIndex?)` → `(char) => void`). Used by Menu and Tree for keyboard character navigation.
 
 ## Key Dependencies
 
 - React 19 with React Compiler (`babel-plugin-react-compiler`)
 - Tailwind CSS v4 via Vite plugin
-- `controlled-machine` for state machine logic
 - `@radix-ui/react-use-controllable-state` for controlled/uncontrolled state
 - `@floating-ui/dom` for positioning
 - `focus-trap` for focus management
@@ -86,6 +75,7 @@ Component infrastructure for tracking nodes across the tree:
 
 - Components export compound component objects (e.g., `Accordion.Root`, `Accordion.Item`)
 - State is lifted to Root via Context, child components access via hooks
-- Context passed to machine includes state, setters, options, and lazy helper functions (e.g., `getEnabledItemIds`)
-- ARIA attributes are managed in Shell components
+- Root contains all state (`useState`/`useControllableState`) and action functions
+- NodeStore queries replace event payload data passing — functions access store directly
+- ARIA attributes are managed directly in component props
 - Animation uses CSS grid-template-rows trick for height transitions
