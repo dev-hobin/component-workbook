@@ -541,17 +541,6 @@ export const Trigger = forwardRef<HTMLButtonElement, TriggerProps>(
       id: comboboxId,
     })
 
-    const handleClick = () => {
-      if (isOpen) {
-        close()
-      } else {
-        open()
-      }
-      // Toggle 후 input으로 포커스
-      const inputEl = store.getElement(comboboxId, 'input')
-      ;(inputEl as HTMLInputElement | null)?.focus()
-    }
-
     return (
       <button
         ref={composeRefs(forwardedRef, ref)}
@@ -564,7 +553,15 @@ export const Trigger = forwardRef<HTMLButtonElement, TriggerProps>(
             'aria-expanded': isOpen,
             'data-part': 'trigger',
             'data-state': isOpen ? 'open' : 'closed',
-            onClick: handleClick,
+            onClick: () => {
+              if (isOpen) {
+                close()
+              } else {
+                open()
+              }
+              const inputEl = store.getElement(comboboxId, 'input')
+              ;(inputEl as HTMLInputElement | null)?.focus()
+            },
           },
           rest,
         )}
@@ -722,32 +719,6 @@ export const Option = forwardRef<HTMLLIElement, OptionProps>(
     const highlighted = isHighlighted(highlightedOptionId, optionId)
     const selected = isSelected(selectedValue, value)
 
-    const handleClick = () => {
-      if (disabled) return
-      const option: ComboboxOption = {
-        id: optionId,
-        value,
-        label: displayLabel,
-        disabled,
-      }
-      selectOption(option)
-      focusInput()
-    }
-
-    const handleMouseEnter = () => {
-      if (disabled) return
-      const enabled = getEnabledOptions()
-      const idx = enabled.findIndex((o) => o.id === optionId)
-      if (idx >= 0) {
-        highlight.set(idx)
-      }
-    }
-
-    // mousedown에서 preventDefault로 input blur 방지
-    const handleMouseDown = (event: React.MouseEvent) => {
-      event.preventDefault()
-    }
-
     return (
       <li
         ref={composeRefs(forwardedRef, ref)}
@@ -760,9 +731,23 @@ export const Option = forwardRef<HTMLLIElement, OptionProps>(
             'data-part': 'option',
             'data-highlighted': highlighted || undefined,
             'data-disabled': disabled || undefined,
-            onMouseDown: handleMouseDown,
-            onClick: handleClick,
-            onMouseEnter: handleMouseEnter,
+            onMouseDown: (event: React.MouseEvent) => event.preventDefault(),
+            onClick: () => {
+              if (disabled) return
+              selectOption({
+                id: optionId,
+                value,
+                label: displayLabel,
+                disabled,
+              })
+              focusInput()
+            },
+            onMouseEnter: () => {
+              if (disabled) return
+              const enabled = getEnabledOptions()
+              const idx = enabled.findIndex((o) => o.id === optionId)
+              if (idx >= 0) highlight.set(idx)
+            },
           },
           rest,
         )}

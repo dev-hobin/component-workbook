@@ -3,7 +3,7 @@ import {
   forwardRef,
   useContext,
   useMemo,
-  useState,
+  useRef,
   type ComponentPropsWithoutRef,
 } from 'react'
 import { useControllableState } from '@radix-ui/react-use-controllable-state'
@@ -290,12 +290,6 @@ export const ItemTrigger = forwardRef<HTMLButtonElement, ItemTriggerProps>(
       (s) => s.getElement(itemId, 'content')?.id ?? null,
     )
 
-    const handleClick = () => {
-      if (!isDisabled) {
-        toggle(itemId)
-      }
-    }
-
     return (
       <h3>
         <button
@@ -311,7 +305,9 @@ export const ItemTrigger = forwardRef<HTMLButtonElement, ItemTriggerProps>(
               'data-part': 'trigger',
               'data-state': isExpanded ? 'open' : 'closed',
               'data-disabled': isDisabled || undefined,
-              onClick: handleClick,
+              onClick: () => {
+                if (!isDisabled) toggle(itemId)
+              },
             },
             rest,
           )}
@@ -345,10 +341,8 @@ export const ItemContent = forwardRef<HTMLDivElement, ItemContentProps>(
       id: itemId,
     })
 
-    const [wasEverExpanded, setWasEverExpanded] = useState(isExpanded)
-    if (isExpanded && !wasEverExpanded) {
-      setWasEverExpanded(true)
-    }
+    const wasEverExpandedRef = useRef(isExpanded)
+    if (isExpanded) wasEverExpandedRef.current = true
 
     const { isPresent, transitionState } = usePresence({
       isVisible: isExpanded,
@@ -361,7 +355,7 @@ export const ItemContent = forwardRef<HTMLDivElement, ItemContentProps>(
     )
 
     const shouldRender = (() => {
-      if (lazyMount && !wasEverExpanded) {
+      if (lazyMount && !wasEverExpandedRef.current) {
         return false
       }
       if (unmountOnExit && !isPresent) {

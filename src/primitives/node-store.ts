@@ -102,7 +102,6 @@ export function createNodeStore<
       if (!existing) return
 
       existing.meta = meta
-      notify()
     },
 
     unregister(id, role) {

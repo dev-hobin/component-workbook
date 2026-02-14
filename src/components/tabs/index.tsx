@@ -338,16 +338,6 @@ export const Trigger = forwardRef<HTMLButtonElement, TriggerProps>(
       (s) => s.getElement(triggerValue, 'content')?.id ?? null,
     )
 
-    const handleClick = () => {
-      if (!isDisabled && triggerValue !== value) {
-        setValue(triggerValue)
-      }
-    }
-
-    const handleFocus = () => {
-      setFocusedValue(triggerValue)
-    }
-
     return (
       <button
         ref={composeRefs(forwardedRef, ref)}
@@ -364,8 +354,10 @@ export const Trigger = forwardRef<HTMLButtonElement, TriggerProps>(
             'data-part': 'trigger',
             'data-state': isActive ? 'active' : 'inactive',
             'data-disabled': isDisabled || undefined,
-            onClick: handleClick,
-            onFocus: handleFocus,
+            onClick: () => {
+              if (!isDisabled && triggerValue !== value) setValue(triggerValue)
+            },
+            onFocus: () => setFocusedValue(triggerValue),
           },
           rest,
         )}
@@ -400,11 +392,8 @@ export const Content = forwardRef<HTMLDivElement, ContentProps>(
       id: contentValue,
     })
 
-    // Track if content was ever active (for lazyMount)
-    const [wasEverActive, setWasEverActive] = useState(isActive)
-    if (isActive && !wasEverActive) {
-      setWasEverActive(true)
-    }
+    const wasEverActiveRef = useRef(isActive)
+    if (isActive) wasEverActiveRef.current = true
 
     // Animation state
     const { isPresent, transitionState } = usePresence({
@@ -420,7 +409,7 @@ export const Content = forwardRef<HTMLDivElement, ContentProps>(
 
     // Determine if we should render
     const shouldRender = (() => {
-      if (lazyMount && !wasEverActive) {
+      if (lazyMount && !wasEverActiveRef.current) {
         return false
       }
       if (unmountOnExit && !isPresent) {
