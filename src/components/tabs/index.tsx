@@ -5,7 +5,6 @@ import {
   useState,
   useRef,
   useLayoutEffect,
-  useCallback,
   useEffect,
   type ComponentPropsWithoutRef,
 } from 'react'
@@ -15,13 +14,13 @@ import { usePresence } from '../../hooks/use-presence'
 import { composeRefs } from '../../utils/compose-refs'
 import { mergeProps } from '../../utils/merge-props'
 
+import { useIdMap, createIdMapKey, type IdMap } from '../../primitives/id-map'
 import {
-  NodeStoreProvider,
-  useNodeStore,
-} from '../../primitives/use-node-store'
-import { useNode } from '../../primitives/use-node'
-import { useStoreSubscribe } from '../../primitives/use-store-subscribe'
-import type { NodeStore } from '../../primitives/node-store'
+  createElementRegistry,
+  type ElementRegistry,
+} from '../../primitives/element-registry'
+import { RegistrationProvider } from '../../primitives/registration-context'
+import { useRegister } from '../../primitives/use-register'
 
 // ============================================
 // Types
@@ -29,23 +28,21 @@ import type { NodeStore } from '../../primitives/node-store'
 
 export type TabValue = string
 
-type TabsRole = 'root' | 'list' | 'trigger' | 'content' | 'indicator'
 type TabsMeta = {
   disabled?: boolean
 }
 
 type TabsContextValue = {
+  idMap: IdMap
+  registry: ElementRegistry<TabsMeta>
   value: TabValue
   setValue: (value: TabValue) => void
   focusedValue: TabValue | null
   setFocusedValue: (value: TabValue | null) => void
-  store: NodeStore<TabsRole, TabsMeta>
   disabled: boolean
   orientation: 'horizontal' | 'vertical'
   activationMode: 'automatic' | 'manual'
   loop: boolean
-  getEnabledValues: () => TabValue[]
-  getTriggerElement: (value: TabValue) => HTMLElement | null
   listRef: React.RefObject<HTMLDivElement | null>
 }
 
@@ -78,15 +75,7 @@ export type RootProps = {
   loop?: boolean
 } & Omit<ComponentPropsWithoutRef<'div'>, 'defaultValue'>
 
-export function Root(props: RootProps) {
-  return (
-    <NodeStoreProvider<TabsRole, TabsMeta>>
-      <RootInner {...props} />
-    </NodeStoreProvider>
-  )
-}
-
-const RootInner = forwardRef<HTMLDivElement, RootProps>(
+export const Root = forwardRef<HTMLDivElement, RootProps>(
   (
     {
       children,
@@ -101,14 +90,16 @@ const RootInner = forwardRef<HTMLDivElement, RootProps>(
     },
     forwardedRef,
   ) => {
-    const store = useNodeStore<TabsRole, TabsMeta>()
+    const [idMap, idActions] = useIdMap()
+
+    const registryRef = useRef<ElementRegistry<TabsMeta>>(null!)
+    if (!registryRef.current) {
+      registryRef.current = createElementRegistry<TabsMeta>()
+    }
+    const registry = registryRef.current
+
     const listRef = useRef<HTMLDivElement>(null)
 
-    const { ref } = useNode<TabsRole>({
-      role: 'root',
-    })
-
-    // Controllable state
     const [valueState, setValueState] = useControllableState<string>({
       prop: valueProp,
       defaultProp: defaultValue ?? '',
@@ -116,56 +107,40 @@ const RootInner = forwardRef<HTMLDivElement, RootProps>(
     })
     const value = valueState ?? ''
 
-    // Internal state: focus tracking for keyboard navigation
     const [focusedValue, setFocusedValue] = useState<TabValue | null>(null)
 
-    // Helper to get enabled trigger values
-    const getEnabledValues = useCallback(() => {
-      const triggers = store.getNodesByRole('trigger')
-      return triggers
-        .filter((node) => !node.meta.disabled && !disabled)
-        .map((node) => node.id)
-    }, [store, disabled])
-
-    // Helper to get trigger element
-    const getTriggerElement = useCallback(
-      (triggerValue: TabValue) => {
-        return store.getElement(triggerValue, 'trigger')
-      },
-      [store],
-    )
-
     const contextValue: TabsContextValue = {
+      idMap,
+      registry,
       value,
       setValue: setValueState,
       focusedValue,
       setFocusedValue,
-      store,
       disabled,
       orientation,
       activationMode,
       loop,
-      getEnabledValues,
-      getTriggerElement,
       listRef,
     }
 
     return (
-      <TabsContext.Provider value={contextValue}>
-        <div
-          ref={composeRefs(forwardedRef, ref)}
-          {...mergeProps(
-            {
-              'data-part': 'root',
-              'data-orientation': orientation,
-              'data-disabled': disabled || undefined,
-            },
-            rest,
-          )}
-        >
-          {children}
-        </div>
-      </TabsContext.Provider>
+      <RegistrationProvider idActions={idActions} registry={registry}>
+        <TabsContext.Provider value={contextValue}>
+          <div
+            ref={forwardedRef}
+            {...mergeProps(
+              {
+                'data-part': 'root',
+                'data-orientation': orientation,
+                'data-disabled': disabled || undefined,
+              },
+              rest,
+            )}
+          >
+            {children}
+          </div>
+        </TabsContext.Provider>
+      </RegistrationProvider>
     )
   },
 )
@@ -183,28 +158,20 @@ export const List = forwardRef<HTMLDivElement, ListProps>(
       setValue,
       focusedValue,
       setFocusedValue,
+      registry,
       orientation,
       disabled,
       activationMode,
       loop,
-      getEnabledValues,
-      getTriggerElement,
       listRef,
     } = useTabsContext()
 
-    const { ref } = useNode<TabsRole>({
-      role: 'list',
-    })
-
-    // Focus DOM element when focusedValue changes
     useEffect(() => {
       if (focusedValue) {
-        const element = getTriggerElement(focusedValue)
-        element?.focus()
+        registry.getElement(focusedValue, 'trigger')?.focus()
       }
-    }, [focusedValue, getTriggerElement])
+    }, [focusedValue, registry])
 
-    // Navigate and optionally activate (automatic mode)
     const navigateTo = (targetValue: TabValue) => {
       setFocusedValue(targetValue)
       if (activationMode === 'automatic' && targetValue !== value) {
@@ -212,7 +179,6 @@ export const List = forwardRef<HTMLDivElement, ListProps>(
       }
     }
 
-    // Keyboard navigation
     const handleKeyDown = (e: React.KeyboardEvent) => {
       if (disabled) return
 
@@ -223,7 +189,10 @@ export const List = forwardRef<HTMLDivElement, ListProps>(
       switch (e.key) {
         case nextKey: {
           e.preventDefault()
-          const enabledValues = getEnabledValues()
+          const triggers = registry.getEntriesByRoleInDomOrder('trigger')
+          const enabledValues = triggers
+            .filter((entry) => !entry.meta.disabled && !disabled)
+            .map((entry) => entry.value)
           if (enabledValues.length === 0) return
 
           const currentIndex = enabledValues.indexOf(focusedValue ?? value)
@@ -242,7 +211,10 @@ export const List = forwardRef<HTMLDivElement, ListProps>(
         }
         case prevKey: {
           e.preventDefault()
-          const enabledValues = getEnabledValues()
+          const triggers = registry.getEntriesByRoleInDomOrder('trigger')
+          const enabledValues = triggers
+            .filter((entry) => !entry.meta.disabled && !disabled)
+            .map((entry) => entry.value)
           if (enabledValues.length === 0) return
 
           const currentIndex = enabledValues.indexOf(focusedValue ?? value)
@@ -251,7 +223,8 @@ export const List = forwardRef<HTMLDivElement, ListProps>(
           if (currentIndex === -1) {
             prevIndex = enabledValues.length - 1
           } else if (loop) {
-            prevIndex = (currentIndex - 1 + enabledValues.length) % enabledValues.length
+            prevIndex =
+              (currentIndex - 1 + enabledValues.length) % enabledValues.length
           } else {
             prevIndex = Math.max(currentIndex - 1, 0)
           }
@@ -261,14 +234,20 @@ export const List = forwardRef<HTMLDivElement, ListProps>(
         }
         case 'Home': {
           e.preventDefault()
-          const enabledValues = getEnabledValues()
+          const triggers = registry.getEntriesByRoleInDomOrder('trigger')
+          const enabledValues = triggers
+            .filter((entry) => !entry.meta.disabled && !disabled)
+            .map((entry) => entry.value)
           if (enabledValues.length === 0) return
           navigateTo(enabledValues[0])
           break
         }
         case 'End': {
           e.preventDefault()
-          const enabledValues = getEnabledValues()
+          const triggers = registry.getEntriesByRoleInDomOrder('trigger')
+          const enabledValues = triggers
+            .filter((entry) => !entry.meta.disabled && !disabled)
+            .map((entry) => entry.value)
           if (enabledValues.length === 0) return
           navigateTo(enabledValues[enabledValues.length - 1])
           break
@@ -285,7 +264,7 @@ export const List = forwardRef<HTMLDivElement, ListProps>(
 
     return (
       <div
-        ref={composeRefs(forwardedRef, ref, listRef)}
+        ref={composeRefs(forwardedRef, listRef)}
         {...mergeProps(
           {
             role: 'tablist',
@@ -314,29 +293,29 @@ export type TriggerProps = {
 } & Omit<ComponentPropsWithoutRef<'button'>, 'value'>
 
 export const Trigger = forwardRef<HTMLButtonElement, TriggerProps>(
-  ({ children, value: triggerValue, disabled = false, ...rest }, forwardedRef) => {
+  (
+    { children, value: triggerValue, id: userDomId, disabled = false, ...rest },
+    forwardedRef,
+  ) => {
     const {
+      idMap,
       value,
       setValue,
       setFocusedValue,
-      store,
       disabled: rootDisabled,
     } = useTabsContext()
 
     const isDisabled = rootDisabled || disabled
     const isActive = value === triggerValue
 
-    const { ref, domId } = useNode<TabsRole, TabsMeta>({
+    const { ref, domId } = useRegister<TabsMeta>({
+      value: triggerValue,
       role: 'trigger',
-      id: triggerValue,
+      id: userDomId,
       meta: { disabled: isDisabled },
     })
 
-    // Subscribe to content element id
-    const contentId = useStoreSubscribe(
-      store,
-      (s) => s.getElement(triggerValue, 'content')?.id ?? null,
-    )
+    const contentDomId = idMap.get(createIdMapKey(triggerValue, 'content'))
 
     return (
       <button
@@ -349,7 +328,7 @@ export const Trigger = forwardRef<HTMLButtonElement, TriggerProps>(
             disabled: isDisabled,
             tabIndex: isActive ? 0 : -1,
             'aria-selected': isActive,
-            'aria-controls': contentId ?? undefined,
+            'aria-controls': contentDomId ?? undefined,
             'aria-disabled': isDisabled || undefined,
             'data-part': 'trigger',
             'data-state': isActive ? 'active' : 'inactive',
@@ -380,34 +359,38 @@ export type ContentProps = {
 
 export const Content = forwardRef<HTMLDivElement, ContentProps>(
   (
-    { children, value: contentValue, lazyMount = false, unmountOnExit = false, ...rest },
+    {
+      children,
+      value: contentValue,
+      id: userDomId,
+      lazyMount = false,
+      unmountOnExit = false,
+      ...rest
+    },
     forwardedRef,
   ) => {
-    const { value, store } = useTabsContext()
+    const { idMap, value } = useTabsContext()
 
     const isActive = value === contentValue
 
-    const { ref, domId, elementRef } = useNode<TabsRole>({
+    const { ref, domId } = useRegister({
+      value: contentValue,
       role: 'content',
-      id: contentValue,
+      id: userDomId,
     })
+
+    const elementRef = useRef<HTMLDivElement>(null)
 
     const wasEverActiveRef = useRef(isActive)
     if (isActive) wasEverActiveRef.current = true
 
-    // Animation state
     const { isPresent, transitionState } = usePresence({
       isVisible: isActive,
       resolveElement: () => elementRef.current,
     })
 
-    // Subscribe to trigger element id
-    const triggerId = useStoreSubscribe(
-      store,
-      (s) => s.getElement(contentValue, 'trigger')?.id ?? null,
-    )
+    const triggerDomId = idMap.get(createIdMapKey(contentValue, 'trigger'))
 
-    // Determine if we should render
     const shouldRender = (() => {
       if (lazyMount && !wasEverActiveRef.current) {
         return false
@@ -424,13 +407,13 @@ export const Content = forwardRef<HTMLDivElement, ContentProps>(
 
     return (
       <div
-        ref={composeRefs(forwardedRef, ref)}
+        ref={composeRefs(forwardedRef, ref, elementRef)}
         {...mergeProps(
           {
             role: 'tabpanel',
             id: domId,
             tabIndex: 0,
-            'aria-labelledby': triggerId ?? undefined,
+            'aria-labelledby': triggerDomId ?? undefined,
             'data-part': 'content',
             'data-state': isActive ? 'active' : 'inactive',
             'data-transition': transitionState,
@@ -453,17 +436,14 @@ export type IndicatorProps = ComponentPropsWithoutRef<'div'>
 
 export const Indicator = forwardRef<HTMLDivElement, IndicatorProps>(
   ({ style, ...rest }, forwardedRef) => {
-    const { value, orientation, getTriggerElement, listRef } = useTabsContext()
+    const { value, registry, orientation, listRef } = useTabsContext()
 
-    const { ref } = useNode<TabsRole>({
-      role: 'indicator',
-    })
+    const [indicatorStyle, setIndicatorStyle] = useState<React.CSSProperties>(
+      {},
+    )
 
-    const [indicatorStyle, setIndicatorStyle] = useState<React.CSSProperties>({})
-
-    // Update indicator position when value changes
     useLayoutEffect(() => {
-      const triggerElement = getTriggerElement(value)
+      const triggerElement = registry.getElement(value, 'trigger')
       const listElement = listRef.current
 
       if (!triggerElement || !listElement) {
@@ -484,11 +464,11 @@ export const Indicator = forwardRef<HTMLDivElement, IndicatorProps>(
           height: triggerRect.height,
         })
       }
-    }, [value, orientation, getTriggerElement, listRef])
+    }, [value, orientation, registry, listRef])
 
     return (
       <div
-        ref={composeRefs(forwardedRef, ref)}
+        ref={forwardedRef}
         {...mergeProps(
           {
             'aria-hidden': true,

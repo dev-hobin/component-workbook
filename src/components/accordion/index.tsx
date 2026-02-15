@@ -12,13 +12,13 @@ import { usePresence } from '../../hooks/use-presence'
 import { composeRefs } from '../../utils/compose-refs'
 import { mergeProps } from '../../utils/merge-props'
 
+import { useIdMap, createIdMapKey, type IdMap } from '../../primitives/id-map'
 import {
-  NodeStoreProvider,
-  useNodeStore,
-} from '../../primitives/use-node-store'
-import { useNode } from '../../primitives/use-node'
-import { useStoreSubscribe } from '../../primitives/use-store-subscribe'
-import type { NodeStore } from '../../primitives/node-store'
+  createElementRegistry,
+  type ElementRegistry,
+} from '../../primitives/element-registry'
+import { RegistrationProvider } from '../../primitives/registration-context'
+import { useRegister } from '../../primitives/use-register'
 
 // ============================================
 // Types
@@ -26,20 +26,18 @@ import type { NodeStore } from '../../primitives/node-store'
 
 export type ItemId = string
 
-type AccordionRole = 'root' | 'item' | 'trigger' | 'content' | 'indicator'
 type AccordionMeta = {
   disabled?: boolean
 }
 
 type AccordionContextValue = {
+  idMap: IdMap
+  registry: ElementRegistry<AccordionMeta>
   value: ItemId[]
   expandedSet: Set<ItemId>
-  store: NodeStore<AccordionRole, AccordionMeta>
   toggle: (itemId: ItemId) => void
   disabled: boolean
   orientation: 'vertical' | 'horizontal'
-  getEnabledTriggerIds: () => ItemId[]
-  getTriggerElement: (itemId: ItemId) => HTMLElement | null
 }
 
 type ItemContextValue = {
@@ -88,15 +86,7 @@ export type RootProps = {
   orientation?: 'vertical' | 'horizontal'
 } & ComponentPropsWithoutRef<'div'>
 
-export function Root(props: RootProps) {
-  return (
-    <NodeStoreProvider<AccordionRole, AccordionMeta>>
-      <RootInner {...props} />
-    </NodeStoreProvider>
-  )
-}
-
-const RootInner = forwardRef<HTMLDivElement, RootProps>(
+export const Root = forwardRef<HTMLDivElement, RootProps>(
   (
     {
       children,
@@ -111,11 +101,13 @@ const RootInner = forwardRef<HTMLDivElement, RootProps>(
     },
     forwardedRef,
   ) => {
-    const store = useNodeStore<AccordionRole, AccordionMeta>()
+    const [idMap, idActions] = useIdMap()
 
-    const { ref } = useNode<AccordionRole>({
-      role: 'root',
-    })
+    const registryRef = useRef<ElementRegistry<AccordionMeta>>(null!)
+    if (!registryRef.current) {
+      registryRef.current = createElementRegistry<AccordionMeta>()
+    }
+    const registry = registryRef.current
 
     const [value = [], setValue] = useControllableState({
       prop: valueProp,
@@ -135,28 +127,21 @@ const RootInner = forwardRef<HTMLDivElement, RootProps>(
       }
     }
 
-    const getEnabledTriggerIds = () => {
-      const items = store.getNodesByRole('item')
-      return items
-        .filter((node) => !node.meta.disabled && !disabled)
-        .map((node) => node.id)
-    }
-
-    const getTriggerElement = (itemId: ItemId) => {
-      return store.getElement(itemId, 'trigger')
-    }
-
     const handleKeyDown = (e: React.KeyboardEvent) => {
-      const enabledIds = getEnabledTriggerIds()
-      if (enabledIds.length === 0) return
+      const items = registry.getEntriesByRoleInDomOrder('item')
+      const enabledItems = items.filter(
+        (entry) => !entry.meta.disabled && !disabled,
+      )
+      if (enabledItems.length === 0) return
 
       const isVertical = orientation === 'vertical'
       const nextKey = isVertical ? 'ArrowDown' : 'ArrowRight'
       const prevKey = isVertical ? 'ArrowUp' : 'ArrowLeft'
 
       const currentElement = document.activeElement
-      const currentIndex = enabledIds.findIndex(
-        (id) => getTriggerElement(id) === currentElement,
+      const currentIndex = enabledItems.findIndex(
+        (entry) =>
+          registry.getElement(entry.value, 'trigger') === currentElement,
       )
 
       let targetIndex: number | null = null
@@ -165,14 +150,16 @@ const RootInner = forwardRef<HTMLDivElement, RootProps>(
         case nextKey:
           e.preventDefault()
           targetIndex =
-            currentIndex === -1 ? 0 : (currentIndex + 1) % enabledIds.length
+            currentIndex === -1
+              ? 0
+              : (currentIndex + 1) % enabledItems.length
           break
         case prevKey:
           e.preventDefault()
           targetIndex =
             currentIndex === -1
-              ? enabledIds.length - 1
-              : (currentIndex - 1 + enabledIds.length) % enabledIds.length
+              ? enabledItems.length - 1
+              : (currentIndex - 1 + enabledItems.length) % enabledItems.length
           break
         case 'Home':
           e.preventDefault()
@@ -180,43 +167,45 @@ const RootInner = forwardRef<HTMLDivElement, RootProps>(
           break
         case 'End':
           e.preventDefault()
-          targetIndex = enabledIds.length - 1
+          targetIndex = enabledItems.length - 1
           break
       }
 
       if (targetIndex !== null) {
-        getTriggerElement(enabledIds[targetIndex])?.focus()
+        const targetValue = enabledItems[targetIndex].value
+        registry.getElement(targetValue, 'trigger')?.focus()
       }
     }
 
     const contextValue: AccordionContextValue = {
+      idMap,
+      registry,
       value,
       expandedSet,
-      store,
       toggle,
       disabled,
       orientation,
-      getEnabledTriggerIds,
-      getTriggerElement,
     }
 
     return (
-      <AccordionContext.Provider value={contextValue}>
-        <div
-          ref={composeRefs(forwardedRef, ref)}
-          {...mergeProps(
-            {
-              'data-part': 'root',
-              'data-orientation': orientation,
-              'data-disabled': disabled || undefined,
-              onKeyDown: handleKeyDown,
-            },
-            rest,
-          )}
-        >
-          {children}
-        </div>
-      </AccordionContext.Provider>
+      <RegistrationProvider idActions={idActions} registry={registry}>
+        <AccordionContext.Provider value={contextValue}>
+          <div
+            ref={forwardedRef}
+            {...mergeProps(
+              {
+                'data-part': 'root',
+                'data-orientation': orientation,
+                'data-disabled': disabled || undefined,
+                onKeyDown: handleKeyDown,
+              },
+              rest,
+            )}
+          >
+            {children}
+          </div>
+        </AccordionContext.Provider>
+      </RegistrationProvider>
     )
   },
 )
@@ -236,11 +225,12 @@ export const Item = forwardRef<HTMLDivElement, ItemProps>(
 
     const isDisabled = rootDisabled || disabled
 
-    const { ref } = useNode<AccordionRole, AccordionMeta>({
+    const { ref } = useRegister<AccordionMeta>({
+      value: itemId,
       role: 'item',
-      id: itemId,
       meta: { disabled: isDisabled },
     })
+
     const isExpanded = expandedSet.has(itemId)
 
     const itemContextValue: ItemContextValue = {
@@ -276,19 +266,17 @@ export const Item = forwardRef<HTMLDivElement, ItemProps>(
 export type ItemTriggerProps = ComponentPropsWithoutRef<'button'>
 
 export const ItemTrigger = forwardRef<HTMLButtonElement, ItemTriggerProps>(
-  ({ children, ...rest }, forwardedRef) => {
-    const { store, toggle } = useAccordionContext()
+  ({ children, id: userDomId, ...rest }, forwardedRef) => {
+    const { idMap, toggle } = useAccordionContext()
     const { itemId, isDisabled, isExpanded } = useItemContext()
 
-    const { ref, domId } = useNode<AccordionRole>({
+    const { ref, domId } = useRegister({
+      value: itemId,
       role: 'trigger',
-      id: itemId,
+      id: userDomId,
     })
 
-    const contentId = useStoreSubscribe(
-      store,
-      (s) => s.getElement(itemId, 'content')?.id ?? null,
-    )
+    const contentDomId = idMap.get(createIdMapKey(itemId, 'content'))
 
     return (
       <h3>
@@ -300,7 +288,7 @@ export const ItemTrigger = forwardRef<HTMLButtonElement, ItemTriggerProps>(
               id: domId,
               disabled: isDisabled,
               'aria-expanded': isExpanded,
-              'aria-controls': contentId ?? undefined,
+              'aria-controls': contentDomId ?? undefined,
               'aria-disabled': isDisabled || undefined,
               'data-part': 'trigger',
               'data-state': isExpanded ? 'open' : 'closed',
@@ -330,16 +318,19 @@ export type ItemContentProps = {
 
 export const ItemContent = forwardRef<HTMLDivElement, ItemContentProps>(
   (
-    { children, lazyMount = false, unmountOnExit = false, ...rest },
+    { children, id: userDomId, lazyMount = false, unmountOnExit = false, ...rest },
     forwardedRef,
   ) => {
-    const { store } = useAccordionContext()
+    const { idMap } = useAccordionContext()
     const { itemId, isDisabled, isExpanded } = useItemContext()
 
-    const { ref, domId, elementRef } = useNode<AccordionRole>({
+    const { ref, domId } = useRegister({
+      value: itemId,
       role: 'content',
-      id: itemId,
+      id: userDomId,
     })
+
+    const elementRef = useRef<HTMLDivElement>(null)
 
     const wasEverExpandedRef = useRef(isExpanded)
     if (isExpanded) wasEverExpandedRef.current = true
@@ -349,10 +340,7 @@ export const ItemContent = forwardRef<HTMLDivElement, ItemContentProps>(
       resolveElement: () => elementRef.current,
     })
 
-    const triggerId = useStoreSubscribe(
-      store,
-      (s) => s.getElement(itemId, 'trigger')?.id ?? null,
-    )
+    const triggerDomId = idMap.get(createIdMapKey(itemId, 'trigger'))
 
     const shouldRender = (() => {
       if (lazyMount && !wasEverExpandedRef.current) {
@@ -370,12 +358,12 @@ export const ItemContent = forwardRef<HTMLDivElement, ItemContentProps>(
 
     return (
       <div
-        ref={composeRefs(forwardedRef, ref)}
+        ref={composeRefs(forwardedRef, ref, elementRef)}
         {...mergeProps(
           {
             id: domId,
             role: 'region',
-            'aria-labelledby': triggerId ?? undefined,
+            'aria-labelledby': triggerDomId ?? undefined,
             'data-part': 'content',
             'data-state': isExpanded ? 'open' : 'closed',
             'data-disabled': isDisabled || undefined,
@@ -399,16 +387,11 @@ export type ItemIndicatorProps = ComponentPropsWithoutRef<'span'>
 
 export const ItemIndicator = forwardRef<HTMLSpanElement, ItemIndicatorProps>(
   ({ children, ...rest }, forwardedRef) => {
-    const { itemId, isExpanded, isDisabled } = useItemContext()
-
-    const { ref } = useNode<AccordionRole>({
-      role: 'indicator',
-      id: itemId,
-    })
+    const { isExpanded, isDisabled } = useItemContext()
 
     return (
       <span
-        ref={composeRefs(forwardedRef, ref)}
+        ref={forwardedRef}
         {...mergeProps(
           {
             'aria-hidden': true,
