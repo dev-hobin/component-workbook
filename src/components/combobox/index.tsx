@@ -14,7 +14,7 @@ import { composeRefs } from '../../utils/compose-refs'
 import { mergeProps } from '../../utils/merge-props'
 import { DismissableLayer } from '../../primitives/dismissable-layer'
 
-import { useIdMap, createIdMapKey, type IdMap } from '../../primitives/id-map'
+import { useComponentRegistry, createComponentKey, type ComponentRegistry } from '../../primitives/component-registry'
 import {
   createElementRegistry,
   type ElementRegistry,
@@ -37,7 +37,7 @@ type ComboboxMeta = {
 
 type ComboboxContextValue = {
   comboboxId: string
-  idMap: IdMap
+  componentRegistry: ComponentRegistry
   registry: ElementRegistry<ComboboxMeta>
   isOpen: boolean
   inputValue: string
@@ -164,7 +164,7 @@ export function Root({
   loop = true,
   onSelect,
 }: RootProps) {
-  const [idMap, idActions] = useIdMap()
+  const [componentRegistry, componentActions] = useComponentRegistry()
 
   const registryRef = useRef<ElementRegistry<ComboboxMeta>>(null!)
   if (!registryRef.current) {
@@ -197,7 +197,7 @@ export function Root({
   useEffect(() => {
     if (highlightedValue) {
       requestAnimationFrame(() => {
-        const element = registry.getElement(highlightedValue, 'option')
+        const element = registry.getElement('option', highlightedValue)
         element?.scrollIntoView({ block: 'nearest' })
       })
     }
@@ -229,7 +229,7 @@ export function Root({
 
   const selectOption = useCallback(
     (optionValue: string) => {
-      const entry = registry.getEntry(optionValue, 'option')
+      const entry = registry.getEntry('option', optionValue)
       if (!entry || entry.meta.disabled) return
 
       setSelectedValue(optionValue)
@@ -253,14 +253,14 @@ export function Root({
   // Focus input helper
   const focusInput = useCallback(() => {
     requestAnimationFrame(() => {
-      const element = registry.getElement(comboboxId, 'input')
+      const element = registry.getElement('input', comboboxId)
       ;(element as HTMLInputElement | null)?.focus()
     })
   }, [registry, comboboxId])
 
   const contextValue: ComboboxContextValue = {
     comboboxId,
-    idMap,
+    componentRegistry,
     registry,
     isOpen,
     inputValue,
@@ -279,7 +279,7 @@ export function Root({
   }
 
   return (
-    <RegistrationProvider idActions={idActions} registry={registry}>
+    <RegistrationProvider componentActions={componentActions} elementRegistry={registry}>
       <ComboboxContext.Provider value={contextValue}>
         {children}
       </ComboboxContext.Provider>
@@ -295,7 +295,7 @@ export type LabelProps = ComponentPropsWithoutRef<'label'>
 
 export const Label = forwardRef<HTMLLabelElement, LabelProps>(
   ({ children, id: userDomId, ...rest }, forwardedRef) => {
-    const { comboboxId, idMap } = useComboboxContext()
+    const { comboboxId, componentRegistry } = useComboboxContext()
 
     const { ref, domId } = useRegister({
       value: comboboxId,
@@ -303,7 +303,7 @@ export const Label = forwardRef<HTMLLabelElement, LabelProps>(
       id: userDomId,
     })
 
-    const inputDomId = idMap.get(createIdMapKey(comboboxId, 'input'))
+    const inputDomId = componentRegistry.get(createComponentKey('input', comboboxId))
 
     return (
       <label
@@ -360,7 +360,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
   ({ id: userDomId, ...rest }, forwardedRef) => {
     const {
       comboboxId,
-      idMap,
+      componentRegistry,
       registry,
       isOpen,
       inputValue,
@@ -381,11 +381,11 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
       id: userDomId,
     })
 
-    const listboxDomId = idMap.get(createIdMapKey(comboboxId, 'listbox'))
+    const listboxDomId = componentRegistry.get(createComponentKey('listbox', comboboxId))
 
     // Highlighted option의 domId
     const highlightedOptionDomId = highlightedValue
-      ? idMap.get(createIdMapKey(highlightedValue, 'option'))
+      ? componentRegistry.get(createComponentKey('option', highlightedValue))
       : undefined
 
     // Keyboard handler
@@ -562,7 +562,7 @@ export const Trigger = forwardRef<HTMLButtonElement, TriggerProps>(
               } else {
                 open()
               }
-              const inputEl = registry.getElement(comboboxId, 'input')
+              const inputEl = registry.getElement('input', comboboxId)
               ;(inputEl as HTMLInputElement | null)?.focus()
             },
           },
@@ -613,7 +613,7 @@ export type ListboxProps = ComponentPropsWithoutRef<'ul'>
 
 export const Listbox = forwardRef<HTMLUListElement, ListboxProps>(
   ({ children, id: userDomId, ...rest }, forwardedRef) => {
-    const { comboboxId, idMap, registry, isOpen, close } = useComboboxContext()
+    const { comboboxId, componentRegistry, registry, isOpen, close } = useComboboxContext()
 
     const { ref, domId } = useRegister({
       value: comboboxId,
@@ -623,15 +623,15 @@ export const Listbox = forwardRef<HTMLUListElement, ListboxProps>(
 
     const elementRef = useRef<HTMLUListElement>(null)
 
-    const labelDomId = idMap.get(createIdMapKey(comboboxId, 'label'))
+    const labelDomId = componentRegistry.get(createComponentKey('label', comboboxId))
 
     // For DismissableLayer excludeRefs
     const inputRef = useRef<HTMLElement | null>(null)
     const triggerRef = useRef<HTMLElement | null>(null)
 
     const getExcludeRefs = useCallback(() => {
-      inputRef.current = registry.getElement(comboboxId, 'input')
-      triggerRef.current = registry.getElement(comboboxId, 'trigger')
+      inputRef.current = registry.getElement('input', comboboxId)
+      triggerRef.current = registry.getElement('trigger', comboboxId)
       return [inputRef, triggerRef]
     }, [registry, comboboxId])
 
@@ -644,8 +644,8 @@ export const Listbox = forwardRef<HTMLUListElement, ListboxProps>(
         const target = event.target as Node | null
         if (!target) return
 
-        const inputEl = registry.getElement(comboboxId, 'input')
-        const triggerEl = registry.getElement(comboboxId, 'trigger')
+        const inputEl = registry.getElement('input', comboboxId)
+        const triggerEl = registry.getElement('trigger', comboboxId)
 
         if (inputEl?.contains(target) || triggerEl?.contains(target)) {
           return

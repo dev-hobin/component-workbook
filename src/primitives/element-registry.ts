@@ -6,13 +6,13 @@ export interface RegistryEntry<Meta extends Record<string, unknown> = Record<str
 }
 
 export interface ElementRegistry<Meta extends Record<string, unknown> = Record<string, unknown>> {
-  set(value: string, role: string, element: HTMLElement, meta: Meta): void
-  delete(value: string, role: string): void
-  updateMeta(value: string, role: string, meta: Partial<Meta>): void
+  set(role: string, value: string, element: HTMLElement, meta: Meta): void
+  delete(role: string, value: string): void
+  updateMeta(role: string, value: string, meta: Partial<Meta>): void
 
-  getElement(value: string, role: string): HTMLElement | null
-  getMeta(value: string, role: string): Meta | null
-  getEntry(value: string, role: string): RegistryEntry<Meta> | null
+  getElement(role: string, value: string): HTMLElement | null
+  getMeta(role: string, value: string): Meta | null
+  getEntry(role: string, value: string): RegistryEntry<Meta> | null
   getEntriesByRole(role: string): RegistryEntry<Meta>[]
   getEntriesByRoleInDomOrder(role: string): RegistryEntry<Meta>[]
   filterEntries(
@@ -21,8 +21,8 @@ export interface ElementRegistry<Meta extends Record<string, unknown> = Record<s
   ): RegistryEntry<Meta>[]
 }
 
-function makeKey(value: string, role: string): string {
-  return `${value}:${role}`
+function makeKey(role: string, value: string): string {
+  return `${role}:${value}`
 }
 
 export function createElementRegistry<
@@ -31,31 +31,31 @@ export function createElementRegistry<
   const entries = new Map<string, RegistryEntry<Meta>>()
 
   return {
-    set(value, role, element, meta) {
-      entries.set(makeKey(value, role), { value, role, element, meta })
+    set(role, value, element, meta) {
+      entries.set(makeKey(role, value), { value, role, element, meta })
     },
 
-    delete(value, role) {
-      entries.delete(makeKey(value, role))
+    delete(role, value) {
+      entries.delete(makeKey(role, value))
     },
 
-    updateMeta(value, role, meta) {
-      const entry = entries.get(makeKey(value, role))
+    updateMeta(role, value, meta) {
+      const entry = entries.get(makeKey(role, value))
       if (entry) {
         entry.meta = { ...entry.meta, ...meta }
       }
     },
 
-    getElement(value, role) {
-      return entries.get(makeKey(value, role))?.element ?? null
+    getElement(role, value) {
+      return entries.get(makeKey(role, value))?.element ?? null
     },
 
-    getMeta(value, role) {
-      return entries.get(makeKey(value, role))?.meta ?? null
+    getMeta(role, value) {
+      return entries.get(makeKey(role, value))?.meta ?? null
     },
 
-    getEntry(value, role) {
-      return entries.get(makeKey(value, role)) ?? null
+    getEntry(role, value) {
+      return entries.get(makeKey(role, value)) ?? null
     },
 
     getEntriesByRole(role) {

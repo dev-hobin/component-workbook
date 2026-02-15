@@ -16,7 +16,7 @@ import { usePresence } from '../../hooks/use-presence'
 import { composeRefs } from '../../utils/compose-refs'
 import { mergeProps } from '../../utils/merge-props'
 
-import { useIdMap, createIdMapKey, type IdMap } from '../../primitives/id-map'
+import { useComponentRegistry, createComponentKey, type ComponentRegistry } from '../../primitives/component-registry'
 import {
   createElementRegistry,
   type ElementRegistry,
@@ -59,7 +59,7 @@ export function isItemSelected(
 }
 
 type TreeContextValue = {
-  idMap: IdMap
+  componentRegistry: ComponentRegistry
   registry: ElementRegistry<TreeMeta>
   // State
   expandedValues: ItemValue[]
@@ -180,21 +180,15 @@ function getVisibleItemValues(
   return result
 }
 
-function getHasChildren(
-  registry: ElementRegistry<TreeMeta>,
-  value: ItemValue,
-): boolean {
-  const groups = registry.getEntriesByRole('group')
-  return groups.some(
-    (entry) => (entry.meta as TreeGroupMeta).parentValue === value,
-  )
+function getHasChildren(componentRegistry: ComponentRegistry, value: ItemValue): boolean {
+  return componentRegistry.has(createComponentKey('group', value))
 }
 
 function getParentValue(
   registry: ElementRegistry<TreeMeta>,
   value: ItemValue,
 ): ItemValue | null {
-  const entry = registry.getEntry(value, 'item')
+  const entry = registry.getEntry('item', value)
   if (!entry) return null
   return (entry.meta as TreeItemMeta).parentValue
 }
@@ -216,7 +210,7 @@ function getSiblingValues(
   registry: ElementRegistry<TreeMeta>,
   value: ItemValue,
 ): ItemValue[] {
-  const entry = registry.getEntry(value, 'item')
+  const entry = registry.getEntry('item', value)
   if (!entry) return []
   const parentVal = (entry.meta as TreeItemMeta).parentValue
 
@@ -230,7 +224,7 @@ function getItemTextValue(
   registry: ElementRegistry<TreeMeta>,
   value: ItemValue,
 ): string {
-  const entry = registry.getEntry(value, 'item')
+  const entry = registry.getEntry('item', value)
   if (!entry) return ''
   return (entry.meta as TreeItemMeta).textValue ?? ''
 }
@@ -267,7 +261,7 @@ export const Root = forwardRef<HTMLDivElement, RootProps>(
     },
     forwardedRef,
   ) => {
-    const [idMap, idActions] = useIdMap()
+    const [componentRegistry, componentActions] = useComponentRegistry()
 
     const registryRef = useRef<ElementRegistry<TreeMeta>>(null!)
     if (!registryRef.current) {
@@ -300,7 +294,7 @@ export const Root = forwardRef<HTMLDivElement, RootProps>(
     // Focus highlighted item when it changes
     useEffect(() => {
       if (highlightedValue) {
-        const labelElement = registry.getElement(highlightedValue, 'label')
+        const labelElement = registry.getElement('label', highlightedValue)
         labelElement?.focus()
       }
     }, [highlightedValue, registry])
@@ -337,11 +331,11 @@ export const Root = forwardRef<HTMLDivElement, RootProps>(
     // Actions
     const expand = useCallback(
       (value: ItemValue) => {
-        if (!getHasChildren(registry, value)) return
+        if (!getHasChildren(componentRegistry, value)) return
         if (expandedValues.includes(value)) return
         setExpandedValues([...expandedValues, value])
       },
-      [registry, expandedValues, setExpandedValues],
+      [componentRegistry, expandedValues, setExpandedValues],
     )
 
     const collapse = useCallback(
@@ -354,19 +348,19 @@ export const Root = forwardRef<HTMLDivElement, RootProps>(
 
     const toggleExpand = useCallback(
       (value: ItemValue) => {
-        if (!getHasChildren(registry, value)) return
+        if (!getHasChildren(componentRegistry, value)) return
         if (expandedValues.includes(value)) {
           setExpandedValues(expandedValues.filter((v) => v !== value))
         } else {
           setExpandedValues([...expandedValues, value])
         }
       },
-      [registry, expandedValues, setExpandedValues],
+      [componentRegistry, expandedValues, setExpandedValues],
     )
 
     const select = useCallback(
       (value: ItemValue) => {
-        const entry = registry.getEntry(value, 'item')
+        const entry = registry.getEntry('item', value)
         if (!entry || (entry.meta as TreeItemMeta).disabled) return
 
         if (selectionMode === 'single') {
@@ -382,7 +376,7 @@ export const Root = forwardRef<HTMLDivElement, RootProps>(
 
     const toggleSelect = useCallback(
       (value: ItemValue) => {
-        const entry = registry.getEntry(value, 'item')
+        const entry = registry.getEntry('item', value)
         if (!entry || (entry.meta as TreeItemMeta).disabled) return
 
         if (selectedValues.includes(value)) {
@@ -426,7 +420,7 @@ export const Root = forwardRef<HTMLDivElement, RootProps>(
         case 'ArrowRight': {
           e.preventDefault()
           if (!highlightedValue) return
-          const hasChildren = getHasChildren(registry, highlightedValue)
+          const hasChildren = getHasChildren(componentRegistry, highlightedValue)
           if (!hasChildren) return
 
           const isExpanded = expandedValues.includes(highlightedValue)
@@ -443,7 +437,7 @@ export const Root = forwardRef<HTMLDivElement, RootProps>(
         case 'ArrowLeft': {
           e.preventDefault()
           if (!highlightedValue) return
-          const hasChildren = getHasChildren(registry, highlightedValue)
+          const hasChildren = getHasChildren(componentRegistry, highlightedValue)
           const isExpanded =
             hasChildren && expandedValues.includes(highlightedValue)
 
@@ -472,10 +466,10 @@ export const Root = forwardRef<HTMLDivElement, RootProps>(
         case 'Enter': {
           e.preventDefault()
           if (!highlightedValue) return
-          const entry = registry.getEntry(highlightedValue, 'item')
+          const entry = registry.getEntry('item', highlightedValue)
           if (!entry || (entry.meta as TreeItemMeta).disabled) return
 
-          const hasChildren = getHasChildren(registry, highlightedValue)
+          const hasChildren = getHasChildren(componentRegistry, highlightedValue)
           if (hasChildren) {
             toggleExpand(highlightedValue)
           } else if (selectionMode === 'multiple') {
@@ -501,7 +495,7 @@ export const Root = forwardRef<HTMLDivElement, RootProps>(
           const siblings = getSiblingValues(registry, highlightedValue)
           const toExpand = siblings.filter((v) => {
             return (
-              getHasChildren(registry, v) && !expandedValues.includes(v)
+              getHasChildren(componentRegistry, v) && !expandedValues.includes(v)
             )
           })
           if (toExpand.length > 0) {
@@ -518,7 +512,7 @@ export const Root = forwardRef<HTMLDivElement, RootProps>(
     }
 
     const contextValue: TreeContextValue = {
-      idMap,
+      componentRegistry,
       registry,
       expandedValues,
       selectedValues,
@@ -533,7 +527,7 @@ export const Root = forwardRef<HTMLDivElement, RootProps>(
     }
 
     return (
-      <RegistrationProvider idActions={idActions} registry={registry}>
+      <RegistrationProvider componentActions={componentActions} elementRegistry={registry}>
         <TreeContext.Provider value={contextValue}>
           <div
             ref={composeRefs(forwardedRef, treeRef)}
@@ -573,11 +567,11 @@ export const Item = forwardRef<HTMLDivElement, ItemProps>(
     { value, textValue = '', disabled = false, children, ...rest },
     forwardedRef,
   ) => {
-    const { registry, expandedValues, selectedValues, highlightedValue } =
+    const { componentRegistry, expandedValues, selectedValues, highlightedValue } =
       useTreeContext()
     const { parentValue, depth } = useTreeParent()
 
-    const hasChildren = getHasChildren(registry, value)
+    const hasChildren = getHasChildren(componentRegistry, value)
 
     const isExpanded = isItemExpanded(expandedValues, value)
     const isSelected = isItemSelected(selectedValues, value)
@@ -692,6 +686,7 @@ export const ItemLabel = forwardRef<HTMLDivElement, ItemLabelProps>(
             },
             onFocus: () => {
               if (isDisabled) return
+              if (isHighlighted) return
               setHighlightedValue(value)
             },
           },
@@ -714,7 +709,7 @@ export type ItemGroupProps = {
 
 export const ItemGroup = forwardRef<HTMLDivElement, ItemGroupProps>(
   ({ children, id: userDomId, ...rest }, forwardedRef) => {
-    const { idMap } = useTreeContext()
+    const { componentRegistry } = useTreeContext()
     const { value, isExpanded } = useItemContext()
     const elementRef = useRef<HTMLDivElement>(null)
 
@@ -727,7 +722,7 @@ export const ItemGroup = forwardRef<HTMLDivElement, ItemGroupProps>(
       },
     })
 
-    const labelDomId = idMap.get(createIdMapKey(value, 'label'))
+    const labelDomId = componentRegistry.get(createComponentKey('label', value))
 
     const { isPresent, transitionState } = usePresence({
       isVisible: isExpanded,

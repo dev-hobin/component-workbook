@@ -14,7 +14,7 @@ import { usePresence } from '../../hooks/use-presence'
 import { composeRefs } from '../../utils/compose-refs'
 import { mergeProps } from '../../utils/merge-props'
 
-import { useIdMap, createIdMapKey, type IdMap } from '../../primitives/id-map'
+import { useComponentRegistry, createComponentKey, type ComponentRegistry } from '../../primitives/component-registry'
 import {
   createElementRegistry,
   type ElementRegistry,
@@ -33,7 +33,7 @@ type TabsMeta = {
 }
 
 type TabsContextValue = {
-  idMap: IdMap
+  componentRegistry: ComponentRegistry
   registry: ElementRegistry<TabsMeta>
   value: TabValue
   setValue: (value: TabValue) => void
@@ -90,7 +90,7 @@ export const Root = forwardRef<HTMLDivElement, RootProps>(
     },
     forwardedRef,
   ) => {
-    const [idMap, idActions] = useIdMap()
+    const [componentRegistry, componentActions] = useComponentRegistry()
 
     const registryRef = useRef<ElementRegistry<TabsMeta>>(null!)
     if (!registryRef.current) {
@@ -110,7 +110,7 @@ export const Root = forwardRef<HTMLDivElement, RootProps>(
     const [focusedValue, setFocusedValue] = useState<TabValue | null>(null)
 
     const contextValue: TabsContextValue = {
-      idMap,
+      componentRegistry,
       registry,
       value,
       setValue: setValueState,
@@ -124,7 +124,7 @@ export const Root = forwardRef<HTMLDivElement, RootProps>(
     }
 
     return (
-      <RegistrationProvider idActions={idActions} registry={registry}>
+      <RegistrationProvider componentActions={componentActions} elementRegistry={registry}>
         <TabsContext.Provider value={contextValue}>
           <div
             ref={forwardedRef}
@@ -168,7 +168,7 @@ export const List = forwardRef<HTMLDivElement, ListProps>(
 
     useEffect(() => {
       if (focusedValue) {
-        registry.getElement(focusedValue, 'trigger')?.focus()
+        registry.getElement('trigger', focusedValue)?.focus()
       }
     }, [focusedValue, registry])
 
@@ -298,7 +298,7 @@ export const Trigger = forwardRef<HTMLButtonElement, TriggerProps>(
     forwardedRef,
   ) => {
     const {
-      idMap,
+      componentRegistry,
       value,
       setValue,
       setFocusedValue,
@@ -315,7 +315,7 @@ export const Trigger = forwardRef<HTMLButtonElement, TriggerProps>(
       meta: { disabled: isDisabled },
     })
 
-    const contentDomId = idMap.get(createIdMapKey(triggerValue, 'content'))
+    const contentDomId = componentRegistry.get(createComponentKey('content', triggerValue))
 
     return (
       <button
@@ -369,7 +369,7 @@ export const Content = forwardRef<HTMLDivElement, ContentProps>(
     },
     forwardedRef,
   ) => {
-    const { idMap, value } = useTabsContext()
+    const { componentRegistry, value } = useTabsContext()
 
     const isActive = value === contentValue
 
@@ -389,7 +389,7 @@ export const Content = forwardRef<HTMLDivElement, ContentProps>(
       resolveElement: () => elementRef.current,
     })
 
-    const triggerDomId = idMap.get(createIdMapKey(contentValue, 'trigger'))
+    const triggerDomId = componentRegistry.get(createComponentKey('trigger', contentValue))
 
     const shouldRender = (() => {
       if (lazyMount && !wasEverActiveRef.current) {
@@ -443,7 +443,7 @@ export const Indicator = forwardRef<HTMLDivElement, IndicatorProps>(
     )
 
     useLayoutEffect(() => {
-      const triggerElement = registry.getElement(value, 'trigger')
+      const triggerElement = registry.getElement('trigger', value)
       const listElement = listRef.current
 
       if (!triggerElement || !listElement) {

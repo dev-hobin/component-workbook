@@ -1,15 +1,15 @@
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useId, useRef } from 'react'
 import { useRegistration } from './registration-context'
-import { createDomId } from './create-dom-id'
 
 interface UseRegisterOptions<Meta extends Record<string, unknown>> {
-  value: string
   role: string
+  value?: string
   id?: string
   meta?: Meta
 }
 
 interface UseRegisterReturn {
+  value: string
   domId: string
   ref: (element: HTMLElement | null) => void
 }
@@ -17,10 +17,12 @@ interface UseRegisterReturn {
 export function useRegister<Meta extends Record<string, unknown> = Record<string, unknown>>(
   options: UseRegisterOptions<Meta>,
 ): UseRegisterReturn {
-  const { idActions, registry } = useRegistration()
-  const { value, role, id: userDomId, meta } = options
+  const { componentActions, elementRegistry } = useRegistration()
+  const { role, id: userDomId, meta } = options
 
-  const domId = userDomId ?? createDomId(role, value)
+  const generatedId = useId()
+  const value = options.value ?? generatedId
+  const domId = userDomId ?? generatedId
 
   const metaRef = useRef(meta)
   metaRef.current = meta
@@ -28,34 +30,34 @@ export function useRegister<Meta extends Record<string, unknown> = Record<string
   const elementRef = useRef<HTMLElement | null>(null)
   const mountedRef = useRef(false)
 
-  // Ref callback: only handles mutable registry (no React state updates)
+  // Ref callback: only handles ElementRegistry (no React state updates)
   const ref = useCallback(
     (element: HTMLElement | null) => {
       elementRef.current = element
       mountedRef.current = !!element
       if (element) {
-        registry.set(value, role, element, metaRef.current ?? ({} as Meta))
+        elementRegistry.set(role, value, element, metaRef.current ?? ({} as Meta))
       } else {
-        registry.delete(value, role)
+        elementRegistry.delete(role, value)
       }
     },
-    [value, role, registry],
+    [role, value, elementRegistry],
   )
 
-  // Effect: handles IdMap registration (React state) — safe from infinite loops
+  // Effect: handles ComponentRegistry (React state) — safe from infinite loops
   useEffect(() => {
-    idActions.register(value, role, domId)
+    componentActions.register(role, value, domId)
     return () => {
-      idActions.unregister(value, role)
+      componentActions.unregister(role, value)
     }
-  }, [value, role, domId, idActions])
+  }, [role, value, domId, componentActions])
 
   // Meta sync effect
   useEffect(() => {
     if (elementRef.current && meta) {
-      registry.updateMeta(value, role, meta)
+      elementRegistry.updateMeta(role, value, meta)
     }
   })
 
-  return { domId, ref }
+  return { value, domId, ref }
 }

@@ -1,21 +1,23 @@
 import { createContext, useContext, type ReactNode } from 'react'
-import type { IdMapActions } from './id-map'
+import type { ComponentRegistryActions } from './component-registry'
 import type { ElementRegistry } from './element-registry'
 
 interface RegistrationContextValue {
-  idActions: IdMapActions
-  registry: ElementRegistry<any>
+  componentActions: ComponentRegistryActions
+  elementRegistry: ElementRegistry<any>
 }
 
 const RegistrationContext = createContext<RegistrationContextValue | null>(null)
 
 export function RegistrationProvider({
-  idActions,
-  registry,
+  componentActions,
+  elementRegistry,
   children,
 }: RegistrationContextValue & { children: ReactNode }) {
   return (
-    <RegistrationContext.Provider value={{ idActions, registry }}>
+    <RegistrationContext.Provider
+      value={{ componentActions, elementRegistry }}
+    >
       {children}
     </RegistrationContext.Provider>
   )

@@ -1,11 +1,17 @@
-import { useLayoutEffect, useState } from 'react'
-import { useLatestRef } from './use-latest-ref'
+import { useEffect, useLayoutEffect, useState } from 'react'
 
 type TransitionState = 'starting' | 'idle' | 'ending' | undefined
 
+const ANIMATION_EVENTS = [
+  'transitionend',
+  'transitioncancel',
+  'animationend',
+  'animationcancel',
+] as const
+
 export function usePresence({
   isVisible,
-  resolveElement: resolveElementFn,
+  resolveElement,
 }: {
   isVisible: boolean
   resolveElement: () => Element | null
@@ -17,91 +23,58 @@ export function usePresence({
     isVisible ? 'idle' : undefined,
   )
 
-  const resolveElementRef = useLatestRef(resolveElementFn)
-  const isVisibleRef = useLatestRef(isVisible)
-  const transitionStateRef = useLatestRef(transitionState)
-
+  // State machine: derive next transitionState from (current state, isVisible)
   useLayoutEffect(() => {
-    let rafId: number | null = null
-    const scheduleTransitionUpdate = (nextState: TransitionState) => {
-      rafId = requestAnimationFrame(() => {
-        if (isVisibleRef.current !== isVisible) {
-          return
-        }
-        if (transitionStateRef.current !== transitionState) {
-          return
-        }
-        setTransitionState(nextState)
-      })
-    }
-
-    const waitForAnimations = (callback: () => void): void => {
-      const element = resolveElementRef.current()
-      if (element === null) {
-        return
-      }
-
-      Promise.all(
-        element
-          .getAnimations({ subtree: true })
-          .map((animation) => animation.finished),
-      ).finally(() => {
-        callback()
-      })
-    }
-
     switch (transitionState) {
+      case undefined: {
+        if (!isVisible) return
+        setTransitionState('starting')
+        break
+      }
       case 'starting': {
-        if (isVisible) {
-          // Wait one frame for CSS to apply, then wait for animations
-          rafId = requestAnimationFrame(() => {
-            waitForAnimations(() => scheduleTransitionUpdate('idle'))
-          })
-        } else {
-          scheduleTransitionUpdate('ending')
-        }
+        if (!isVisible) setTransitionState('ending')
         break
       }
       case 'idle': {
-        if (isVisible) {
-          return
-        }
-        scheduleTransitionUpdate('ending')
+        if (!isVisible) setTransitionState('ending')
         break
       }
       case 'ending': {
-        if (isVisible) {
-          scheduleTransitionUpdate('idle')
-        } else {
-          // Wait one frame for CSS to apply, then wait for animations
-          rafId = requestAnimationFrame(() => {
-            waitForAnimations(() => scheduleTransitionUpdate(undefined))
-          })
-        }
+        if (isVisible) setTransitionState('starting')
         break
       }
-      default: {
-        if (!isVisible) {
-          return
-        }
-        setTransitionState('starting')
-        // scheduleTransitionUpdate('starting')
-        break
-      }
+    }
+  }, [isVisible, transitionState])
+
+  // Wait for animations to complete, then settle
+  useEffect(() => {
+    if (transitionState !== 'starting' && transitionState !== 'ending') return
+
+    const completeState: TransitionState =
+      transitionState === 'starting' ? 'idle' : undefined
+
+    const element = resolveElement()
+    if (!element || element.getAnimations({ subtree: true }).length === 0) {
+      setTransitionState(completeState)
+      return
     }
 
+    function onAnimationEvent(event: Event) {
+      const el = resolveElement()
+      if (!el || !el.contains(event.target as Node)) return
+      if (el.getAnimations({ subtree: true }).length > 0) return
+      setTransitionState(completeState)
+    }
+
+    for (const name of ANIMATION_EVENTS) {
+      element.addEventListener(name, onAnimationEvent)
+    }
     return () => {
-      if (rafId !== null) {
-        cancelAnimationFrame(rafId)
+      for (const name of ANIMATION_EVENTS) {
+        element.removeEventListener(name, onAnimationEvent)
       }
     }
-  }, [
-    isVisible,
-    isVisibleRef,
-    resolveElementRef,
-    transitionState,
-    transitionStateRef,
-  ])
+  }, [transitionState, resolveElement])
 
   return {
     isPresent: Boolean(transitionState),

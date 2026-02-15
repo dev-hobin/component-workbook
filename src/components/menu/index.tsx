@@ -27,7 +27,7 @@ import { composeRefs } from '../../utils/compose-refs'
 import { mergeProps } from '../../utils/merge-props'
 import { DismissableLayer } from '../../primitives/dismissable-layer'
 
-import { useIdMap, createIdMapKey, type IdMap } from '../../primitives/id-map'
+import { useComponentRegistry, createComponentKey, type ComponentRegistry } from '../../primitives/component-registry'
 import {
   createElementRegistry,
   type ElementRegistry,
@@ -57,7 +57,7 @@ export function isMenuOpen(openedPath: MenuId[], menuId: MenuId): boolean {
 }
 
 type MenuContextValue = {
-  idMap: IdMap
+  componentRegistry: ComponentRegistry
   registry: ElementRegistry<MenuMeta>
 
   openedPath: MenuId[]
@@ -148,7 +148,7 @@ export function Root({
 }: RootProps) {
   const rootMenuId = useId()
 
-  const [idMap, idActions] = useIdMap()
+  const [componentRegistry, componentActions] = useComponentRegistry()
   const registryRef = useRef<ElementRegistry<MenuMeta>>(null!)
   if (!registryRef.current) {
     registryRef.current = createElementRegistry<MenuMeta>()
@@ -220,8 +220,8 @@ export function Root({
     if (highlightedId) {
       requestAnimationFrame(() => {
         const entry =
-          registry.getEntry(highlightedId, 'item') ??
-          registry.getEntry(highlightedId, 'sub-trigger')
+          registry.getEntry('item', highlightedId) ??
+          registry.getEntry('sub-trigger', highlightedId)
         entry?.element?.focus()
       })
     }
@@ -300,7 +300,7 @@ export function Root({
 
   const openSubmenu = useCallback(() => {
     if (!highlightedId || !activeMenuId) return
-    const entry = registry.getEntry(highlightedId, 'sub-trigger')
+    const entry = registry.getEntry('sub-trigger', highlightedId)
     if (!entry || !entry.meta.subMenuId) return
 
     const subMenuId = entry.meta.subMenuId
@@ -372,11 +372,11 @@ export function Root({
       case ' ':
         e.preventDefault()
         if (highlightedId) {
-          const entry = registry.getEntry(highlightedId, 'sub-trigger')
+          const entry = registry.getEntry('sub-trigger', highlightedId)
           if (entry?.meta.subMenuId) {
             openSubmenu()
           } else {
-            const itemEntry = registry.getEntry(highlightedId, 'item')
+            const itemEntry = registry.getEntry('item', highlightedId)
             itemEntry?.meta.onSelect?.()
             onItemSelect?.(highlightedId)
             closeAll()
@@ -417,7 +417,7 @@ export function Root({
   )
 
   const contextValue: MenuContextValue = {
-    idMap,
+    componentRegistry,
     registry,
     openedPath,
     highlightedId,
@@ -441,7 +441,7 @@ export function Root({
   }
 
   return (
-    <RegistrationProvider idActions={idActions} registry={registry}>
+    <RegistrationProvider componentActions={componentActions} elementRegistry={registry}>
       <MenuContext.Provider value={contextValue}>
         <MenuIdContext.Provider value={menuIdContextValue}>
           {children}
@@ -459,7 +459,7 @@ export type TriggerProps = ComponentPropsWithoutRef<'button'>
 
 export const Trigger = forwardRef<HTMLButtonElement, TriggerProps>(
   ({ children, id: userDomId, ...rest }, forwardedRef) => {
-    const { idMap, openedPath, openMenu, closeMenu } = useMenuContext()
+    const { componentRegistry, openedPath, openMenu, closeMenu } = useMenuContext()
     const { menuId, parentMenuId } = useMenuIdContext()
 
     const { domId, ref } = useRegister<MenuMeta>({
@@ -470,7 +470,7 @@ export const Trigger = forwardRef<HTMLButtonElement, TriggerProps>(
     })
 
     const isOpen = isMenuOpen(openedPath, menuId)
-    const contentDomId = idMap.get(createIdMapKey(menuId, 'content'))
+    const contentDomId = componentRegistry.get(createComponentKey('content', menuId))
 
     const handleClick = () => {
       if (isOpen) {
@@ -550,7 +550,7 @@ export const Content = forwardRef<HTMLDivElement, ContentProps>(
     forwardedRef,
   ) => {
     const {
-      idMap,
+      componentRegistry,
       registry,
       openedPath,
       closeMenu,
@@ -569,7 +569,7 @@ export const Content = forwardRef<HTMLDivElement, ContentProps>(
       meta: { menuId, disabled: false, textValue: '', isSubTrigger: false },
     })
 
-    const triggerDomId = idMap.get(createIdMapKey(menuId, 'trigger'))
+    const triggerDomId = componentRegistry.get(createComponentKey('trigger', menuId))
     const isOpen = isMenuOpen(openedPath, menuId)
 
     const { isPresent, transitionState } = usePresence({
@@ -585,7 +585,7 @@ export const Content = forwardRef<HTMLDivElement, ContentProps>(
     }, [isPresent])
 
     useLayoutEffect(() => {
-      const trigger = registry.getElement(menuId, 'trigger')
+      const trigger = registry.getElement('trigger', menuId)
       const positioner = positionerRef.current
       if (!trigger || !positioner) return
 
@@ -675,10 +675,7 @@ export const Item = forwardRef<HTMLDivElement, ItemProps>(
     const derivedTextValue =
       textValue ?? (typeof children === 'string' ? children : '')
 
-    const itemId = useId()
-
-    const { ref } = useRegister<MenuMeta>({
-      value: itemId,
+    const { ref, value: itemId } = useRegister<MenuMeta>({
       role: 'item',
       meta: {
         menuId,
@@ -855,7 +852,7 @@ export const SubContent = forwardRef<HTMLDivElement, SubContentProps>(
     forwardedRef,
   ) => {
     const {
-      idMap,
+      componentRegistry,
       registry,
       openedPath,
       closeMenu,
@@ -874,7 +871,7 @@ export const SubContent = forwardRef<HTMLDivElement, SubContentProps>(
       meta: { menuId: subMenuId, disabled: false, textValue: '', isSubTrigger: false },
     })
 
-    const subTriggerDomId = idMap.get(createIdMapKey(subMenuId, 'sub-trigger'))
+    const subTriggerDomId = componentRegistry.get(createComponentKey('sub-trigger', subMenuId))
     const isOpen = isMenuOpen(openedPath, subMenuId)
 
     const { isPresent, transitionState } = usePresence({
@@ -890,7 +887,7 @@ export const SubContent = forwardRef<HTMLDivElement, SubContentProps>(
     }, [isPresent])
 
     useLayoutEffect(() => {
-      const trigger = registry.getElement(subMenuId, 'sub-trigger')
+      const trigger = registry.getElement('sub-trigger', subMenuId)
       const positioner = positionerRef.current
       if (!trigger || !positioner) return
 

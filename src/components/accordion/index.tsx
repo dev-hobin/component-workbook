@@ -12,7 +12,7 @@ import { usePresence } from '../../hooks/use-presence'
 import { composeRefs } from '../../utils/compose-refs'
 import { mergeProps } from '../../utils/merge-props'
 
-import { useIdMap, createIdMapKey, type IdMap } from '../../primitives/id-map'
+import { useComponentRegistry, createComponentKey, type ComponentRegistry } from '../../primitives/component-registry'
 import {
   createElementRegistry,
   type ElementRegistry,
@@ -31,7 +31,7 @@ type AccordionMeta = {
 }
 
 type AccordionContextValue = {
-  idMap: IdMap
+  componentRegistry: ComponentRegistry
   registry: ElementRegistry<AccordionMeta>
   value: ItemId[]
   expandedSet: Set<ItemId>
@@ -101,7 +101,7 @@ export const Root = forwardRef<HTMLDivElement, RootProps>(
     },
     forwardedRef,
   ) => {
-    const [idMap, idActions] = useIdMap()
+    const [componentRegistry, componentActions] = useComponentRegistry()
 
     const registryRef = useRef<ElementRegistry<AccordionMeta>>(null!)
     if (!registryRef.current) {
@@ -141,7 +141,7 @@ export const Root = forwardRef<HTMLDivElement, RootProps>(
       const currentElement = document.activeElement
       const currentIndex = enabledItems.findIndex(
         (entry) =>
-          registry.getElement(entry.value, 'trigger') === currentElement,
+          registry.getElement('trigger', entry.value) === currentElement,
       )
 
       let targetIndex: number | null = null
@@ -173,12 +173,12 @@ export const Root = forwardRef<HTMLDivElement, RootProps>(
 
       if (targetIndex !== null) {
         const targetValue = enabledItems[targetIndex].value
-        registry.getElement(targetValue, 'trigger')?.focus()
+        registry.getElement('trigger', targetValue)?.focus()
       }
     }
 
     const contextValue: AccordionContextValue = {
-      idMap,
+      componentRegistry,
       registry,
       value,
       expandedSet,
@@ -188,7 +188,7 @@ export const Root = forwardRef<HTMLDivElement, RootProps>(
     }
 
     return (
-      <RegistrationProvider idActions={idActions} registry={registry}>
+      <RegistrationProvider componentActions={componentActions} elementRegistry={registry}>
         <AccordionContext.Provider value={contextValue}>
           <div
             ref={forwardedRef}
@@ -267,7 +267,7 @@ export type ItemTriggerProps = ComponentPropsWithoutRef<'button'>
 
 export const ItemTrigger = forwardRef<HTMLButtonElement, ItemTriggerProps>(
   ({ children, id: userDomId, ...rest }, forwardedRef) => {
-    const { idMap, toggle } = useAccordionContext()
+    const { componentRegistry, toggle } = useAccordionContext()
     const { itemId, isDisabled, isExpanded } = useItemContext()
 
     const { ref, domId } = useRegister({
@@ -276,7 +276,7 @@ export const ItemTrigger = forwardRef<HTMLButtonElement, ItemTriggerProps>(
       id: userDomId,
     })
 
-    const contentDomId = idMap.get(createIdMapKey(itemId, 'content'))
+    const contentDomId = componentRegistry.get(createComponentKey('content', itemId))
 
     return (
       <h3>
@@ -321,7 +321,7 @@ export const ItemContent = forwardRef<HTMLDivElement, ItemContentProps>(
     { children, id: userDomId, lazyMount = false, unmountOnExit = false, ...rest },
     forwardedRef,
   ) => {
-    const { idMap } = useAccordionContext()
+    const { componentRegistry } = useAccordionContext()
     const { itemId, isDisabled, isExpanded } = useItemContext()
 
     const { ref, domId } = useRegister({
@@ -340,7 +340,7 @@ export const ItemContent = forwardRef<HTMLDivElement, ItemContentProps>(
       resolveElement: () => elementRef.current,
     })
 
-    const triggerDomId = idMap.get(createIdMapKey(itemId, 'trigger'))
+    const triggerDomId = componentRegistry.get(createComponentKey('trigger', itemId))
 
     const shouldRender = (() => {
       if (lazyMount && !wasEverExpandedRef.current) {
