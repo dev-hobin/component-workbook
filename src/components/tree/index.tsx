@@ -4,30 +4,25 @@ import React, {
   useCallback,
   useContext,
   useEffect,
-  useId,
+  useState,
   useRef,
   type ComponentPropsWithoutRef,
   type ReactNode,
 } from 'react'
 import { useControllableState } from '@radix-ui/react-use-controllable-state'
 
-import { useHighlight, type UseHighlightReturn } from '../../hooks/use-highlight'
 import { useCharacterSearch } from '../../hooks/use-character-search'
 import { usePresence } from '../../hooks/use-presence'
 import { composeRefs } from '../../utils/compose-refs'
 import { mergeProps } from '../../utils/merge-props'
+
+import { useIdMap, createIdMapKey, type IdMap } from '../../primitives/id-map'
 import {
-  NodeStoreProvider,
-  useNodeStore,
-} from '../../primitives/use-node-store'
-import { useNode, useLogicalNode } from '../../primitives/use-node'
-import { useStoreSubscribe } from '../../primitives/use-store-subscribe'
-import {
-  ParentProvider,
-  useParentId,
-  useLevel,
-} from '../../primitives/use-parent-context'
-import type { NodeStore } from '../../primitives/node-store'
+  createElementRegistry,
+  type ElementRegistry,
+} from '../../primitives/element-registry'
+import { RegistrationProvider } from '../../primitives/registration-context'
+import { useRegister } from '../../primitives/use-register'
 
 // ============================================
 // Types
@@ -35,7 +30,7 @@ import type { NodeStore } from '../../primitives/node-store'
 
 export type ItemValue = string
 
-export type TreeItemMeta = {
+type TreeItemMeta = {
   value: ItemValue
   disabled: boolean
   parentValue: ItemValue | null
@@ -43,13 +38,11 @@ export type TreeItemMeta = {
   textValue: string
 }
 
-type TreeRole = 'tree' | 'item' | 'label' | 'group'
-
 type TreeGroupMeta = {
   parentValue: ItemValue
 }
 
-type TreeMeta = TreeItemMeta | TreeGroupMeta | object
+type TreeMeta = TreeItemMeta | TreeGroupMeta
 
 export function isItemExpanded(
   expandedValues: ItemValue[],
@@ -66,20 +59,14 @@ export function isItemSelected(
 }
 
 type TreeContextValue = {
+  idMap: IdMap
+  registry: ElementRegistry<TreeMeta>
   // State
   expandedValues: ItemValue[]
   selectedValues: ItemValue[]
   highlightedValue: ItemValue | null
-
-  // NodeStore
-  store: NodeStore<TreeRole, TreeMeta>
-
   // Options
   selectionMode: 'single' | 'multiple'
-
-  // Highlight
-  highlight: UseHighlightReturn
-
   // Actions
   setHighlightedValue: (value: ItemValue | null) => void
   expand: (value: ItemValue) => void
@@ -98,6 +85,41 @@ type ItemContextValue = {
   isSelected: boolean
   isDisabled: boolean
   isHighlighted: boolean
+}
+
+// ============================================
+// Tree-local Parent/Depth Context
+// ============================================
+
+type TreeParentContextValue = {
+  parentValue: ItemValue | null
+  depth: number
+}
+
+const TreeParentContext = createContext<TreeParentContextValue>({
+  parentValue: null,
+  depth: -1,
+})
+
+function TreeParentProvider({
+  value,
+  children,
+}: {
+  value: ItemValue | null
+  children: ReactNode
+}) {
+  const parent = useContext(TreeParentContext)
+  return (
+    <TreeParentContext.Provider
+      value={{ parentValue: value, depth: parent.depth + 1 }}
+    >
+      {children}
+    </TreeParentContext.Provider>
+  )
+}
+
+function useTreeParent() {
+  return useContext(TreeParentContext)
 }
 
 // ============================================
@@ -121,6 +143,96 @@ function useItemContext() {
     throw new Error('Tree.ItemLabel/ItemGroup must be used within Tree.Item')
   }
   return context
+}
+
+// ============================================
+// Registry Helpers
+// ============================================
+
+function getVisibleItemValues(
+  registry: ElementRegistry<TreeMeta>,
+  expandedValues: ItemValue[],
+): ItemValue[] {
+  const result: ItemValue[] = []
+
+  const allItems = registry.getEntriesByRoleInDomOrder('item')
+
+  function isAncestorCollapsed(parentValue: ItemValue | null): boolean {
+    if (parentValue === null) return false
+    if (!expandedValues.includes(parentValue)) return true
+    // Check grandparent
+    const parentEntry = allItems.find(
+      (e) => (e.meta as TreeItemMeta).value === parentValue,
+    )
+    if (!parentEntry) return false
+    return isAncestorCollapsed(
+      (parentEntry.meta as TreeItemMeta).parentValue,
+    )
+  }
+
+  for (const entry of allItems) {
+    const meta = entry.meta as TreeItemMeta
+    if (meta.disabled) continue
+    if (isAncestorCollapsed(meta.parentValue)) continue
+    result.push(meta.value)
+  }
+
+  return result
+}
+
+function getHasChildren(
+  registry: ElementRegistry<TreeMeta>,
+  value: ItemValue,
+): boolean {
+  const groups = registry.getEntriesByRole('group')
+  return groups.some(
+    (entry) => (entry.meta as TreeGroupMeta).parentValue === value,
+  )
+}
+
+function getParentValue(
+  registry: ElementRegistry<TreeMeta>,
+  value: ItemValue,
+): ItemValue | null {
+  const entry = registry.getEntry(value, 'item')
+  if (!entry) return null
+  return (entry.meta as TreeItemMeta).parentValue
+}
+
+function getFirstChildValue(
+  registry: ElementRegistry<TreeMeta>,
+  value: ItemValue,
+): ItemValue | null {
+  const allItems = registry.getEntriesByRoleInDomOrder('item')
+  const children = allItems.filter((entry) => {
+    const meta = entry.meta as TreeItemMeta
+    return meta.parentValue === value && !meta.disabled
+  })
+  if (children.length === 0) return null
+  return (children[0].meta as TreeItemMeta).value
+}
+
+function getSiblingValues(
+  registry: ElementRegistry<TreeMeta>,
+  value: ItemValue,
+): ItemValue[] {
+  const entry = registry.getEntry(value, 'item')
+  if (!entry) return []
+  const parentVal = (entry.meta as TreeItemMeta).parentValue
+
+  const allItems = registry.getEntriesByRole('item')
+  return allItems
+    .filter((e) => (e.meta as TreeItemMeta).parentValue === parentVal)
+    .map((e) => (e.meta as TreeItemMeta).value)
+}
+
+function getItemTextValue(
+  registry: ElementRegistry<TreeMeta>,
+  value: ItemValue,
+): string {
+  const entry = registry.getEntry(value, 'item')
+  if (!entry) return ''
+  return (entry.meta as TreeItemMeta).textValue ?? ''
 }
 
 // ============================================
@@ -155,43 +267,14 @@ export const Root = forwardRef<HTMLDivElement, RootProps>(
     },
     forwardedRef,
   ) => {
-    return (
-      <NodeStoreProvider<TreeRole, TreeMeta>>
-        <RootImpl
-          ref={forwardedRef}
-          defaultExpandedValues={defaultExpandedValues}
-          expandedValues={expandedValuesProp}
-          onExpandedValuesChange={onExpandedValuesChange}
-          defaultSelectedValues={defaultSelectedValues}
-          selectedValues={selectedValuesProp}
-          onSelectedValuesChange={onSelectedValuesChange}
-          selectionMode={selectionMode}
-          {...rest}
-        >
-          {children}
-        </RootImpl>
-      </NodeStoreProvider>
-    )
-  },
-)
+    const [idMap, idActions] = useIdMap()
 
-const RootImpl = forwardRef<HTMLDivElement, RootProps>(
-  (
-    {
-      children,
-      defaultExpandedValues = [],
-      expandedValues: expandedValuesProp,
-      onExpandedValuesChange,
-      defaultSelectedValues = [],
-      selectedValues: selectedValuesProp,
-      onSelectedValuesChange,
-      selectionMode = 'single',
-      ...rest
-    },
-    forwardedRef,
-  ) => {
-    const treeId = useId()
-    const store = useNodeStore<TreeRole, TreeMeta>()
+    const registryRef = useRef<ElementRegistry<TreeMeta>>(null!)
+    if (!registryRef.current) {
+      registryRef.current = createElementRegistry<TreeMeta>()
+    }
+    const registry = registryRef.current
+
     const treeRef = useRef<HTMLDivElement>(null)
 
     // Controllable states
@@ -206,176 +289,59 @@ const RootImpl = forwardRef<HTMLDivElement, RootProps>(
       onChange: onSelectedValuesChange,
     })
 
-    // Refs for latest values (needed in callbacks)
+    const [highlightedValue, setHighlightedValue] = useState<ItemValue | null>(
+      null,
+    )
+
+    // Ref for expandedValues (needed in callbacks that compute visible items)
     const expandedValuesRef = useRef(expandedValues)
     expandedValuesRef.current = expandedValues
-
-    // NodeStore-based helpers
-    const getVisibleItemValues = useCallback(() => {
-      const result: ItemValue[] = []
-      const currentExpanded = expandedValuesRef.current ?? []
-
-      const allItems = store.getNodesByRole('item')
-
-      const groups = store.getNodesByRole('group')
-      const parentsWithChildren = new Set(
-        groups
-          .filter((node) => 'parentValue' in node.meta)
-          .map((node) => (node.meta as { parentValue: ItemValue }).parentValue),
-      )
-
-      function collectVisible(parentValue: ItemValue | null) {
-        const children = allItems.filter((node) => {
-          const meta = node.meta as TreeItemMeta
-          return meta.parentValue === parentValue && !meta.disabled
-        })
-
-        children.sort((a, b) => {
-          if (!a.element || !b.element) return 0
-          const position = a.element.compareDocumentPosition(b.element)
-          if (position & Node.DOCUMENT_POSITION_FOLLOWING) return -1
-          if (position & Node.DOCUMENT_POSITION_PRECEDING) return 1
-          return 0
-        })
-
-        for (const child of children) {
-          const meta = child.meta as TreeItemMeta
-          result.push(meta.value)
-
-          const hasChildren = parentsWithChildren.has(meta.value)
-          if (hasChildren && currentExpanded.includes(meta.value)) {
-            collectVisible(meta.value)
-          }
-        }
-      }
-
-      collectVisible(null)
-      return result
-    }, [store])
-
-    const getItemMeta = useCallback(
-      (value: ItemValue): TreeItemMeta | null => {
-        const node = store.getNode(value, 'item')
-        return node ? (node.meta as TreeItemMeta) : null
-      },
-      [store],
-    )
-
-    const getParentValue = useCallback(
-      (value: ItemValue): ItemValue | null => {
-        const meta = getItemMeta(value)
-        return meta?.parentValue ?? null
-      },
-      [getItemMeta],
-    )
-
-    const getFirstChildValue = useCallback(
-      (value: ItemValue): ItemValue | null => {
-        const allItems = store.getNodesByRole('item')
-        const children = allItems.filter((node) => {
-          const meta = node.meta as TreeItemMeta
-          return meta.parentValue === value && !meta.disabled
-        })
-
-        if (children.length === 0) return null
-
-        children.sort((a, b) => {
-          if (!a.element || !b.element) return 0
-          const position = a.element.compareDocumentPosition(b.element)
-          if (position & Node.DOCUMENT_POSITION_FOLLOWING) return -1
-          if (position & Node.DOCUMENT_POSITION_PRECEDING) return 1
-          return 0
-        })
-
-        return (children[0].meta as TreeItemMeta).value
-      },
-      [store],
-    )
-
-    const getSiblingValues = useCallback(
-      (value: ItemValue): ItemValue[] => {
-        const meta = getItemMeta(value)
-        if (!meta) return []
-
-        const allItems = store.getNodesByRole('item')
-        return allItems
-          .filter((node) => {
-            const nodeMeta = node.meta as TreeItemMeta
-            return nodeMeta.parentValue === meta.parentValue
-          })
-          .map((node) => (node.meta as TreeItemMeta).value)
-      },
-      [store, getItemMeta],
-    )
-
-    const getItemTextValue = useCallback(
-      (value: ItemValue): string => {
-        const meta = getItemMeta(value)
-        return meta?.textValue ?? ''
-      },
-      [getItemMeta],
-    )
-
-    const getHasChildren = useCallback(
-      (value: ItemValue): boolean => {
-        const groups = store.getNodesByRole('group')
-        return groups.some(
-          (node) =>
-            'parentValue' in node.meta && node.meta.parentValue === value,
-        )
-      },
-      [store],
-    )
-
-    // useHighlight: index 기반
-    const visibleItems = getVisibleItemValues()
-    const highlight = useHighlight(visibleItems.length)
-
-    // index → value 파생
-    const highlightedValue =
-      highlight.index >= 0 ? (visibleItems[highlight.index] ?? null) : null
-
-    // character search
-    const typeahead = useCharacterSearch(
-      () => visibleItems.map((v) => getItemTextValue(v)),
-      (index) => highlight.set(index),
-      highlight.index >= 0 ? highlight.index : undefined,
-    )
-
-    // setHighlightedValue: value로 직접 설정 (click, focus 등)
-    const setHighlightedValue = useCallback(
-      (value: ItemValue | null) => {
-        if (value === null) {
-          highlight.clear()
-          return
-        }
-        const items = getVisibleItemValues()
-        const idx = items.indexOf(value)
-        if (idx >= 0) {
-          highlight.set(idx)
-        }
-      },
-      [getVisibleItemValues, highlight],
-    )
 
     // Focus highlighted item when it changes
     useEffect(() => {
       if (highlightedValue) {
-        requestAnimationFrame(() => {
-          const labelElement = store.getElement(highlightedValue, 'label')
-          labelElement?.focus()
-        })
+        const labelElement = registry.getElement(highlightedValue, 'label')
+        labelElement?.focus()
       }
-    }, [highlightedValue, store])
+    }, [highlightedValue, registry])
+
+    // Character search
+    const typeahead = useCharacterSearch(
+      () => {
+        const visible = getVisibleItemValues(
+          registry,
+          expandedValuesRef.current,
+        )
+        return visible.map((v) => getItemTextValue(registry, v))
+      },
+      (index) => {
+        const visible = getVisibleItemValues(
+          registry,
+          expandedValuesRef.current,
+        )
+        if (index >= 0 && index < visible.length) {
+          setHighlightedValue(visible[index])
+        }
+      },
+      (() => {
+        if (!highlightedValue) return undefined
+        const visible = getVisibleItemValues(
+          registry,
+          expandedValuesRef.current,
+        )
+        const idx = visible.indexOf(highlightedValue)
+        return idx >= 0 ? idx : undefined
+      })(),
+    )
 
     // Actions
     const expand = useCallback(
       (value: ItemValue) => {
-        if (!getHasChildren(value)) return
+        if (!getHasChildren(registry, value)) return
         if (expandedValues.includes(value)) return
         setExpandedValues([...expandedValues, value])
       },
-      [expandedValues, setExpandedValues, getHasChildren],
+      [registry, expandedValues, setExpandedValues],
     )
 
     const collapse = useCallback(
@@ -388,20 +354,20 @@ const RootImpl = forwardRef<HTMLDivElement, RootProps>(
 
     const toggleExpand = useCallback(
       (value: ItemValue) => {
-        if (!getHasChildren(value)) return
+        if (!getHasChildren(registry, value)) return
         if (expandedValues.includes(value)) {
           setExpandedValues(expandedValues.filter((v) => v !== value))
         } else {
           setExpandedValues([...expandedValues, value])
         }
       },
-      [expandedValues, setExpandedValues, getHasChildren],
+      [registry, expandedValues, setExpandedValues],
     )
 
     const select = useCallback(
       (value: ItemValue) => {
-        const meta = getItemMeta(value)
-        if (meta?.disabled) return
+        const entry = registry.getEntry(value, 'item')
+        if (!entry || (entry.meta as TreeItemMeta).disabled) return
 
         if (selectionMode === 'single') {
           setSelectedValues([value])
@@ -411,13 +377,13 @@ const RootImpl = forwardRef<HTMLDivElement, RootProps>(
           }
         }
       },
-      [selectionMode, selectedValues, setSelectedValues, getItemMeta],
+      [registry, selectionMode, selectedValues, setSelectedValues],
     )
 
     const toggleSelect = useCallback(
       (value: ItemValue) => {
-        const meta = getItemMeta(value)
-        if (meta?.disabled) return
+        const entry = registry.getEntry(value, 'item')
+        if (!entry || (entry.meta as TreeItemMeta).disabled) return
 
         if (selectedValues.includes(value)) {
           setSelectedValues(selectedValues.filter((v) => v !== value))
@@ -425,35 +391,51 @@ const RootImpl = forwardRef<HTMLDivElement, RootProps>(
           setSelectedValues([...selectedValues, value])
         }
       },
-      [selectedValues, setSelectedValues, getItemMeta],
+      [registry, selectedValues, setSelectedValues],
     )
 
     // Keyboard handler on tree root
     const handleKeyDown = (e: React.KeyboardEvent) => {
+      const visible = getVisibleItemValues(registry, expandedValues)
+
+      const currentIndex = highlightedValue
+        ? visible.indexOf(highlightedValue)
+        : -1
+
       switch (e.key) {
-        case 'ArrowDown':
+        case 'ArrowDown': {
           e.preventDefault()
-          highlight.next()
+          if (visible.length === 0) return
+          const nextIndex =
+            currentIndex === -1
+              ? 0
+              : Math.min(currentIndex + 1, visible.length - 1)
+          setHighlightedValue(visible[nextIndex])
           break
-        case 'ArrowUp':
+        }
+        case 'ArrowUp': {
           e.preventDefault()
-          highlight.prev()
+          if (visible.length === 0) return
+          const prevIndex =
+            currentIndex === -1
+              ? visible.length - 1
+              : Math.max(currentIndex - 1, 0)
+          setHighlightedValue(visible[prevIndex])
           break
+        }
         case 'ArrowRight': {
           e.preventDefault()
           if (!highlightedValue) return
-          const hasChildren = getHasChildren(highlightedValue)
+          const hasChildren = getHasChildren(registry, highlightedValue)
           if (!hasChildren) return
 
           const isExpanded = expandedValues.includes(highlightedValue)
           if (!isExpanded) {
             expand(highlightedValue)
           } else {
-            // Move to first child
-            const firstChild = getFirstChildValue(highlightedValue)
+            const firstChild = getFirstChildValue(registry, highlightedValue)
             if (firstChild) {
-              // After expand, firstChild is at highlight.index + 1
-              highlight.set(highlight.index + 1)
+              setHighlightedValue(firstChild)
             }
           }
           break
@@ -461,39 +443,39 @@ const RootImpl = forwardRef<HTMLDivElement, RootProps>(
         case 'ArrowLeft': {
           e.preventDefault()
           if (!highlightedValue) return
-          const hasChildren = getHasChildren(highlightedValue)
-          const isExpanded = hasChildren && expandedValues.includes(highlightedValue)
+          const hasChildren = getHasChildren(registry, highlightedValue)
+          const isExpanded =
+            hasChildren && expandedValues.includes(highlightedValue)
 
           if (isExpanded) {
             collapse(highlightedValue)
           } else {
-            // Move to parent
-            const parentVal = getParentValue(highlightedValue)
+            const parentVal = getParentValue(registry, highlightedValue)
             if (parentVal) {
-              const items = getVisibleItemValues()
-              const idx = items.indexOf(parentVal)
-              if (idx >= 0) {
-                highlight.set(idx)
-              }
+              setHighlightedValue(parentVal)
             }
           }
           break
         }
         case 'Home':
           e.preventDefault()
-          highlight.first()
+          if (visible.length > 0) {
+            setHighlightedValue(visible[0])
+          }
           break
         case 'End':
           e.preventDefault()
-          highlight.last()
+          if (visible.length > 0) {
+            setHighlightedValue(visible[visible.length - 1])
+          }
           break
         case 'Enter': {
           e.preventDefault()
           if (!highlightedValue) return
-          const meta = getItemMeta(highlightedValue)
-          if (!meta || meta.disabled) return
+          const entry = registry.getEntry(highlightedValue, 'item')
+          if (!entry || (entry.meta as TreeItemMeta).disabled) return
 
-          const hasChildren = getHasChildren(highlightedValue)
+          const hasChildren = getHasChildren(registry, highlightedValue)
           if (hasChildren) {
             toggleExpand(highlightedValue)
           } else if (selectionMode === 'multiple') {
@@ -516,9 +498,11 @@ const RootImpl = forwardRef<HTMLDivElement, RootProps>(
         case '*': {
           e.preventDefault()
           if (!highlightedValue) return
-          const siblings = getSiblingValues(highlightedValue)
+          const siblings = getSiblingValues(registry, highlightedValue)
           const toExpand = siblings.filter((v) => {
-            return getHasChildren(v) && !expandedValues.includes(v)
+            return (
+              getHasChildren(registry, v) && !expandedValues.includes(v)
+            )
           })
           if (toExpand.length > 0) {
             setExpandedValues([...expandedValues, ...toExpand])
@@ -534,12 +518,12 @@ const RootImpl = forwardRef<HTMLDivElement, RootProps>(
     }
 
     const contextValue: TreeContextValue = {
+      idMap,
+      registry,
       expandedValues,
       selectedValues,
       highlightedValue,
-      store,
       selectionMode,
-      highlight,
       setHighlightedValue,
       expand,
       collapse,
@@ -549,24 +533,26 @@ const RootImpl = forwardRef<HTMLDivElement, RootProps>(
     }
 
     return (
-      <TreeContext.Provider value={contextValue}>
-        <div
-          ref={composeRefs(forwardedRef, treeRef)}
-          {...mergeProps(
-            {
-              role: 'tree',
-              id: treeId,
-              tabIndex: 0,
-              'aria-multiselectable': selectionMode === 'multiple' || undefined,
-              'data-part': 'tree',
-              onKeyDown: handleKeyDown,
-            },
-            rest,
-          )}
-        >
-          <ParentProvider id={null}>{children}</ParentProvider>
-        </div>
-      </TreeContext.Provider>
+      <RegistrationProvider idActions={idActions} registry={registry}>
+        <TreeContext.Provider value={contextValue}>
+          <div
+            ref={composeRefs(forwardedRef, treeRef)}
+            {...mergeProps(
+              {
+                role: 'tree',
+                tabIndex: 0,
+                'aria-multiselectable':
+                  selectionMode === 'multiple' || undefined,
+                'data-part': 'tree',
+                onKeyDown: handleKeyDown,
+              },
+              rest,
+            )}
+          >
+            <TreeParentProvider value={null}>{children}</TreeParentProvider>
+          </div>
+        </TreeContext.Provider>
+      </RegistrationProvider>
     )
   },
 )
@@ -587,21 +573,20 @@ export const Item = forwardRef<HTMLDivElement, ItemProps>(
     { value, textValue = '', disabled = false, children, ...rest },
     forwardedRef,
   ) => {
-    const { expandedValues, selectedValues, highlightedValue } =
+    const { registry, expandedValues, selectedValues, highlightedValue } =
       useTreeContext()
-    const parentValue = useParentId() as ItemValue | null
+    const { parentValue, depth } = useTreeParent()
 
-    const depth = useDepth()
-    const hasChildren = useHasChildren(value)
+    const hasChildren = getHasChildren(registry, value)
 
     const isExpanded = isItemExpanded(expandedValues, value)
     const isSelected = isItemSelected(selectedValues, value)
     const isHighlighted = highlightedValue === value
     const isDisabled = disabled
 
-    const { ref } = useNode<TreeRole, TreeItemMeta>({
+    const { ref } = useRegister<TreeItemMeta>({
+      value,
       role: 'item',
-      id: value,
       meta: {
         value,
         disabled,
@@ -647,30 +632,12 @@ export const Item = forwardRef<HTMLDivElement, ItemProps>(
             rest,
           )}
         >
-          <ParentProvider id={value}>{children}</ParentProvider>
+          <TreeParentProvider value={value}>{children}</TreeParentProvider>
         </div>
       </ItemContext.Provider>
     )
   },
 )
-
-// Helper to calculate depth
-function useDepth(): number {
-  const level = useLevel()
-  return level - 1
-}
-
-// Helper to check if an item has children
-function useHasChildren(value: ItemValue): boolean {
-  const { store } = useTreeContext()
-
-  return useStoreSubscribe(store, (s) => {
-    const groups = s.getNodesByRole('group')
-    return groups.some(
-      (node) => 'parentValue' in node.meta && node.meta.parentValue === value,
-    )
-  })
-}
 
 // ============================================
 // ItemLabel
@@ -681,7 +648,7 @@ export type ItemLabelProps = {
 } & ComponentPropsWithoutRef<'div'>
 
 export const ItemLabel = forwardRef<HTMLDivElement, ItemLabelProps>(
-  ({ children, ...rest }, forwardedRef) => {
+  ({ children, id: userDomId, ...rest }, forwardedRef) => {
     const { setHighlightedValue, toggleExpand, toggleSelect } = useTreeContext()
     const {
       value,
@@ -692,9 +659,10 @@ export const ItemLabel = forwardRef<HTMLDivElement, ItemLabelProps>(
       isHighlighted,
     } = useItemContext()
 
-    const { ref } = useNode<TreeRole, object>({
+    const { ref, domId } = useRegister({
+      value,
       role: 'label',
-      id: value,
+      id: userDomId,
     })
 
     return (
@@ -702,6 +670,7 @@ export const ItemLabel = forwardRef<HTMLDivElement, ItemLabelProps>(
         ref={composeRefs(forwardedRef, ref)}
         {...mergeProps(
           {
+            id: domId,
             tabIndex: isHighlighted ? 0 : -1,
             'data-part': 'label',
             'data-state': hasChildren
@@ -744,23 +713,21 @@ export type ItemGroupProps = {
 } & ComponentPropsWithoutRef<'div'>
 
 export const ItemGroup = forwardRef<HTMLDivElement, ItemGroupProps>(
-  ({ children, ...rest }, forwardedRef) => {
-    const { store } = useTreeContext()
+  ({ children, id: userDomId, ...rest }, forwardedRef) => {
+    const { idMap } = useTreeContext()
     const { value, isExpanded } = useItemContext()
     const elementRef = useRef<HTMLDivElement>(null)
 
-    const { domId } = useLogicalNode<TreeRole, TreeGroupMeta>({
+    const { ref, domId } = useRegister<TreeGroupMeta>({
+      value,
       role: 'group',
-      id: value,
+      id: userDomId,
       meta: {
         parentValue: value,
       },
     })
 
-    const labelDomId = useStoreSubscribe(
-      store,
-      (s) => s.getNode(value, 'label')?.domId ?? null,
-    )
+    const labelDomId = idMap.get(createIdMapKey(value, 'label'))
 
     const { isPresent, transitionState } = usePresence({
       isVisible: isExpanded,
@@ -771,7 +738,7 @@ export const ItemGroup = forwardRef<HTMLDivElement, ItemGroupProps>(
 
     return (
       <div
-        ref={composeRefs(forwardedRef, elementRef)}
+        ref={composeRefs(forwardedRef, ref, elementRef)}
         {...mergeProps(
           {
             role: 'group',

@@ -21,20 +21,20 @@ import {
 } from '@floating-ui/dom'
 import { useControllableState } from '@radix-ui/react-use-controllable-state'
 
-import { useHighlight, type UseHighlightReturn } from '../../hooks/use-highlight'
 import { useCharacterSearch } from '../../hooks/use-character-search'
 import { usePresence } from '../../hooks/use-presence'
 import { composeRefs } from '../../utils/compose-refs'
 import { mergeProps } from '../../utils/merge-props'
 import { DismissableLayer } from '../../primitives/dismissable-layer'
+
+import { useIdMap, createIdMapKey, type IdMap } from '../../primitives/id-map'
 import {
-  NodeStoreProvider,
-  useNodeStore,
-} from '../../primitives/use-node-store'
-import { useNode } from '../../primitives/use-node'
-import { useStoreSubscribe } from '../../primitives/use-store-subscribe'
-import { ParentProvider } from '../../primitives/use-parent-context'
-import type { NodeStore } from '../../primitives/node-store'
+  createElementRegistry,
+  type ElementRegistry,
+  type RegistryEntry,
+} from '../../primitives/element-registry'
+import { RegistrationProvider } from '../../primitives/registration-context'
+import { useRegister } from '../../primitives/use-register'
 
 // ============================================
 // Types
@@ -43,9 +43,7 @@ import type { NodeStore } from '../../primitives/node-store'
 export type MenuId = string
 export type ItemId = string
 
-type MenuRole = 'trigger' | 'content' | 'item' | 'sub-trigger' | 'sub-content'
-
-type MenuItemMeta = {
+type MenuMeta = {
   menuId: MenuId
   disabled: boolean
   textValue: string
@@ -54,45 +52,27 @@ type MenuItemMeta = {
   onSelect?: () => void
 }
 
-type MenuContentMeta = {
-  menuId: MenuId
-}
-
-type MenuMeta = MenuItemMeta | MenuContentMeta | object
-
 export function isMenuOpen(openedPath: MenuId[], menuId: MenuId): boolean {
   return openedPath.includes(menuId)
 }
 
 type MenuContextValue = {
-  // State
+  idMap: IdMap
+  registry: ElementRegistry<MenuMeta>
+
   openedPath: MenuId[]
   highlightedId: ItemId | null
   activeMenuId: MenuId | null
-
-  // NodeStore
-  store: NodeStore<MenuRole, MenuMeta>
-
-  // Options
   loop: boolean
-
-  // Callbacks
   onItemSelect?: (id: ItemId) => void
 
-  // Highlight
-  highlight: UseHighlightReturn
-
-  // Actions (행동 단위)
   setHighlightedId: (id: ItemId | null) => void
   openMenu: (menuId: MenuId, parentMenuId: MenuId | null, highlightFirst?: boolean) => void
   closeMenu: (menuId: MenuId) => void
   closeAll: () => void
-  highlightFirst: () => void
-  highlightLast: () => void
   openSubmenu: () => void
   closeSubmenu: () => void
   typeahead: (char: string) => void
-  getEnabledItemIds: (menuId: MenuId) => ItemId[]
   handleMenuKeyDown: (e: React.KeyboardEvent) => void
   handlePointerDownOutside: (event: PointerEvent) => void
 }
@@ -126,6 +106,26 @@ function useMenuIdContext() {
 }
 
 // ============================================
+// Helpers
+// ============================================
+
+function getEnabledItems(
+  registry: ElementRegistry<MenuMeta>,
+  menuId: MenuId,
+): RegistryEntry<MenuMeta>[] {
+  const items = registry.filterEntries(['item', 'sub-trigger'], (entry) => {
+    return entry.meta.menuId === menuId && !entry.meta.disabled
+  })
+  items.sort((a, b) => {
+    const pos = a.element.compareDocumentPosition(b.element)
+    if (pos & Node.DOCUMENT_POSITION_FOLLOWING) return -1
+    if (pos & Node.DOCUMENT_POSITION_PRECEDING) return 1
+    return 0
+  })
+  return items
+}
+
+// ============================================
 // Root
 // ============================================
 
@@ -146,173 +146,62 @@ export function Root({
   loop = true,
   onItemSelect,
 }: RootProps) {
-  return (
-    <NodeStoreProvider<MenuRole, MenuMeta>>
-      <RootImpl
-        open={openProp}
-        defaultOpen={defaultOpen}
-        onOpenChange={onOpenChange}
-        loop={loop}
-        onItemSelect={onItemSelect}
-      >
-        {children}
-      </RootImpl>
-    </NodeStoreProvider>
-  )
-}
-
-function RootImpl({
-  children,
-  open: openProp,
-  defaultOpen = false,
-  onOpenChange,
-  loop = true,
-  onItemSelect,
-}: RootProps) {
   const rootMenuId = useId()
-  const store = useNodeStore<MenuRole, MenuMeta>()
 
-  // Controllable state
+  const [idMap, idActions] = useIdMap()
+  const registryRef = useRef<ElementRegistry<MenuMeta>>(null!)
+  if (!registryRef.current) {
+    registryRef.current = createElementRegistry<MenuMeta>()
+  }
+  const registry = registryRef.current
+
   const [open = false, setOpen] = useControllableState({
     prop: openProp,
     defaultProp: defaultOpen,
     onChange: onOpenChange,
   })
 
-  // Internal states
   const [openedPath, setOpenedPath] = useState<MenuId[]>([])
+  const [highlightedId, setHighlightedIdState] = useState<ItemId | null>(null)
 
-  // Derived
   const activeMenuId = openedPath[openedPath.length - 1] ?? null
 
-  // Sync external open → internal openedPath (always bridge replacement)
+  // Sync external open → internal openedPath
   useLayoutEffect(() => {
     if (open) {
       setOpenedPath((prev) => (prev.length === 0 ? [rootMenuId] : prev))
     } else {
       setOpenedPath([])
-      highlight.clear()
+      setHighlightedIdState(null)
     }
   }, [open, rootMenuId])
 
-  // NodeStore-based helpers
-  const getEnabledItemIds = useCallback(
-    (menuId: MenuId) => {
-      const items = store.filterNodesByRolesAndMeta(
-        ['item', 'sub-trigger'],
-        (meta) => {
-          if (!('menuId' in meta)) return false
-          const itemMeta = meta as MenuItemMeta
-          return itemMeta.menuId === menuId && !itemMeta.disabled
-        },
-      )
-
-      items.sort((a, b) => {
-        if (!a.element || !b.element) return 0
-        const position = a.element.compareDocumentPosition(b.element)
-        if (position & Node.DOCUMENT_POSITION_FOLLOWING) return -1
-        if (position & Node.DOCUMENT_POSITION_PRECEDING) return 1
-        return 0
-      })
-
-      return items.map((node) => node.id)
-    },
-    [store],
-  )
-
-  const getItemTextValue = useCallback(
-    (itemId: ItemId) => {
-      const node =
-        store.getNode(itemId, 'item') ?? store.getNode(itemId, 'sub-trigger')
-      if (node && 'textValue' in node.meta) {
-        return (node.meta as MenuItemMeta).textValue
-      }
-      return ''
-    },
-    [store],
-  )
-
-  const isSubTriggerCheck = useCallback(
-    (itemId: ItemId): MenuId | null => {
-      const node = store.getNode(itemId, 'sub-trigger')
-      if (node && 'subMenuId' in node.meta) {
-        return (node.meta as MenuItemMeta).subMenuId ?? null
-      }
-      return null
-    },
-    [store],
-  )
-
-  // useHighlight: index 기반
-  // count는 action 시점에 lazy 계산하므로 0으로 시작 — 실제 items는 action 내에서 조회
-  // 하지만 count가 필요한 건 safe 보정뿐이므로, activeMenuId 기반 현재 items를 전달
-  const currentItems = activeMenuId ? getEnabledItemIds(activeMenuId) : []
-  const highlight = useHighlight(currentItems.length, { loop })
-
-  // index → ID 파생
-  const highlightedId =
-    highlight.index >= 0 ? (currentItems[highlight.index] ?? null) : null
-
-  // character search
-  const typeahead = useCharacterSearch(
-    () => {
-      if (!activeMenuId) return []
-      const items = getEnabledItemIds(activeMenuId)
-      return items.map((id) => getItemTextValue(id))
-    },
-    (index) => highlight.set(index),
-    highlight.index >= 0 ? highlight.index : undefined,
-  )
-
-  // setHighlightedId: ID로 직접 설정 (pointer enter 등)
+  // setHighlightedId: validate against enabled items
   const setHighlightedId = useCallback(
     (id: ItemId | null) => {
-      if (id === null) {
-        highlight.clear()
-        return
-      }
-      if (!activeMenuId) return
-      const items = getEnabledItemIds(activeMenuId)
-      const idx = items.indexOf(id)
-      if (idx >= 0) {
-        highlight.set(idx)
-      }
+      setHighlightedIdState(id)
     },
-    [activeMenuId, getEnabledItemIds, highlight],
+    [],
   )
 
   // DOM focus helpers
   const focusContent = useCallback(() => {
     requestAnimationFrame(() => {
-      const currentPath = openedPath
-      const activeId = currentPath[currentPath.length - 1]
-      if (!activeId) return
-
-      const contentNodes = store.filterNodesByRolesAndMeta(
+      if (!activeMenuId) return
+      const contentEntries = registry.filterEntries(
         ['content', 'sub-content'],
-        (meta) => 'menuId' in meta && meta.menuId === activeId,
+        (entry) => entry.meta.menuId === activeMenuId,
       )
-      contentNodes[0]?.element?.focus()
+      contentEntries[0]?.element?.focus()
     })
-  }, [openedPath, store])
+  }, [activeMenuId, registry])
 
   const focusTrigger = useCallback(() => {
     requestAnimationFrame(() => {
-      const triggerNode = store.getNodesByRole('trigger')[0]
-      triggerNode?.element?.focus()
+      const triggers = registry.getEntriesByRole('trigger')
+      triggers[0]?.element?.focus()
     })
-  }, [store])
-
-  const focusItemById = useCallback(
-    (itemId: ItemId) => {
-      requestAnimationFrame(() => {
-        const itemNode =
-          store.getNode(itemId, 'item') ?? store.getNode(itemId, 'sub-trigger')
-        itemNode?.element?.focus()
-      })
-    },
-    [store],
-  )
+  }, [registry])
 
   // Focus content when menu opens, trigger when it closes
   const wasOpenRef = useRef(false)
@@ -329,23 +218,38 @@ function RootImpl({
   // Focus highlighted item when it changes
   useEffect(() => {
     if (highlightedId) {
-      focusItemById(highlightedId)
+      requestAnimationFrame(() => {
+        const entry =
+          registry.getEntry(highlightedId, 'item') ??
+          registry.getEntry(highlightedId, 'sub-trigger')
+        entry?.element?.focus()
+      })
     }
-  }, [highlightedId, focusItemById])
+  }, [highlightedId, registry])
 
-  // ── 행동 단위 액션 ──
+  // Character search
+  const typeahead = useCharacterSearch(
+    () => {
+      if (!activeMenuId) return []
+      const items = getEnabledItems(registry, activeMenuId)
+      return items.map((entry) => entry.meta.textValue)
+    },
+    (index) => {
+      if (!activeMenuId) return
+      const items = getEnabledItems(registry, activeMenuId)
+      const item = items[index]
+      if (item) setHighlightedIdState(item.value)
+    },
+    (() => {
+      if (!activeMenuId || !highlightedId) return undefined
+      const items = getEnabledItems(registry, activeMenuId)
+      const idx = items.findIndex((entry) => entry.value === highlightedId)
+      return idx >= 0 ? idx : undefined
+    })(),
+  )
 
-  const highlightFirstFn = useCallback(() => {
-    if (!activeMenuId) return
-    highlight.first()
-  }, [activeMenuId, highlight])
+  // ── Actions ──
 
-  const highlightLastFn = useCallback(() => {
-    if (!activeMenuId) return
-    highlight.last()
-  }, [activeMenuId, highlight])
-
-  // Action: open a menu
   const openMenu = useCallback(
     (menuId: MenuId, parentMenuId: MenuId | null, highlightFirst = true) => {
       if (parentMenuId === null) {
@@ -353,103 +257,101 @@ function RootImpl({
       } else {
         setOpenedPath((prev) => {
           const parentIndex = prev.indexOf(parentMenuId)
-          if (parentIndex === -1) {
-            return [parentMenuId, menuId]
-          }
+          if (parentIndex === -1) return [parentMenuId, menuId]
           return [...prev.slice(0, parentIndex + 1), menuId]
         })
       }
 
-      // Highlight first/last after open
-      // Note: items may not be available yet if submenu hasn't rendered
-      // So we use requestAnimationFrame to let the DOM settle
       requestAnimationFrame(() => {
-        if (highlightFirst) {
-          highlight.first()
-        } else {
-          highlight.last()
+        const items = getEnabledItems(registry, menuId)
+        if (items.length > 0) {
+          setHighlightedIdState(
+            highlightFirst
+              ? items[0].value
+              : items[items.length - 1].value,
+          )
         }
       })
 
-      if (!open) {
-        setOpen(true)
-      }
+      if (!open) setOpen(true)
     },
-    [open, setOpen, highlight],
+    [open, setOpen, registry],
   )
 
-  // Action: close a specific menu
   const closeMenu = useCallback(
     (menuId: MenuId) => {
       setOpenedPath((prev) => {
         const index = prev.indexOf(menuId)
         if (index === -1) return prev
         const newPath = prev.slice(0, index)
-        if (newPath.length === 0 && open) {
-          setOpen(false)
-        }
+        if (newPath.length === 0 && open) setOpen(false)
         return newPath
       })
-      highlight.clear()
+      setHighlightedIdState(null)
     },
-    [open, setOpen, highlight],
+    [open, setOpen],
   )
 
-  // Action: close all menus
   const closeAll = useCallback(() => {
     setOpenedPath([])
-    highlight.clear()
-    if (open) {
-      setOpen(false)
-    }
-  }, [open, setOpen, highlight])
+    setHighlightedIdState(null)
+    if (open) setOpen(false)
+  }, [open, setOpen])
 
-  // Submenu actions
   const openSubmenu = useCallback(() => {
-    if (highlight.index < 0 || !activeMenuId) return
-    const items = getEnabledItemIds(activeMenuId)
-    const itemId = items[highlight.index]
-    if (!itemId) return
+    if (!highlightedId || !activeMenuId) return
+    const entry = registry.getEntry(highlightedId, 'sub-trigger')
+    if (!entry || !entry.meta.subMenuId) return
 
-    const subMenuId = isSubTriggerCheck(itemId)
-    if (!subMenuId) return
-
+    const subMenuId = entry.meta.subMenuId
     setOpenedPath((prev) => [...prev, subMenuId])
-    // activeMenuId changes → currentItems changes → highlight resets via safe bound
     requestAnimationFrame(() => {
-      highlight.first()
+      const items = getEnabledItems(registry, subMenuId)
+      if (items.length > 0) setHighlightedIdState(items[0].value)
     })
-  }, [highlight, activeMenuId, getEnabledItemIds, isSubTriggerCheck])
+  }, [highlightedId, activeMenuId, registry])
 
   const closeSubmenu = useCallback(() => {
     if (openedPath.length <= 1) return
     const closingMenuId = openedPath[openedPath.length - 1]
-    setOpenedPath((prev) => prev.slice(0, -1))
-    // Highlight the SubTrigger of the closing menu in parent
-    // closingMenuId is also the sub-trigger's id
     const parentMenuId = openedPath[openedPath.length - 2]
+    setOpenedPath((prev) => prev.slice(0, -1))
     if (parentMenuId) {
-      requestAnimationFrame(() => {
-        const items = getEnabledItemIds(parentMenuId)
-        const idx = items.indexOf(closingMenuId)
-        if (idx >= 0) {
-          highlight.set(idx)
-        }
-      })
+      setHighlightedIdState(closingMenuId)
     }
-  }, [openedPath, getEnabledItemIds, highlight])
+  }, [openedPath])
 
-  // 메뉴 키보드 핸들러 (Content/SubContent 공통)
+  // Menu keyboard handler
   const handleMenuKeyDown = (e: React.KeyboardEvent) => {
+    // Scope to the closest [role=menu] — prevents portal synthetic event bubbling
+    const target = e.target as HTMLElement
+    if (target.closest('[role=menu]') !== e.currentTarget) return
+
+    if (!activeMenuId) return
+    const items = getEnabledItems(registry, activeMenuId)
+    const currentIndex = items.findIndex((entry) => entry.value === highlightedId)
+
     switch (e.key) {
-      case 'ArrowDown':
+      case 'ArrowDown': {
         e.preventDefault()
-        highlight.next()
+        if (items.length === 0) break
+        const nextIndex = currentIndex + 1
+        const next = loop
+          ? items[nextIndex % items.length]
+          : items[Math.min(nextIndex, items.length - 1)]
+        if (next) setHighlightedIdState(next.value)
         break
-      case 'ArrowUp':
+      }
+      case 'ArrowUp': {
         e.preventDefault()
-        highlight.prev()
+        if (items.length === 0) break
+        const prevIndex = currentIndex - 1
+        const prev = loop
+          ? items[(prevIndex + items.length) % items.length]
+          : items[Math.max(prevIndex, 0)]
+        if (prev) setHighlightedIdState(prev.value)
         break
+      }
       case 'ArrowRight':
         e.preventDefault()
         openSubmenu()
@@ -460,23 +362,22 @@ function RootImpl({
         break
       case 'Home':
         e.preventDefault()
-        highlightFirstFn()
+        if (items.length > 0) setHighlightedIdState(items[0].value)
         break
       case 'End':
         e.preventDefault()
-        highlightLastFn()
+        if (items.length > 0) setHighlightedIdState(items[items.length - 1].value)
         break
       case 'Enter':
       case ' ':
         e.preventDefault()
         if (highlightedId) {
-          const subMenuId = isSubTriggerCheck(highlightedId)
-          if (subMenuId) {
+          const entry = registry.getEntry(highlightedId, 'sub-trigger')
+          if (entry?.meta.subMenuId) {
             openSubmenu()
           } else {
-            const node = store.getNode(highlightedId, 'item')
-            const meta = node?.meta as MenuItemMeta | undefined
-            meta?.onSelect?.()
+            const itemEntry = registry.getEntry(highlightedId, 'item')
+            itemEntry?.meta.onSelect?.()
             onItemSelect?.(highlightedId)
             closeAll()
           }
@@ -494,7 +395,6 @@ function RootImpl({
     }
   }
 
-  // 외부 클릭 핸들러 (Content/SubContent 공통)
   const handlePointerDownOutside = useCallback(
     (event: PointerEvent) => {
       const target = event.target as Node | null
@@ -503,37 +403,34 @@ function RootImpl({
         return
       }
 
-      const roles: MenuRole[] = ['trigger', 'sub-trigger', 'content', 'sub-content']
+      const roles = ['trigger', 'sub-trigger', 'content', 'sub-content'] as const
       for (const role of roles) {
-        const nodes = store.getNodesByRole(role)
-        for (const node of nodes) {
-          if (node.element?.contains(target)) return
+        const entries = registry.getEntriesByRole(role)
+        for (const entry of entries) {
+          if (entry.element?.contains(target)) return
         }
       }
 
       closeAll()
     },
-    [closeAll, store],
+    [closeAll, registry],
   )
 
   const contextValue: MenuContextValue = {
+    idMap,
+    registry,
     openedPath,
     highlightedId,
     activeMenuId,
-    store,
     loop,
     onItemSelect,
-    highlight,
     setHighlightedId,
     openMenu,
     closeMenu,
     closeAll,
-    highlightFirst: highlightFirstFn,
-    highlightLast: highlightLastFn,
     openSubmenu,
     closeSubmenu,
     typeahead,
-    getEnabledItemIds,
     handleMenuKeyDown,
     handlePointerDownOutside,
   }
@@ -544,11 +441,13 @@ function RootImpl({
   }
 
   return (
-    <MenuContext.Provider value={contextValue}>
-      <MenuIdContext.Provider value={menuIdContextValue}>
-        <ParentProvider id={rootMenuId}>{children}</ParentProvider>
-      </MenuIdContext.Provider>
-    </MenuContext.Provider>
+    <RegistrationProvider idActions={idActions} registry={registry}>
+      <MenuContext.Provider value={contextValue}>
+        <MenuIdContext.Provider value={menuIdContextValue}>
+          {children}
+        </MenuIdContext.Provider>
+      </MenuContext.Provider>
+    </RegistrationProvider>
   )
 }
 
@@ -559,21 +458,19 @@ function RootImpl({
 export type TriggerProps = ComponentPropsWithoutRef<'button'>
 
 export const Trigger = forwardRef<HTMLButtonElement, TriggerProps>(
-  ({ children, ...rest }, forwardedRef) => {
-    const { openedPath, openMenu, closeMenu, store } = useMenuContext()
+  ({ children, id: userDomId, ...rest }, forwardedRef) => {
+    const { idMap, openedPath, openMenu, closeMenu } = useMenuContext()
     const { menuId, parentMenuId } = useMenuIdContext()
 
-    const { domId, ref } = useNode<MenuRole>({
+    const { domId, ref } = useRegister<MenuMeta>({
+      value: menuId,
       role: 'trigger',
-      id: menuId,
+      id: userDomId,
+      meta: { menuId, disabled: false, textValue: '', isSubTrigger: false },
     })
 
     const isOpen = isMenuOpen(openedPath, menuId)
-
-    const contentDomId = useStoreSubscribe(
-      store,
-      (s) => s.getNode(menuId, 'content')?.domId ?? null,
-    )
+    const contentDomId = idMap.get(createIdMapKey(menuId, 'content'))
 
     const handleClick = () => {
       if (isOpen) {
@@ -649,12 +546,13 @@ export type ContentProps = {
 
 export const Content = forwardRef<HTMLDivElement, ContentProps>(
   (
-    { children, placement = 'bottom-start', sideOffset = 4, ...rest },
+    { children, id: userDomId, placement = 'bottom-start', sideOffset = 4, ...rest },
     forwardedRef,
   ) => {
     const {
+      idMap,
+      registry,
       openedPath,
-      store,
       closeMenu,
       handleMenuKeyDown,
       handlePointerDownOutside,
@@ -662,17 +560,16 @@ export const Content = forwardRef<HTMLDivElement, ContentProps>(
     const { menuId } = useMenuIdContext()
 
     const positionerRef = useRef<HTMLDivElement>(null)
+    const elementRef = useRef<HTMLDivElement>(null)
 
-    const { domId, ref, elementRef } = useNode<MenuRole, MenuContentMeta>({
+    const { domId, ref } = useRegister<MenuMeta>({
+      value: menuId,
       role: 'content',
-      id: menuId,
-      meta: { menuId },
+      id: userDomId,
+      meta: { menuId, disabled: false, textValue: '', isSubTrigger: false },
     })
 
-    const triggerDomId = useStoreSubscribe(
-      store,
-      (s) => s.getNode(menuId, 'trigger')?.domId ?? null,
-    )
+    const triggerDomId = idMap.get(createIdMapKey(menuId, 'trigger'))
     const isOpen = isMenuOpen(openedPath, menuId)
 
     const { isPresent, transitionState } = usePresence({
@@ -680,18 +577,15 @@ export const Content = forwardRef<HTMLDivElement, ContentProps>(
       resolveElement: () => elementRef.current,
     })
 
-    // Auto-focus content when it becomes present
     useLayoutEffect(() => {
       if (!isPresent) return
       requestAnimationFrame(() => {
         elementRef.current?.focus()
       })
-    }, [isPresent, elementRef])
+    }, [isPresent])
 
-    // Positioning with floating-ui
     useLayoutEffect(() => {
-      const triggerNode = store.getNode(menuId, 'trigger')
-      const trigger = triggerNode?.element
+      const trigger = registry.getElement(menuId, 'trigger')
       const positioner = positionerRef.current
       if (!trigger || !positioner) return
 
@@ -709,7 +603,7 @@ export const Content = forwardRef<HTMLDivElement, ContentProps>(
 
       const cleanup = autoUpdate(trigger, positioner, updatePosition)
       return cleanup
-    }, [placement, sideOffset, menuId, store])
+    }, [placement, sideOffset, menuId, registry])
 
     const handleEscapeKeyDown = useCallback(() => {
       closeMenu(menuId)
@@ -735,7 +629,7 @@ export const Content = forwardRef<HTMLDivElement, ContentProps>(
             contentRef={elementRef}
           >
             <div
-              ref={composeRefs(forwardedRef, ref as React.Ref<HTMLDivElement>)}
+              ref={composeRefs(forwardedRef, ref as React.Ref<HTMLDivElement>, elementRef)}
               {...mergeProps(
                 {
                   role: 'menu',
@@ -750,7 +644,7 @@ export const Content = forwardRef<HTMLDivElement, ContentProps>(
                 rest,
               )}
             >
-              <ParentProvider id={menuId}>{children}</ParentProvider>
+              {children}
             </div>
           </DismissableLayer>
         )}
@@ -774,13 +668,17 @@ export const Item = forwardRef<HTMLDivElement, ItemProps>(
     { children, disabled = false, textValue, onSelect, ...rest },
     forwardedRef,
   ) => {
-    const { highlightedId, setHighlightedId, closeAll, onItemSelect } = useMenuContext()
+    const { highlightedId, setHighlightedId, closeAll, onItemSelect } =
+      useMenuContext()
     const { menuId } = useMenuIdContext()
 
     const derivedTextValue =
       textValue ?? (typeof children === 'string' ? children : '')
 
-    const { id: itemId, ref } = useNode<MenuRole, MenuItemMeta>({
+    const itemId = useId()
+
+    const { ref } = useRegister<MenuMeta>({
+      value: itemId,
       role: 'item',
       meta: {
         menuId,
@@ -883,15 +781,16 @@ export type SubTriggerProps = {
 
 export const SubTrigger = forwardRef<HTMLDivElement, SubTriggerProps>(
   ({ children, disabled = false, textValue, ...rest }, forwardedRef) => {
-    const { openedPath, highlightedId, setHighlightedId, openMenu, closeMenu } = useMenuContext()
+    const { openedPath, highlightedId, setHighlightedId, openMenu, closeMenu } =
+      useMenuContext()
     const { menuId: subMenuId, parentMenuId } = useMenuIdContext()
 
     const derivedTextValue =
       textValue ?? (typeof children === 'string' ? children : '')
 
-    const { ref } = useNode<MenuRole, MenuItemMeta>({
+    const { ref } = useRegister<MenuMeta>({
+      value: subMenuId,
       role: 'sub-trigger',
-      id: subMenuId,
       meta: {
         menuId: parentMenuId ?? '',
         disabled,
@@ -952,33 +851,30 @@ export type SubContentProps = {
 
 export const SubContent = forwardRef<HTMLDivElement, SubContentProps>(
   (
-    { children, placement = 'right-start', sideOffset = 4, ...rest },
+    { children, id: userDomId, placement = 'right-start', sideOffset = 4, ...rest },
     forwardedRef,
   ) => {
     const {
+      idMap,
+      registry,
       openedPath,
-      activeMenuId,
-      store,
       closeMenu,
-      highlightFirst,
       handleMenuKeyDown,
       handlePointerDownOutside,
     } = useMenuContext()
     const { menuId: subMenuId } = useMenuIdContext()
 
     const positionerRef = useRef<HTMLDivElement>(null)
+    const elementRef = useRef<HTMLDivElement>(null)
 
-    const { domId, ref, elementRef } = useNode<MenuRole, MenuContentMeta>({
+    const { domId, ref } = useRegister<MenuMeta>({
+      value: subMenuId,
       role: 'sub-content',
-      id: subMenuId,
-      meta: { menuId: subMenuId },
+      id: userDomId,
+      meta: { menuId: subMenuId, disabled: false, textValue: '', isSubTrigger: false },
     })
 
-    const subTriggerDomId = useStoreSubscribe(
-      store,
-      (s) => s.getNode(subMenuId, 'sub-trigger')?.domId ?? null,
-    )
-
+    const subTriggerDomId = idMap.get(createIdMapKey(subMenuId, 'sub-trigger'))
     const isOpen = isMenuOpen(openedPath, subMenuId)
 
     const { isPresent, transitionState } = usePresence({
@@ -986,21 +882,15 @@ export const SubContent = forwardRef<HTMLDivElement, SubContentProps>(
       resolveElement: () => elementRef.current,
     })
 
-    // Auto-focus content and highlight first item when submenu becomes present
     useLayoutEffect(() => {
       if (!isPresent) return
       requestAnimationFrame(() => {
         elementRef.current?.focus()
-        if (activeMenuId === subMenuId) {
-          highlightFirst()
-        }
       })
-    }, [isPresent, elementRef, activeMenuId, subMenuId, highlightFirst])
+    }, [isPresent])
 
-    // Positioning with floating-ui
     useLayoutEffect(() => {
-      const subTriggerNode = store.getNode(subMenuId, 'sub-trigger')
-      const trigger = subTriggerNode?.element
+      const trigger = registry.getElement(subMenuId, 'sub-trigger')
       const positioner = positionerRef.current
       if (!trigger || !positioner) return
 
@@ -1018,7 +908,7 @@ export const SubContent = forwardRef<HTMLDivElement, SubContentProps>(
 
       const cleanup = autoUpdate(trigger, positioner, updatePosition)
       return cleanup
-    }, [placement, sideOffset, subMenuId, store])
+    }, [placement, sideOffset, subMenuId, registry])
 
     const handleEscapeKeyDown = useCallback(() => {
       closeMenu(subMenuId)
@@ -1044,7 +934,7 @@ export const SubContent = forwardRef<HTMLDivElement, SubContentProps>(
             contentRef={elementRef}
           >
             <div
-              ref={composeRefs(forwardedRef, ref as React.Ref<HTMLDivElement>)}
+              ref={composeRefs(forwardedRef, ref as React.Ref<HTMLDivElement>, elementRef)}
               {...mergeProps(
                 {
                   role: 'menu',
@@ -1059,7 +949,7 @@ export const SubContent = forwardRef<HTMLDivElement, SubContentProps>(
                 rest,
               )}
             >
-              <ParentProvider id={subMenuId}>{children}</ParentProvider>
+              {children}
             </div>
           </DismissableLayer>
         )}
